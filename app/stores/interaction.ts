@@ -2,12 +2,14 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type { ImageId, ViewState } from '~/types/interaction'
 import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
+import { useProjectSocket } from '~/composables/useProjectSocket'
 
 const VIEW_ORDER: ViewState[] = ['VIEW_1', 'VIEW_2', 'VIEW_3']
 const VIEW_2_AUTO_ADVANCE_MS = 3000
 
 export const useInteractionStore = defineStore('interaction', () => {
   const { emit } = useInteractionEmitter()
+  const projectSocket = useProjectSocket()
   const currentView = ref<ViewState>('VIEW_1')
   const selectedImages = ref<ImageId[]>([])
   const navigationHistory = ref<ImageId[]>([])
@@ -73,6 +75,7 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: currentView.value,
       clientTimestamp: Date.now(),
     })
+    projectSocket.focus(id)
   }
 
   function enterRelationalView() {
@@ -107,6 +110,7 @@ export const useInteractionStore = defineStore('interaction', () => {
       historyIndex: historyIndex.value,
       clientTimestamp: Date.now(),
     })
+    projectSocket.focus(id)
   }
 
   function stepBackInHistory() {
