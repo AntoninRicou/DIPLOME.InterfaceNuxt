@@ -1,11 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type { ImageId, ViewState } from '~/types/interaction'
+import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 
 const VIEW_ORDER: ViewState[] = ['VIEW_1', 'VIEW_2', 'VIEW_3']
 const VIEW_2_AUTO_ADVANCE_MS = 3000
 
 export const useInteractionStore = defineStore('interaction', () => {
+  const { emit } = useInteractionEmitter()
   const currentView = ref<ViewState>('VIEW_1')
   const selectedImages = ref<ImageId[]>([])
   const navigationHistory = ref<ImageId[]>([])
@@ -55,8 +57,22 @@ export const useInteractionStore = defineStore('interaction', () => {
     if (currentView.value !== 'VIEW_1') return
     if (!selectedImages.value.includes(id)) selectedImages.value.push(id)
     activeCentralImageId.value = id
+    const from = currentView.value
     advanceView()
     startView2Timer()
+    emit({
+      type: 'central_activate',
+      imageId: id,
+      source: 'initial',
+      historyIndex: 0,
+      clientTimestamp: Date.now(),
+    })
+    emit({
+      type: 'view_advance',
+      from,
+      to: currentView.value,
+      clientTimestamp: Date.now(),
+    })
   }
 
   function enterRelationalView() {
@@ -66,7 +82,14 @@ export const useInteractionStore = defineStore('interaction', () => {
       navigationHistory.value.push(activeCentralImageId.value)
       historyIndex.value = 0
     }
+    const from = currentView.value
     advanceView()
+    emit({
+      type: 'view_advance',
+      from,
+      to: currentView.value,
+      clientTimestamp: Date.now(),
+    })
   }
 
   function activateCentral(id: ImageId) {
@@ -77,27 +100,59 @@ export const useInteractionStore = defineStore('interaction', () => {
     historyIndex.value = navigationHistory.value.length - 1
     activeCentralImageId.value = id
     if (!selectedImages.value.includes(id)) selectedImages.value.push(id)
+    emit({
+      type: 'central_activate',
+      imageId: id,
+      source: 'related',
+      historyIndex: historyIndex.value,
+      clientTimestamp: Date.now(),
+    })
   }
 
   function stepBackInHistory() {
     if (currentView.value !== 'VIEW_3') return
     if (historyIndex.value <= 0) return
+    const fromIndex = historyIndex.value
     historyIndex.value -= 1
     activeCentralImageId.value = navigationHistory.value[historyIndex.value]!
+    emit({
+      type: 'history_step_back',
+      fromIndex,
+      toIndex: historyIndex.value,
+      toImageId: activeCentralImageId.value,
+      clientTimestamp: Date.now(),
+    })
   }
 
   function stepForwardInHistory() {
     if (currentView.value !== 'VIEW_3') return
     if (historyIndex.value >= navigationHistory.value.length - 1) return
+    const fromIndex = historyIndex.value
     historyIndex.value += 1
     activeCentralImageId.value = navigationHistory.value[historyIndex.value]!
+    emit({
+      type: 'history_step_forward',
+      fromIndex,
+      toIndex: historyIndex.value,
+      toImageId: activeCentralImageId.value,
+      clientTimestamp: Date.now(),
+    })
   }
 
   function jumpToHistory(targetIndex: number) {
     if (currentView.value !== 'VIEW_3') return
     if (targetIndex < 0 || targetIndex >= navigationHistory.value.length) return
+    if (targetIndex === historyIndex.value) return
+    const fromIndex = historyIndex.value
     historyIndex.value = targetIndex
     activeCentralImageId.value = navigationHistory.value[targetIndex]!
+    emit({
+      type: 'history_jump',
+      fromIndex,
+      toIndex: targetIndex,
+      toImageId: activeCentralImageId.value,
+      clientTimestamp: Date.now(),
+    })
   }
 
   return {
