@@ -1,22 +1,35 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-interface RelationDataset {
-  componentId: string
-  seed: number
-  pool: string[]
+export interface UmapPoint {
+  id: string
+  x: number
+  y: number
 }
 
-const cache = new Map<string, RelationDataset>()
+export interface UmapDataset {
+  componentId: string
+  points: UmapPoint[]
+}
 
-export async function loadRelationDataset(componentId: string): Promise<RelationDataset | null> {
+const cache = new Map<string, UmapDataset>()
+
+interface UmapFileWrapper {
+  count?: number
+  method?: string
+  points?: UmapPoint[]
+}
+
+export async function loadUmapDataset(componentId: string): Promise<UmapDataset | null> {
   if (cache.has(componentId)) return cache.get(componentId)!
-  const path = resolve(process.cwd(), 'assets/mock', `relations_${componentId}.json`)
+  const path = resolve(process.cwd(), 'assets/mock', `umap_${componentId}.json`)
   try {
     const raw = await readFile(path, 'utf8')
-    const parsed = JSON.parse(raw) as RelationDataset
-    cache.set(componentId, parsed)
-    return parsed
+    const parsed = JSON.parse(raw) as UmapPoint[] | UmapFileWrapper
+    const points: UmapPoint[] = Array.isArray(parsed) ? parsed : (parsed.points ?? [])
+    const dataset: UmapDataset = { componentId, points }
+    cache.set(componentId, dataset)
+    return dataset
   } catch {
     return null
   }
@@ -41,17 +54,19 @@ function mulberry32(seed: number) {
   }
 }
 
+// Mock proximity: random pick, deterministic by (componentId, centralImageId).
+// To be replaced with real Euclidean nearest-neighbor on (x, y) coordinates.
+// Endpoint surface stays unchanged.
 export function pickRelations(
-  dataset: RelationDataset,
+  dataset: UmapDataset,
   centralImageId: string,
   count = 8,
 ): string[] {
-  const rng = mulberry32(dataset.seed ^ hashString(centralImageId))
-  const candidates = dataset.pool.filter((id) => id !== centralImageId)
-  const indices = candidates.map((_, i) => i)
-  for (let i = indices.length - 1; i > 0; i--) {
+  const rng = mulberry32(hashString(dataset.componentId) ^ hashString(centralImageId))
+  const candidates = dataset.points.filter((p) => p.id !== centralImageId).map((p) => p.id)
+  for (let i = candidates.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1))
-    ;[indices[i], indices[j]] = [indices[j]!, indices[i]!]
+    ;[candidates[i], candidates[j]] = [candidates[j]!, candidates[i]!]
   }
-  return indices.slice(0, count).map((i) => candidates[i]!)
+  return candidates.slice(0, count)
 }

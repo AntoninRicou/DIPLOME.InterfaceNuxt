@@ -1,5 +1,5 @@
 import { defineEventHandler, getQuery, getRouterParam, createError } from 'h3'
-import { loadRelationDataset, pickRelations } from '~~/server/utils/mockRelations'
+import { loadUmapDataset, pickRelations } from '~~/server/utils/mockRelations'
 
 export default defineEventHandler(async (event) => {
   const componentId = getRouterParam(event, 'componentId')
@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'centralImageId required' })
   }
 
-  const dataset = await loadRelationDataset(componentId)
+  const dataset = await loadUmapDataset(componentId)
   if (!dataset) {
     throw createError({ statusCode: 404, statusMessage: `unknown component: ${componentId}` })
   }
