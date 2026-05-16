@@ -19,23 +19,41 @@ const store = useInteractionStore()
       </div>
 
       <div class="block">
-        <p class="label">history ({{ store.navigationHistory.length }})</p>
+        <p class="label">
+          history ({{ store.historyIndex + 1 }}/{{ store.navigationHistory.length }})
+        </p>
         <ol class="history">
           <li
             v-for="(id, i) in store.navigationHistory"
             :key="id + ':' + i"
-            :class="{ current: i === store.navigationHistory.length - 1 }"
+            :class="{
+              current: i === store.historyIndex,
+              future: i > store.historyIndex,
+            }"
+            tabindex="0"
+            @click="store.jumpToHistory(i)"
+            @keydown.enter="store.jumpToHistory(i)"
+            @keydown.space.prevent="store.jumpToHistory(i)"
           >
             {{ id }}
           </li>
         </ol>
-        <button
-          class="back"
-          :disabled="!store.historyHasPrevious"
-          @click="store.stepBackInHistory()"
-        >
-          step back
-        </button>
+        <div class="nav-buttons">
+          <button
+            class="back"
+            :disabled="!store.historyHasPrevious"
+            @click="store.stepBackInHistory()"
+          >
+            ← back
+          </button>
+          <button
+            class="back"
+            :disabled="!store.historyHasForward"
+            @click="store.stepForwardInHistory()"
+          >
+            forward →
+          </button>
+        </div>
       </div>
 
       <div class="block">
@@ -107,13 +125,29 @@ h1 {
   color: #888;
   padding: 2px 4px;
   word-break: break-all;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.history li:hover,
+.history li:focus {
+  border-color: #444;
+  outline: none;
+  background: #16161a;
 }
 .history li.current {
   color: #fff;
   background: #1c1c22;
+  border-color: #555;
+}
+.history li.future {
+  color: #555;
+}
+.nav-buttons {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
 }
 .back {
-  margin-top: 0.25rem;
   padding: 0.35rem 0.6rem;
   background: transparent;
   color: #ccc;
