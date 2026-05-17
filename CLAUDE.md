@@ -142,11 +142,190 @@ The irreversible logic only applies to the global progression of views.
 
 ---
 
+## DETERMINISTIC PROJECT STATE
+
+`interface_nuxt` is the sole authority for `project`'s render state. The state is
+computed explicitly from two store values and emitted over the socket. `project`
+never infers, derives, or interprets. The pipeline is **deterministic, not emergent**:
+
+```text
+interface_nuxt  →  decides project state from (VIEW + imageClick)
+                →  emits set-state(state) and focus(id)
+socket          →  transport only
+project         →  pure renderer of (state, focus(id), time)
+```
+
+### State table
+
+The state is driven by `imageClick` (and, for `FOCUS`, by VIEW-3 being active).
+**VIEW-2 does not appear here** — it is a UI-only phase and is not part of project's
+state machine.
+
+| Trigger condition                                          | project state |
+| ---------------------------------------------------------- | ------------- |
+| pre-selection (`imageClick = 0`)                           | `SINGLE`      |
+| first VIEW-1 click — at the moment of the click            | `FADE`        |
+| VIEW-3 active (any `imageClick`, until OVERVIEW confirmed) | `FOCUS`       |
+| user **explicitly confirms** OVERVIEW after `imageClick ≥ 10` | `OVERVIEW`    |
+
+**OVERVIEW is not a threshold-triggered state.** Reaching `imageClick ≥ 10` only
+marks OVERVIEW as **eligible**; the system stays in `FOCUS` with the last
+`focus(id)` fully rendered. The transition to `OVERVIEW` happens only when the user
+performs an explicit confirmation action (e.g. clicking a confirmation button in
+VIEW-3) — see *OVERVIEW eligibility & confirmation* below.
+
+### `imageClick` — progression counter
+
+`imageClick` is **strictly monotonic** and counts only **new image selection events**:
+
+* VIEW-1 selection (the first image): **+1**
+* VIEW-3 `central_activate` (related-image click): **+1**
+* History navigation (`stepBack`, `stepForward`, `jumpToHistory`): **no change**
+* VIEW transitions themselves: **no change**
+
+VIEW-3 entry **does not** increment `imageClick` — it reuses the image stored from VIEW-1.
+
+Consequences:
+
+* `OVERVIEW` is **irreversible within a session**. Once `imageClick ≥ 10`, the state
+  remains `OVERVIEW` even if the user navigates back in history.
+* History navigation never changes project state and never appears on the socket.
+* `imageClick` is a progression counter, not a navigation counter.
+
+### Wire behavior (final)
+
+| State      | Emitted from                                                | Wire emission                                          |
+| ---------- | ----------------------------------------------------------- | ------------------------------------------------------ |
+| `SINGLE`   | socket-register bootstrap                                    | `set-state('SINGLE')`                                  |
+| `FADE`     | `selectImage` (the first VIEW-1 click)                       | `set-state('FADE', 4000–5000)` — no `focus`            |
+| `FOCUS`    | `enterRelationalView` (VIEW-3 entry)                         | `set-state('FOCUS')` + `focus(storedImageId)`          |
+| `FOCUS` (in flight) | `activateCentral` (each new related-image click)    | `focus(newImageId)`                                    |
+| `OVERVIEW` | `confirmOverview()` — explicit user action after `imageClick ≥ 10` | `set-state('OVERVIEW')` — emitted exactly once   |
+
+**VIEW-2** is a UI-only buffer phase. During VIEW-2 the socket emits **nothing**;
+project remains in the `FADE` state that was already set at the click moment in
+VIEW-1.
+
+**History navigation** in any state (`stepBack`, `stepForward`, `jumpToHistory`)
+emits **nothing** to the socket. It is a UI-side revisit of past store values and
+does not move the project state machine.
+
+### OVERVIEW eligibility & confirmation
+
+OVERVIEW is a **deliberate transition**, not a threshold trigger. Two pieces of
+store state govern it:
+
+* `overviewEligible` (derived): `true` once `imageClick ≥ 10` AND OVERVIEW has not
+  yet been confirmed.
+* `overviewConfirmed` (boolean flag): `false` initially; set to `true` exactly once
+  by the `confirmOverview()` store action.
+
+Flow:
+
+1. User keeps clicking related images in VIEW-3. `imageClick` keeps incrementing.
+2. When `imageClick` reaches 10, `overviewEligible` becomes `true`. The system
+   **stays in `FOCUS`** — the last `focus(id)` remains active, fully rendered,
+   and the user can keep navigating or selecting normally.
+3. The VIEW-3 UI surfaces a confirmation control (e.g. a button) only while
+   `overviewEligible` is `true`.
+4. When the user explicitly confirms, `confirmOverview()`:
+   * sets `overviewConfirmed = true`
+   * emits `set-state('OVERVIEW')` over the socket exactly once
+   * does **not** touch `imageClick`
+
+### OVERVIEW — terminal, read-only state
+
+After confirmation OVERVIEW is **terminal and irreversible** for the rest of the
+session. The state machine and the interaction logic are both frozen:
+
+* `overviewConfirmed` stays `true`.
+* `overviewEligible` becomes `false` (the confirmation control disappears).
+* `imageClick` is **frozen** — it never increments again, by any path.
+* No further `set-state` emissions occur. The system stays in OVERVIEW.
+* `activateCentral` does **not** trigger any state logic — no `imageClick++`,
+  no derived-state recomputation, no setState. Interaction logic does not
+  re-open in any way.
+* `activateCentral` **may** still emit `focus(id)` for log consistency on the
+  wire, but `project` **must not** use it for spatial rendering and **must not**
+  use it to drive any state change. OVERVIEW is read-only on the spatial side.
+* UI-side store mutations (e.g. updating the displayed central image or the
+  navigation history view) remain available for read-only exploration of past
+  state, but they have no progression effect.
+
+Summary of `imageClick` rules (final):
+
+* Increments **only on explicit user image selection events** *before* OVERVIEW
+  is confirmed (VIEW-1 first click; VIEW-3 `central_activate`).
+* Never affected by VIEW transitions, history navigation, `confirmOverview()`,
+  or any post-OVERVIEW interaction.
+
+Why this exists: the confirmation step lets the last image be properly anchored
+in `FOCUS` before any zoom-out, so the transition to OVERVIEW is intentional and
+stable. After OVERVIEW, the user is in a read-only exploration mode — clicks
+still register in the UI (and on the wire as log artifacts) but no longer drive
+progression or rendering.
+
+### Implementation rule — structural guard (defensive)
+
+The post-OVERVIEW mutation prohibition for `activateCentral` is enforced
+**structurally**, not by scattered conditional checks. `activateCentral` MUST
+place a hard early-return guard immediately after its existing precondition
+checks (VIEW-3 check and same-id dedup), so that **all mutation code below the
+guard is provably unreachable** once `overviewConfirmed === true`:
+
+```ts
+function activateCentral(id) {
+  if (currentView.value !== 'VIEW_3') return
+  if (activeCentralImageId.value === id) return
+
+  // ── HARD GUARD — terminal OVERVIEW state ──
+  if (overviewConfirmed.value) {
+    emit({ /* central_activate trace */ })   // /api/interaction log
+    projectSocket.focus(id)                  // wire log only
+    return
+  }
+
+  // ── Pre-OVERVIEW only. Provably unreachable post-confirmation. ──
+  // …all store mutations + imageClick++ + emissions live here…
+}
+```
+
+Rules for this guard:
+
+* **One** guard, **one** return. No `if (!overviewConfirmed)` checks wrapped
+  around individual mutations. No flags scattered through the function body.
+* The mutation block is a single contiguous region **after** the guard's
+  `return`.
+* This makes accidental mutation impossible by construction and makes the
+  read-only contract auditable at a glance — a reviewer only needs to verify
+  the guard exists and the return is unconditional.
+* The same principle applies to any future action that needs a terminal-state
+  guard: hoist the guard, single early-return, no per-mutation flag plumbing.
+
+### Architectural invariants
+
+* `interface_nuxt` owns `VIEW` + `imageClick` and decides every transition.
+* The socket is **transport only**. It never carries `VIEW` or `imageClick` directly —
+  only the resolved `set-state(name)` and `focus(id)` directives.
+* `project` is a **pure renderer**. It never infers state, never interprets `VIEW`,
+  never computes progression rules.
+* The system is **deterministic**: given the same sequence of user selections, the
+  same sequence of socket emissions occurs.
+
+`/api/interaction` (Phase 2 HTTP log) continues to record the **full** behavioral
+trace including history navigation. It is independent of the socket and acts as the
+source of truth for behavior history.
+
+---
+
 ## VIEW-1
 
-VIEW-1 reuses the existing "disperse" state already present in the project.
+VIEW-1's UI is a disperse-style selection grid of hoverable, clickable images.
 
-This state displays hoverable and clickable images.
+While the user has not yet selected anything (`imageClick = 0`), the corresponding
+project state is `SINGLE`, emitted via `set-state('SINGLE')` on socket-register
+bootstrap. At the moment of the first click, `imageClick` becomes 1 and the system
+emits `set-state('FADE', 4000–5000)` — then transitions the UI to VIEW-2.
 
 When the user selects an image:
 
@@ -160,11 +339,12 @@ The image already exists in memory before becoming visually central later.
 
 ## VIEW-2
 
-VIEW-2 is an intermediate transition state.
+VIEW-2 is a **UI-only** intermediate transition phase. It is mostly textual and
+temporal, and emits **nothing** to the socket. The project state during VIEW-2
+remains `FADE`, which was already emitted at the moment of the VIEW-1 click that
+triggered VIEW-2.
 
-It is mostly textual and temporal.
-
-Its role is to create a temporary phase between:
+Its role is to create a temporary UI phase between:
 
 * image selection
 * relational exploration
