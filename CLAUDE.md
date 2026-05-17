@@ -318,43 +318,95 @@ source of truth for behavior history.
 
 ---
 
-## VIEW-1
+## VIEW-1 — pre-selection UI state (interface_nuxt)
 
-VIEW-1's UI is a disperse-style selection grid of hoverable, clickable images.
+The VIEW-1 pre-selection state uses the existing disperse layout as a UI-only
+interaction surface. It is **not** a project state and has no spatial meaning.
 
-While the user has not yet selected anything (`imageClick = 0`), the corresponding
-project state is `SINGLE`, emitted via `set-state('SINGLE')` on socket-register
-bootstrap. At the moment of the first click, `imageClick` becomes 1 and the system
-emits `set-state('FADE', 4000–5000)` — then transitions the UI to VIEW-2.
+### State behavior
 
-When the user selects an image:
+At system bootstrap, `project` is in `SINGLE`.
 
-* the image ID is stored in the global interaction state
-* the image becomes the active central image reference
-* the system transitions permanently to VIEW-2
+When the first image is selected in VIEW-1:
 
-The image already exists in memory before becoming visually central later.
+* the selection is stored in the interaction state
+* `imageClick` is incremented (0 → 1)
+* the system transitions immediately and permanently to VIEW-2
+* `project` receives `set-state('FADE', 4500)`
+
+**No `focus(id)` is emitted at this stage.**
+
+The first `focus(id)` is emitted only later, upon VIEW-3 entry, together with
+`set-state('FOCUS')` + `focus(storedImageId)`.
+
+### FADE duration is project-deterministic
+
+`set-state('FADE', 4500)` carries a **fixed** project-side duration of 4500ms.
+`interface_nuxt` never extends, shortens, or otherwise modifies this duration —
+project is the source of truth for FADE timing.
+
+VIEW-2 is the **UI mirror** of this state. By default it lasts the same 4500ms,
+but it may be exited early by an explicit user skip action. The skip is purely
+a UI-side trigger:
+
+* it does **not** modify project-side FADE
+* it does **not** affect `imageClick`
+* it does **not** introduce any additional project state
+* it emits **no** intermediate socket event
+
+Transition timeline:
+
+1. VIEW-1 click → emits `set-state('FADE', 4500)` **immediately**.
+2. VIEW-2 begins and runs for up to 4500ms (or until user skip).
+3. On either exit, VIEW-3 entry emits `set-state('FOCUS')` + `focus(storedImageId)`.
+
+Both exit paths produce the **same** deterministic emission sequence; only the
+timing of step 3 varies. Project's response to that emission is project's own
+deterministic decision.
+
+### Semantic role of "disperse"
+
+`disperse` is strictly a **UI layout term** describing the visual arrangement of
+selectable images. It does **not** correspond to any `project` rendering mode.
 
 ---
 
-## VIEW-2
+## VIEW-2 — UI transition phase (interface_nuxt)
 
-VIEW-2 is a **UI-only** intermediate transition phase. It is mostly textual and
-temporal, and emits **nothing** to the socket. The project state during VIEW-2
-remains `FADE`, which was already emitted at the moment of the VIEW-1 click that
-triggered VIEW-2.
+VIEW-2 is a UI-only transition phase **derived from** the project-side `FADE`
+state.
 
-Its role is to create a temporary UI phase between:
+`project` defines FADE duration (4500ms) as **immutable configuration for
+transition timing**.
 
-* image selection
-* relational exploration
+`set-state('FADE', 4500)` is emitted immediately upon the VIEW-1 selection
+event, triggering the transition into VIEW-2. The project-side `FADE` is
+deterministic and is not modified by user interaction; VIEW-2 is the UI
+interpretation of this state.
 
-The transition to VIEW-3 can later happen:
+### Exit conditions
 
-* automatically after a duration
-* or through user action
+VIEW-2 can end via two equivalent UI triggers:
 
-The transition logic belongs to the global state machine, not to the component itself.
+* Automatic completion when the 4500ms FADE duration elapses.
+* Optional user skip action in `interface_nuxt`.
+
+Both triggers result in the same deterministic transition at VIEW-3 entry:
+
+```
+set-state('FOCUS') + focus(storedImageId)
+```
+
+Only the *moment* of VIEW-3 entry varies between the two triggers.
+
+### Constraints
+
+* Skip does not modify project-side FADE.
+* Skip does not affect `imageClick`.
+* Skip does not introduce any additional project state.
+* `project` remains the source of truth for FADE timing (4500ms).
+* VIEW-2 is purely a visual / UX transition layer.
+* Transition logic (timer + skip handler) belongs to `interface_nuxt` only.
 
 ---
 
@@ -526,7 +578,7 @@ project should temporarily be treated as a passive receiver that will later subs
 
 Do not:
 
-* import Three.js into interface_nuxt
+
 * duplicate relation logic across layers
 * bypass the server
 * create direct interface/project communication
