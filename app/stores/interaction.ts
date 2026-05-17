@@ -126,6 +126,7 @@ export const useInteractionStore = defineStore('interaction', () => {
       toImageId: activeCentralImageId.value,
       clientTimestamp: Date.now(),
     })
+    projectSocket.focus(activeCentralImageId.value)
   }
 
   function stepForwardInHistory() {
@@ -141,6 +142,7 @@ export const useInteractionStore = defineStore('interaction', () => {
       toImageId: activeCentralImageId.value,
       clientTimestamp: Date.now(),
     })
+    projectSocket.focus(activeCentralImageId.value)
   }
 
   function jumpToHistory(targetIndex: number) {
@@ -157,6 +159,7 @@ export const useInteractionStore = defineStore('interaction', () => {
       toImageId: activeCentralImageId.value,
       clientTimestamp: Date.now(),
     })
+    projectSocket.focus(activeCentralImageId.value)
   }
 
   return {
