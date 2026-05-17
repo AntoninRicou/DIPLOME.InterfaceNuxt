@@ -1,6 +1,9 @@
 import { useProjectSocket } from '~/composables/useProjectSocket'
 
 export default defineNuxtPlugin(() => {
-  const { init } = useProjectSocket()
+  const { init, onRegister, setState } = useProjectSocket()
+  onRegister(() => {
+    setState('SINGLE')
+  })
   init()
 })

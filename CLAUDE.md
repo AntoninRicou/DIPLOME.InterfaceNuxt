@@ -144,42 +144,63 @@ The irreversible logic only applies to the global progression of views.
 
 ## DETERMINISTIC PROJECT STATE
 
-`interface_nuxt` is the sole authority for `project`'s render state. The state is
-computed explicitly from two store values and emitted over the socket. `project`
-never infers, derives, or interprets. The pipeline is **deterministic, not emergent**:
+`interface_nuxt` is the sole authority for `project`'s render state. The state
+is computed explicitly from the store and emitted over the socket. `project`
+never infers, derives, or interprets. The pipeline is **deterministic, not
+emergent**:
 
 ```text
-interface_nuxt  →  decides project state from (VIEW + imageClick)
+interface_nuxt  →  decides project state from
+                     (VIEW, imageClick, historyIndex, overviewConfirmed)
                 →  emits set-state(state) and focus(id)
 socket          →  transport only
 project         →  pure renderer of (state, focus(id), time)
 ```
 
+`imageClick` keys the `SINGLE → FADE` boot transition only. Inside VIEW-3 the
+meaningful progression measure is **active branch depth** (`historyIndex + 1`),
+bounded to `[1..10]` — see *NAVIGATION MEMORY* and *OVERVIEW eligibility &
+confirmation*. `overviewConfirmed` is the irreversible OVERVIEW latch.
+
 ### State table
 
-The state is driven by `imageClick` (and, for `FOCUS`, by VIEW-3 being active).
-**VIEW-2 does not appear here** — it is a UI-only phase and is not part of project's
-state machine.
+Drivers: `imageClick` keys `SINGLE` / `FADE`; VIEW-3 entry keys `FOCUS`;
+explicit user confirmation **while at branch position `>= 10`** keys
+`OVERVIEW`. **VIEW-2 does not appear here** — it is a UI-only phase and is not
+part of project's state machine.
 
-| Trigger condition                                          | project state |
-| ---------------------------------------------------------- | ------------- |
-| pre-selection (`imageClick = 0`)                           | `SINGLE`      |
-| first VIEW-1 click — at the moment of the click            | `FADE`        |
-| VIEW-3 active (any `imageClick`, until OVERVIEW confirmed) | `FOCUS`       |
-| user **explicitly confirms** OVERVIEW after `imageClick ≥ 10` | `OVERVIEW`    |
+| Trigger condition                                                       | project state |
+| ----------------------------------------------------------------------- | ------------- |
+| pre-selection (`imageClick = 0`)                                        | `SINGLE`      |
+| first VIEW-1 click — at the moment of the click                         | `FADE`        |
+| VIEW-3 active (any `imageClick`, until OVERVIEW confirmed)              | `FOCUS`       |
+| user **explicitly confirms** OVERVIEW while at branch position `>= 10`  | `OVERVIEW`    |
 
-**OVERVIEW is not a threshold-triggered state.** Reaching `imageClick ≥ 10` only
-marks OVERVIEW as **eligible**; the system stays in `FOCUS` with the last
-`focus(id)` fully rendered. The transition to `OVERVIEW` happens only when the user
-performs an explicit confirmation action (e.g. clicking a confirmation button in
-VIEW-3) — see *OVERVIEW eligibility & confirmation* below.
+**OVERVIEW is not a threshold-triggered state.** Reaching branch position
+`>= 10` (i.e. `historyIndex + 1 >= 10`) only marks OVERVIEW as **eligible**;
+the system stays in `FOCUS` with the last `focus(id)` fully rendered. The
+transition to `OVERVIEW` happens only when the user performs an explicit
+confirmation action (e.g. clicking a confirmation button in VIEW-3) — see
+*OVERVIEW eligibility & confirmation* below.
 
-### `imageClick` — progression counter
+### `imageClick` — session-level selection counter
 
-`imageClick` is **strictly monotonic** and counts only **new image selection events**:
+`imageClick` is a **strictly monotonic, session-wide selection counter**.
+Within the project-state machine it serves a **single** structural role:
+distinguishing pre-selection (`imageClick === 0` → `SINGLE`) from
+post-selection (`imageClick > 0` → `FADE` / `FOCUS`). Beyond that boot gate,
+`imageClick` is preserved as a historical / telemetry trace on the HTTP
+`/api/interaction` log — it is **not** the progression metric for VIEW-3, and
+it does **not** drive any further state transition.
+
+The meaningful progression measure inside VIEW-3 is the **active branch
+depth** (`historyIndex + 1`), bounded to `[1..10]` (see *NAVIGATION MEMORY*).
+
+`imageClick` counts only new image selection events:
 
 * VIEW-1 selection (the first image): **+1**
-* VIEW-3 `central_activate` (related-image click): **+1**
+* VIEW-3 `central_activate` (related-image click): **+1**, but only while
+  `overviewConfirmed === false` and the activation actually extends the branch
 * History navigation (`stepBack`, `stepForward`, `jumpToHistory`): **no change**
 * VIEW transitions themselves: **no change**
 
@@ -187,10 +208,14 @@ VIEW-3 entry **does not** increment `imageClick` — it reuses the image stored 
 
 Consequences:
 
-* `OVERVIEW` is **irreversible within a session**. Once `imageClick ≥ 10`, the state
+* `OVERVIEW` is **irreversible within a session**. Once confirmed, the state
   remains `OVERVIEW` even if the user navigates back in history.
-* History navigation never changes project state and never appears on the socket.
-* `imageClick` is a progression counter, not a navigation counter.
+* History navigation never changes project state. It emits **only** `focus(id)`
+  for camera follow — see the wire-behavior table above.
+* `imageClick` is a session-level selection counter, **not** the VIEW-3
+  progression metric and **not** the OVERVIEW eligibility driver. It must
+  not be conflated with `historyIndex + 1` (the active branch depth) — see
+  *OVERVIEW eligibility & confirmation* below for the comparison table.
 
 ### Wire behavior (final)
 
@@ -200,34 +225,73 @@ Consequences:
 | `FADE`     | `selectImage` (the first VIEW-1 click)                       | `set-state('FADE', 4000–5000)` — no `focus`            |
 | `FOCUS`    | `enterRelationalView` (VIEW-3 entry)                         | `set-state('FOCUS')` + `focus(storedImageId)`          |
 | `FOCUS` (in flight) | `activateCentral` (each new related-image click)    | `focus(newImageId)`                                    |
-| `OVERVIEW` | `confirmOverview()` — explicit user action after `imageClick ≥ 10` | `set-state('OVERVIEW')` — emitted exactly once   |
+| `OVERVIEW` | `confirmOverview()` — explicit user action while at branch position `>= 10` | `set-state('OVERVIEW')` — emitted exactly once   |
 
 **VIEW-2** is a UI-only buffer phase. During VIEW-2 the socket emits **nothing**;
 project remains in the `FADE` state that was already set at the click moment in
 VIEW-1.
 
 **History navigation** in any state (`stepBack`, `stepForward`, `jumpToHistory`)
-emits **nothing** to the socket. It is a UI-side revisit of past store values and
-does not move the project state machine.
+emits **only** `focus(id)` on the wire, where `id` is the resolved past target.
+It does **not** emit `set-state`, does **not** change `projectState`, and does
+**not** affect `imageClick`. Its sole socket purpose is to move project's camera
+to track the user's UI navigation through past selections.
 
 ### OVERVIEW eligibility & confirmation
 
 OVERVIEW is a **deliberate transition**, not a threshold trigger. Two pieces of
 store state govern it:
 
-* `overviewEligible` (derived): `true` once `imageClick ≥ 10` AND OVERVIEW has not
-  yet been confirmed.
-* `overviewConfirmed` (boolean flag): `false` initially; set to `true` exactly once
-  by the `confirmOverview()` store action.
+* `overviewEligible` (derived): `true` when the **currently active branch
+  depth** is at or above the threshold AND OVERVIEW has not yet been
+  confirmed. Concretely:
+  `historyIndex + 1 >= OVERVIEW_THRESHOLD && !overviewConfirmed`.
+* `overviewConfirmed` (boolean flag): `false` initially; set to `true` exactly
+  once by the `confirmOverview()` store action.
+
+The eligibility gate is **branch-dependent**, not cumulative. The active
+branch is bounded to a maximum depth of `OVERVIEW_THRESHOLD = 10` (see
+*NAVIGATION MEMORY*), so:
+
+* OVERVIEW becomes eligible the moment the active traversal **reaches** depth
+  10 — i.e. the user has built up a 10-image relational route inside the
+  current branch.
+* Stepping back below depth 10 (`stepBackInHistory` / `jumpToHistory` to an
+  earlier index) **hides** the button — eligibility is recomputed on every
+  position change. The user is now mid-branch, not at the tip.
+* Returning to the tip (`stepForwardInHistory`), or activating new images
+  from an earlier position (which truncates the forward branch and appends),
+  re-enables eligibility the moment the active depth is back to 10.
+* `imageClick` keeps its own session-counter rules independently of all of
+  this; it does **not** gate the button.
+
+`imageClick` and `overviewEligible` must not be conflated:
+
+| Quantity            | Type                  | Bounds   | Mutates on history nav? | Drives OVERVIEW eligibility? |
+| ------------------- | --------------------- | -------- | ----------------------- | ---------------------------- |
+| `imageClick`        | session selection log | `[0, ∞)` | No                      | No                           |
+| `historyIndex + 1`  | active branch depth   | `[1, 10]`| **Yes**                 | **Yes**                      |
+
+The **irreversible** portion of OVERVIEW begins only after
+`overviewConfirmed === true`. Up to that point eligibility is fluid and tracks
+the active branch depth; once confirmed, the latch is permanent (see
+*OVERVIEW — terminal, read-only state* below).
 
 Flow:
 
-1. User keeps clicking related images in VIEW-3. `imageClick` keeps incrementing.
-2. When `imageClick` reaches 10, `overviewEligible` becomes `true`. The system
-   **stays in `FOCUS`** — the last `focus(id)` remains active, fully rendered,
-   and the user can keep navigating or selecting normally.
+1. User keeps clicking related images in VIEW-3. Each new selection appends to
+   `navigationHistory` and advances `historyIndex` (active branch depth).
+   `imageClick` also ticks for the HTTP log but is not consulted by the state
+   machine beyond the initial `SINGLE → FADE` boot gate.
+2. When `historyIndex + 1` reaches 10, `overviewEligible` becomes `true`. The
+   system **stays in `FOCUS`** — the last `focus(id)` remains active, fully
+   rendered. Because the branch is at its maximum depth, no further image can
+   be appended; the user must either confirm OVERVIEW or step back to make
+   room for a new sub-branch.
 3. The VIEW-3 UI surfaces a confirmation control (e.g. a button) only while
-   `overviewEligible` is `true`.
+   `overviewEligible` is `true`. If the user steps back below depth 10, the
+   control disappears; if they return to the tip (or rebuild a sub-branch
+   back to depth 10 after stepping back), it reappears.
 4. When the user explicitly confirms, `confirmOverview()`:
    * sets `overviewConfirmed = true`
    * emits `set-state('OVERVIEW')` over the socket exactly once
@@ -254,10 +318,15 @@ session. The state machine and the interaction logic are both frozen:
 
 Summary of `imageClick` rules (final):
 
-* Increments **only on explicit user image selection events** *before* OVERVIEW
-  is confirmed (VIEW-1 first click; VIEW-3 `central_activate`).
+* Increments **only on explicit user image selection events** that actually
+  extend the active branch, *before* OVERVIEW is confirmed (VIEW-1 first
+  click; VIEW-3 `central_activate` while not at the branch cap).
 * Never affected by VIEW transitions, history navigation, `confirmOverview()`,
   or any post-OVERVIEW interaction.
+* Is **not** the OVERVIEW eligibility driver and **not** the VIEW-3
+  progression metric. Eligibility is recomputed from the active branch depth
+  (`historyIndex + 1`, bounded to `[1..10]`) on every history change.
+  `imageClick` is preserved as a session-level selection trace only.
 
 Why this exists: the confirmation step lets the last image be properly anchored
 in `FOCUS` before any zoom-out, so the transition to OVERVIEW is intentional and
@@ -518,17 +587,46 @@ The server remains the single synchronization authority.
 
 ## NAVIGATION MEMORY
 
-Inside VIEW-3:
+Inside VIEW-3, navigation history behaves as a **bounded, mutable active
+branch** — not an unbounded historical log. The branch has a hard maximum
+depth of `OVERVIEW_THRESHOLD = 10` entries.
 
-* every newly activated image is added to navigation history
-* previously activated images remain accessible
-* the user can reactivate older central images
-* reactivating a previous image restores the navigation state at that point in the timeline
-* if the user selects a different image from that restored state, the previous forward timeline is discarded and replaced by the new navigation branch
+Mechanics:
 
-The navigation history therefore behaves as a persistent but rewritable relational memory.
+* every newly activated image is appended to `navigationHistory`
+* `historyIndex` points to the currently active position in that branch
+* previously activated images in the current branch remain accessible by
+  stepping back / forward / jumping to a past index
+* if the user activates a new image while `historyIndex` is **not** at the
+  tip of the branch, the forward portion is **destroyed** — `navigationHistory`
+  is truncated to `[0..historyIndex]` and the new image is appended,
+  replacing the previous forward timeline
+* the active branch is capped at 10 entries. Once the branch is at maximum
+  depth (`navigationHistory.length === 10` AND `historyIndex` is at the tip),
+  no further image can be appended. The user's only progression options are
+  `confirmOverview()` or stepping back to make room for a new sub-branch.
+* history navigation itself (`stepBack`, `stepForward`, `jumpToHistory`)
+  never adds, removes, or reorders entries — it only moves `historyIndex`.
 
-Through interaction and traversal, previously activated images remain available as re-enterable relational states, while future paths remain mutable and can be rewritten through new selections.
+What this means conceptually:
+
+* the displayed path is always the **currently reconstructed active
+  traversal**, not a record of every image the user has ever visited across
+  every prior branch
+* the system visualizes the user's *current relational route*, not the total
+  session memory of all activations
+* **active branch depth** (`historyIndex + 1`, bounded to `[1..10]`) is the
+  meaningful progression measure inside VIEW-3 — it is what gates OVERVIEW
+  eligibility (see *OVERVIEW eligibility & confirmation*)
+* `imageClick` continues to count every new image selection event for the
+  HTTP behavioral log (`/api/interaction`), but it is **not** the VIEW-3
+  progression metric and **not** an unbounded "how far have we come" gauge;
+  it is a session-level selection trace
+
+Re-traversal of prior positions within the active branch is unbounded — the
+user can step back and forward freely. Forward paths beyond the active
+position are mutable and get rewritten on the next new activation. Branches
+discarded by truncation are not retained anywhere; they are gone.
 
 ---
 

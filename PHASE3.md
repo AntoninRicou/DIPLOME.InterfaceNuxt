@@ -117,16 +117,21 @@ A view transition isn't a render directive on its own — it's a metadata change
 
 ---
 
-## Mapping rules (current)
+## Mapping rules (Phase 3b — superseded by Phase 4)
 
-| Interaction event (Phase 2 vocabulary) | Socket command emitted   |
-| --------------------------------------- | ------------------------ |
-| `central_activate` (source: `initial`)  | `focus({ id })`          |
-| `central_activate` (source: `related`)  | `focus({ id })`          |
-| `history_step_back`                     | `focus({ id })` (Phase 3b) |
-| `history_step_forward`                  | `focus({ id })` (Phase 3b) |
-| `history_jump`                          | `focus({ id })` (Phase 3b) |
-| `view_advance`                          | —                        |
+> **Note:** the table below describes the state at the end of Phase 3b. In
+> **Phase 4** the history → `focus(id)` mappings were **REMOVED** and a
+> state-driven socket model was introduced. See [PHASE4.md](PHASE4.md) for the
+> current canonical wire behavior.
+
+| Interaction event (Phase 2 vocabulary) | Socket command at end of Phase 3b | Status in Phase 4 |
+| --------------------------------------- | ----------------------------------- | ----------------- |
+| `central_activate` (source: `initial`)  | `focus({ id })`                     | reframed (see PHASE4.md) |
+| `central_activate` (source: `related`)  | `focus({ id })`                     | preserved (with terminal-state guard) |
+| `history_step_back`                     | `focus({ id })` (Phase 3b)          | **REMOVED**       |
+| `history_step_forward`                  | `focus({ id })` (Phase 3b)          | **REMOVED**       |
+| `history_jump`                          | `focus({ id })` (Phase 3b)          | **REMOVED**       |
+| `view_advance`                          | —                                   | —                 |
 
 The HTTP `/api/interaction` log still records **all** of these — the socket map is
 narrower by design.
@@ -187,12 +192,23 @@ Three channels, three independent destinations. None blocks the others. None blo
 
 ## What Phase 4 (or later) might build on top
 
-* Map `view_advance` to `set-state(name)` if `project` should react to view transitions.
-* Replace the mock `pickRelations` random pick with Euclidean nearest-neighbor on the
-  UMAP coordinates (deferred until 4 distinct UMAPs land — until then, real NN would
-  collapse the perceptual divergence across VIEW-3 components).
-* Add an outbound channel for camera targets, paths, or other rendering directives
-  that don't yet exist in the legacy protocol (e.g. `path-simulate`, `focus-random`).
+> **Update:** Phase 4 has been implemented. See [PHASE4.md](PHASE4.md). It
+> introduced a deterministic project-state model (`SINGLE` / `FADE` / `FOCUS` /
+> `OVERVIEW`), wired `set-state` directives, added a user-confirmed OVERVIEW
+> transition, and **removed** the Phase 3b history → `focus(id)` mappings
+> (history is now socket-silent in any state).
 
-None of these require revisiting Phase 3. The adapter pattern is additive —
-each new mapping is one more explicit `projectSocket.foo(args)` call at one action site.
+Items deferred beyond Phase 4:
+
+* Map `view_advance` to `set-state(name)` if `project` should react to view
+  transitions independently of the four canonical project states.
+* Replace the mock `pickRelations` random pick with Euclidean nearest-neighbor
+  on the UMAP coordinates (still deferred until 4 distinct UMAPs land — until
+  then, real NN would collapse the perceptual divergence across VIEW-3
+  components).
+* Add an outbound channel for camera targets, paths, or other rendering
+  directives that don't yet exist in the legacy protocol (e.g. `path-simulate`,
+  `focus-random`).
+
+The adapter pattern remains additive — each new mapping is one more explicit
+`projectSocket.foo(args)` call at one action site.

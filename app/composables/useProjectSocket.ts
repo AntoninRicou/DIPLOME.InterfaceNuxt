@@ -3,6 +3,7 @@ import { io, type Socket } from 'socket.io-client'
 const ROLE = 'interface'
 
 let socket: Socket | null = null
+let onRegisterCallbacks: Array<() => void> = []
 
 function ensureSocket(url: string): Socket {
   if (socket) return socket
@@ -16,6 +17,13 @@ function ensureSocket(url: string): Socket {
   socket.on('connect', () => {
     socket!.emit('register', ROLE, (res: unknown) => {
       console.log('[socket] registered', res)
+      for (const cb of onRegisterCallbacks) {
+        try {
+          cb()
+        } catch (err) {
+          console.warn('[socket] onRegister callback failed', err)
+        }
+      }
     })
   })
 
@@ -39,6 +47,11 @@ export function useProjectSocket() {
     ensureSocket(url)
   }
 
+  function onRegister(cb: () => void): void {
+    if (import.meta.server) return
+    onRegisterCallbacks.push(cb)
+  }
+
   function focus(id: string): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
@@ -49,9 +62,21 @@ export function useProjectSocket() {
     return true
   }
 
+  function setState(name: string, duration?: number): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-state', name)
+      return false
+    }
+    const payload: { name: string; duration?: number } = { name }
+    if (typeof duration === 'number') payload.duration = duration
+    socket.emit('message', { type: 'set-state', payload })
+    return true
+  }
+
   function isConnected(): boolean {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, focus, isConnected }
+  return { init, onRegister, focus, setState, isConnected }
 }

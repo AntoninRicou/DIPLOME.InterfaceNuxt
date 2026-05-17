@@ -20,7 +20,7 @@ const store = useInteractionStore()
 
       <div class="block">
         <p class="label">
-          history ({{ store.historyIndex + 1 }}/{{ store.navigationHistory.length }})
+          branch ({{ store.historyIndex + 1 }}/{{ store.navigationHistory.length }}, max 10)
         </p>
         <ol class="history">
           <li
@@ -57,7 +57,28 @@ const store = useInteractionStore()
       </div>
 
       <div class="block">
-        <p class="label">selected ({{ store.selectedImages.length }})</p>
+        <p class="label">project state</p>
+        <p class="state-value" :class="`state-${store.projectState.toLowerCase()}`">
+          {{ store.projectState }}
+        </p>
+      </div>
+
+      <div v-if="store.overviewEligible" class="block overview-eligible">
+        <p class="label">overview eligible</p>
+        <p class="hint">
+          You've reached {{ store.historyIndex + 1 }} images in this branch.
+          Confirm to switch project into OVERVIEW mode.
+        </p>
+        <button class="confirm" @click="store.confirmOverview()">
+          confirm overview
+        </button>
+      </div>
+
+      <div v-else-if="store.overviewConfirmed" class="block overview-confirmed">
+        <p class="label">overview active</p>
+        <p class="hint">
+          Terminal state. Clicks still log on the wire but no longer drive progression.
+        </p>
       </div>
     </aside>
 
@@ -173,5 +194,50 @@ h1 {
   padding: 1px;
   height: 100vh;
   overflow: hidden;
+}
+.state-value {
+  margin: 0;
+  font-family: monospace;
+  letter-spacing: 0.08em;
+  padding: 4px 8px;
+  border: 1px solid #2a2a2e;
+  display: inline-block;
+}
+.state-single   { color: #888; border-color: #444; }
+.state-fade     { color: #c9a35c; border-color: #6e5a36; }
+.state-focus    { color: #5cc987; border-color: #336e4a; }
+.state-overview { color: #9b6ecf; border-color: #553a76; }
+
+.overview-eligible {
+  border-left: 2px solid #9b6ecf;
+  padding-left: 0.6rem;
+}
+.overview-eligible .hint,
+.overview-confirmed .hint {
+  font-family: sans-serif;
+  font-size: 0.75rem;
+  color: #aaa;
+  margin: 0 0 0.5rem;
+  line-height: 1.4;
+}
+.confirm {
+  padding: 0.5rem 0.8rem;
+  background: #9b6ecf;
+  color: #0d0d10;
+  border: 1px solid #9b6ecf;
+  font-family: monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  font-weight: 600;
+}
+.confirm:hover {
+  background: #b58cda;
+  border-color: #b58cda;
+}
+.overview-confirmed {
+  border-left: 2px solid #5a5a66;
+  padding-left: 0.6rem;
+  opacity: 0.7;
 }
 </style>

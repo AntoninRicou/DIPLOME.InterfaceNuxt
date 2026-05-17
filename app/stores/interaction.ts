@@ -5,16 +5,23 @@ import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 import { useProjectSocket } from '~/composables/useProjectSocket'
 
 const VIEW_ORDER: ViewState[] = ['VIEW_1', 'VIEW_2', 'VIEW_3']
-const VIEW_2_AUTO_ADVANCE_MS = 3000
+const FADE_DURATION_MS = 4500
+const VIEW_2_AUTO_ADVANCE_MS = FADE_DURATION_MS
+const OVERVIEW_THRESHOLD = 10
+
+export type ProjectState = 'SINGLE' | 'FADE' | 'FOCUS' | 'OVERVIEW'
 
 export const useInteractionStore = defineStore('interaction', () => {
   const { emit } = useInteractionEmitter()
   const projectSocket = useProjectSocket()
+
   const currentView = ref<ViewState>('VIEW_1')
-  const selectedImages = ref<ImageId[]>([])
   const navigationHistory = ref<ImageId[]>([])
   const historyIndex = ref(-1)
   const activeCentralImageId = ref<ImageId | null>(null)
+
+  const imageClick = ref(0)
+  const overviewConfirmed = ref(false)
 
   const view2AutoAdvanceMs = VIEW_2_AUTO_ADVANCE_MS
   const view2RemainingMs = ref(0)
@@ -28,6 +35,17 @@ export const useInteractionStore = defineStore('interaction', () => {
   const historyHasPrevious = computed(() => historyIndex.value > 0)
   const historyHasForward = computed(
     () => historyIndex.value >= 0 && historyIndex.value < navigationHistory.value.length - 1,
+  )
+
+  const projectState = computed<ProjectState>(() => {
+    if (overviewConfirmed.value) return 'OVERVIEW'
+    if (currentView.value === 'VIEW_3') return 'FOCUS'
+    if (imageClick.value === 0) return 'SINGLE'
+    return 'FADE'
+  })
+
+  const overviewEligible = computed(
+    () => historyIndex.value + 1 >= OVERVIEW_THRESHOLD && !overviewConfirmed.value,
   )
 
   function stopView2Timer() {
@@ -57,8 +75,8 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   function selectImage(id: ImageId) {
     if (currentView.value !== 'VIEW_1') return
-    if (!selectedImages.value.includes(id)) selectedImages.value.push(id)
     activeCentralImageId.value = id
+    imageClick.value += 1
     const from = currentView.value
     advanceView()
     startView2Timer()
@@ -75,7 +93,7 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: currentView.value,
       clientTimestamp: Date.now(),
     })
-    projectSocket.focus(id)
+    projectSocket.setState('FADE', FADE_DURATION_MS)
   }
 
   function enterRelationalView() {
@@ -93,16 +111,48 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: currentView.value,
       clientTimestamp: Date.now(),
     })
+    projectSocket.setState('FOCUS')
+    if (activeCentralImageId.value) projectSocket.focus(activeCentralImageId.value)
   }
 
   function activateCentral(id: ImageId) {
     if (currentView.value !== 'VIEW_3') return
     if (activeCentralImageId.value === id) return
+
+    // ── HARD GUARD — terminal OVERVIEW state. No store mutation below. ──
+    if (overviewConfirmed.value) {
+      emit({
+        type: 'central_activate',
+        imageId: id,
+        source: 'related',
+        historyIndex: historyIndex.value,
+        clientTimestamp: Date.now(),
+      })
+      projectSocket.focus(id)
+      return
+    }
+
+    // ── BRANCH CAP — active branch bounded to OVERVIEW_THRESHOLD entries. ──
+    // At the cap, the user must confirm OVERVIEW or step back to make room.
+    // Log the attempted activation for telemetry but do not mutate or emit
+    // on the project socket — the branch state must not change.
+    if (historyIndex.value + 1 >= OVERVIEW_THRESHOLD) {
+      emit({
+        type: 'central_activate',
+        imageId: id,
+        source: 'related',
+        historyIndex: historyIndex.value,
+        clientTimestamp: Date.now(),
+      })
+      return
+    }
+    // ── Pre-OVERVIEW, pre-cap only. Provably unreachable otherwise. ──
+
     navigationHistory.value = navigationHistory.value.slice(0, historyIndex.value + 1)
     navigationHistory.value.push(id)
     historyIndex.value = navigationHistory.value.length - 1
     activeCentralImageId.value = id
-    if (!selectedImages.value.includes(id)) selectedImages.value.push(id)
+    imageClick.value += 1
     emit({
       type: 'central_activate',
       imageId: id,
@@ -111,6 +161,12 @@ export const useInteractionStore = defineStore('interaction', () => {
       clientTimestamp: Date.now(),
     })
     projectSocket.focus(id)
+  }
+
+  function confirmOverview() {
+    if (!overviewEligible.value) return
+    overviewConfirmed.value = true
+    projectSocket.setState('OVERVIEW')
   }
 
   function stepBackInHistory() {
@@ -164,10 +220,13 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   return {
     currentView,
-    selectedImages,
     navigationHistory,
     historyIndex,
     activeCentralImageId,
+    imageClick,
+    overviewConfirmed,
+    projectState,
+    overviewEligible,
     view2AutoAdvanceMs,
     view2RemainingMs,
     isInView1,
@@ -178,6 +237,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     selectImage,
     enterRelationalView,
     activateCentral,
+    confirmOverview,
     stepBackInHistory,
     stepForwardInHistory,
     jumpToHistory,
