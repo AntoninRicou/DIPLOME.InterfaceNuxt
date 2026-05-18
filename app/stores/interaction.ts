@@ -139,6 +139,10 @@ export const useInteractionStore = defineStore('interaction', () => {
     }
     // ── Pre-OVERVIEW, pre-cap only. Provably unreachable otherwise. ──
 
+    const prevId = activeCentralImageId.value!
+    const isMidBranch = historyIndex.value < navigationHistory.value.length - 1
+    const truncateKeepCount = historyIndex.value
+
     navigationHistory.value = navigationHistory.value.slice(0, historyIndex.value + 1)
     navigationHistory.value.push(id)
     historyIndex.value = navigationHistory.value.length - 1
@@ -151,7 +155,9 @@ export const useInteractionStore = defineStore('interaction', () => {
       historyIndex: historyIndex.value,
       clientTimestamp: Date.now(),
     })
+    if (isMidBranch) projectSocket.pathTruncate(truncateKeepCount)
     projectSocket.focus(id)
+    projectSocket.pathSegment(prevId, id)
   }
 
   function confirmOverview() {

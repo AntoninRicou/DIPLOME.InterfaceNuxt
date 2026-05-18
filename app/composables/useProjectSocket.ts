@@ -74,9 +74,39 @@ export function useProjectSocket() {
     return true
   }
 
+  function pathSegment(fromId: string, toId: string): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping path-segment', fromId, toId)
+      return false
+    }
+    socket.emit('message', { type: 'path-segment', payload: { fromId, toId } })
+    return true
+  }
+
+  function pathTruncate(keepCount: number): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping path-truncate', keepCount)
+      return false
+    }
+    socket.emit('message', { type: 'path-truncate', payload: { keepCount } })
+    return true
+  }
+
+  function pathClear(): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping path-clear')
+      return false
+    }
+    socket.emit('message', { type: 'path-clear', payload: {} })
+    return true
+  }
+
   function isConnected(): boolean {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, isConnected }
 }

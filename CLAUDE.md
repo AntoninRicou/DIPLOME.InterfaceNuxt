@@ -191,10 +191,11 @@ render state** — it is a UI-only buffer that mirrors the in-flight `single
 
 | Interaction event                                                       | Wire emission                          | Resulting render state |
 | ----------------------------------------------------------------------- | -------------------------------------- | ---------------------- |
-| socket-register bootstrap (no clicks yet, `imageClick = 0`)             | `set-state('single')`                  | `single`               |
+| socket-register bootstrap or reconnect (no clicks yet, `imageClick = 0`) | `path-clear` + `set-state('single')`  | `single` (full reset)  |
 | first VIEW-1 click                                                      | `set-state('split', 4500)` + `focus(storedImageId)` | `single → split` (4500ms morph) |
 | VIEW-3 entry (timer or skip — morph already in flight)                  | `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change) |
-| VIEW-3 related-image click (`activateCentral`)                          | `focus(newImageId)`                    | `split` (no state change) |
+| VIEW-3 related-image click (`activateCentral`, pre-overview, pre-cap)   | `focus(newId)` + `path-segment(prevId, newId)`, prefixed by `path-truncate(historyIndex)` if mid-branch | `split` (no state change) |
+| VIEW-3 related-image click (`activateCentral`, at cap or post-overview) | post-overview: `focus(newId)` only — at cap: **nothing** on the wire | `split` (no state change; read-only) |
 | history nav (`stepBack` / `stepForward` / `jumpToHistory`)              | `focus(historicalId)`                  | `split` (no state change) |
 | user **explicitly confirms** overview while at branch depth `>= 10`     | `set-state('overview')`                | `split → overview`     |
 
@@ -268,6 +269,67 @@ target the click already established — project's `focusOn` is idempotent,
 so this is a no-op confirmation, not a first-time binding. If the user
 skips VIEW-2 early, project's morph naturally truncates — no second
 `set-state` is needed.
+
+### Boot reset sequence
+
+On every `register` event between `interface_nuxt` and `project` (initial
+connect and reconnect), `interface_nuxt` emits the following pair, in
+order:
+
+1. `path-clear`
+2. `set-state('single')`
+
+This is the canonical session-reset handshake. No aggregate `reset-session`
+wire verb exists; composition is sufficient because the wire vocabulary is
+deliberately minimal and each constituent already carries clean semantics.
+
+* `path-clear` wipes `pathTrace.segments[]`, the `visited` set, and zeroes
+  the endpoint glow buffer. Originally introduced for the legacy demo
+  system, it is now formally part of the boot contract — promoted to
+  canonical use alongside `path-segment` / `path-truncate`.
+* `set-state('single')` transitions `project` to the `single` render
+  state. The contract of `single` explicitly includes — beyond layout,
+  `cameraZ`, and `drift` — **"no focal target, camera at map origin"**.
+  Concretely: on entering `single`, `goTo('single')` resets each ready
+  canvas's `targetX/targetY` to `(0, 0)` with `panProgress = 1`, and
+  clears any previous point highlight. This makes `set-state('single')`
+  alone sufficient to reset camera + focus state without introducing a
+  separate `focus-clear` directive.
+
+Ordering between the two emissions is cosmetic — the two subsystems
+(`pathTrace` and `stateManager`) are independent and do not interact —
+but `path-clear` fires first so the path wipe is visible before the
+layout transitions away from whatever rendered state preceded the
+reconnect.
+
+**Outcome of a hard refresh of `interface_nuxt`:**
+
+| Project state | Reset path |
+|---|---|
+| `pathTrace.segments[]` + glow | `path-clear` → `pathTrace.clear()` |
+| `currentName`, layout, `cameraZ`, drift | `set-state('single')` → `stateManager.goTo('single')` |
+| `targetX` / `targetY` / `panProgress` / highlight | `set-state('single')` → `single`-state focus reset (inside `goTo`) |
+
+Together they leave `project` indistinguishable from a cold boot: empty
+path, camera at origin, no focal target, layout in `single`, auto-morph
+cycle restarted.
+
+**Caveats:**
+
+* `onRegister` fires on **every** socket connect, including transient
+  reconnects mid-session. The current implementation therefore wipes
+  `project`'s visuals even when the interface store still holds the full
+  `navigationHistory`. This is acceptable for the prototype phase. The
+  long-term fix is *replay-from-store on reconnect* — emit `path-clear`,
+  then walk `navigationHistory` re-emitting `path-segment` for each edge,
+  then `focus(activeCentralImageId)` — deferred until reconnect behavior
+  becomes a felt problem.
+* If `project` is offline at the moment `interface_nuxt` registers, the
+  relay drops the boot emissions; project will boot into its own
+  internal default state (`stateManager`'s `initial = 'split'`) and stay
+  there until the next interface event arrives. This is a pre-existing
+  race in the relay's at-most-once delivery semantics — flagged but out
+  of scope for this contract.
 
 ### overview eligibility & confirmation
 
@@ -693,6 +755,133 @@ discarded by truncation are not retained anywhere; they are gone.
 
 ---
 
+## VIEW-3 — PATH RENDERING
+
+VIEW-3 has a **persistent visual path** rendered by `project`. It visualizes
+the user's currently reconstructed active branch (see *NAVIGATION MEMORY*)
+as a continuous line of segments connecting each successively activated
+image, with an additive glow at each endpoint.
+
+The rendered path is **not** a separate memory and **not** a server-side
+artifact; it is a pure visual derivation of `navigationHistory` /
+`historyIndex` mutations. `interface_nuxt` owns the memory and emits
+explicit directives; `project` owns the rendering and never infers, never
+derives, never stores. This is the canonical user-driven path-rendering
+system — the legacy `pathPlayer` / `simulatePath` machinery in `project`
+remains in source but is **never engaged** by `interface_nuxt`.
+
+### Wire vocabulary
+
+Two directives, both flowing from `interface_nuxt` to `project` through the
+opaque relay (`server`):
+
+* `path-segment({ fromId, toId })` — append a new visible segment from
+  `fromId` to `toId`. Project picks the segment color locally (color is a
+  rendering concern, not a wire concern) and animates the new segment's
+  `progress` against the current `focus(id)` pan animation, so the segment
+  visibly "grows" in sync with camera convergence on the new central image.
+* `path-truncate({ keepCount })` — drop all segments after index
+  `keepCount`. The surviving last segment is clamped to fully drawn. Used
+  to visually destroy a forward branch that was just rewritten by a
+  mid-branch activation.
+
+`interface_nuxt` emits **only** these two path directives. Legacy
+`'path-simulate'`, `'path-start'`, `'path-clear'` handlers exist inside
+`project`'s `commandsManager` but are unreachable in the production user
+journey because `interface_nuxt` never emits them.
+
+### Emission rules
+
+Path emissions originate **only** in `activateCentral`, and **only** inside
+its pre-overview, pre-cap mutation block. The structural guards described
+in *overview — terminal, read-only state* and the branch-cap check ensure
+this block is provably unreachable from any other state.
+
+When the mutation block runs, `activateCentral` socket emissions are
+produced in this fixed order:
+
+1. `path-truncate({ keepCount: historyIndex })` — **only if mid-branch**
+   (`historyIndex < navigationHistory.length - 1`). Emitted **before**
+   focus.
+2. `focus({ id: newId })` — repositions camera, resets `panProgress` to 0.
+3. `path-segment({ fromId: prevId, toId: newId })` — pushes new segment
+   with `progress = 0`; will animate against the fresh pan.
+
+Both `prevId` and `truncateKeepCount` are captured **before** the store
+mutation runs, so they reference the *previous* active image and the
+*previous* `historyIndex` respectively.
+
+The ordering is intentional and load-bearing:
+
+* truncate **before** focus, so the discarded tail is removed before the
+  camera starts repositioning visually
+* focus **before** segment, so `panProgress` is reset to 0 at the moment
+  the new segment is pushed — otherwise the new segment would inherit a
+  stale `panProgress = 1` from the previous arrival and skip its
+  animation entirely
+* `socket.io-client` preserves emission order on a single connection;
+  the three messages arrive at `project` in the same order they leave
+  `interface_nuxt`
+
+### Actions that do NOT emit path directives
+
+* `selectImage` (VIEW-1 first click) — no path yet exists; there is no
+  `prev` to draw from. The first visible segment appears on the **second**
+  activation overall, i.e. the first VIEW-3 related-image click.
+* `enterRelationalView` (VIEW-2 → VIEW-3 entry) — only re-asserts
+  `focus(storedImageId)`. Pushing the initial image into
+  `navigationHistory` is a memory event, not a segment event (a single node
+  has no edge).
+* `stepBackInHistory` / `stepForwardInHistory` / `jumpToHistory` — emit
+  **only** `focus(historicalId)`. The visual path already exists; history
+  traversal is read-only camera movement through it. **No** `path-segment`,
+  **no** `path-truncate`, by design.
+* `confirmOverview` — emits only `set-state('overview')`. The path
+  permanently freezes as drawn at the moment of confirmation.
+* `activateCentral` while at branch cap (`historyIndex + 1 >= 10`) — the
+  pre-cap guard returns before any socket emission. No `focus`, no
+  `path-segment`, no `path-truncate`. The path is unchanged.
+* `activateCentral` after `overviewConfirmed === true` — the hard guard
+  returns after emitting only `focus(id)` (for wire-log consistency, per
+  *overview — terminal, read-only state*). No path emission. The path
+  remains frozen.
+
+### Project-side rendering contract
+
+`project` maintains a single `segments` array inside `pathTrace`, one entry
+per visible edge. On wire receipt:
+
+* `path-segment(from, to)`: appends `{ fromId, toId, color, progress: 0 }`;
+  clamps the previously-last segment to `progress = 1`.
+* `path-truncate(keepCount)`: shrinks `segments` to length `keepCount`;
+  clamps the new last segment to `progress = 1`; clears the glow buffer so
+  endpoints at discarded nodes disappear on the next tick.
+
+The pushed segment animates its `progress` against the camera's
+`panProgress` (which was just reset by `focus`), so each segment visibly
+grows as the camera converges on the new central image. The animation is
+project-internal; `interface_nuxt` does not orchestrate it.
+
+### Invariants
+
+* The visual path always equals `navigationHistory[0..historyIndex]`
+  rendered as `historyIndex` segments. Preserved by construction:
+  * appending: `path-segment` adds exactly one segment
+  * truncating: `path-truncate(historyIndex)` drops everything past the
+    surviving prefix **before** the new segment is appended
+* History traversal never mutates the rendered path — only the camera
+  moves through pre-existing geometry.
+* Once `overviewConfirmed === true`, the path is permanently frozen for
+  the rest of the session. No code path can append, truncate, or clear it.
+* The path is **client-only visual state**. It is not persisted on the
+  server, not in `localStorage`, not on the wire beyond the per-event
+  directives. Page reload destroys it; subsequent activations rebuild it
+  from the next user interactions.
+* Color is chosen inside `project` per segment. `interface_nuxt` is
+  color-blind by design — the wire stays minimal.
+
+---
+
 # CURRENT DEVELOPMENT SCOPE
 
 Current phase:
@@ -702,7 +891,12 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project yet.
+Do not modify project, **with one explicit exception**: the user-driven
+path-rendering directive surface inside `project` — `path-segment`,
+`path-truncate`, and the `pathTrace` primitive they drive — is the canonical
+visual path system and is permitted to evolve. The legacy `pathPlayer` /
+`simulatePath` machinery in `project` must remain untouched and unreferenced
+from `interface_nuxt`. See *VIEW-3 — PATH RENDERING*.
 
 At this stage:
 
