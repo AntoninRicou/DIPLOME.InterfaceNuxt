@@ -2,67 +2,132 @@
 
 ## Goal
 
-Replace the Phase 3 / 3b emergent socket-emission pattern (just `focus(id)` per
-interaction) with an **explicit, deterministic project-state model** driven by
-`interface_nuxt`. `project` is now a pure renderer of the state it is told to be
-in; it never infers or interprets `VIEW`, `imageClick`, or any progression rule.
+Replace the Phase 3 / 3b emergent socket-emission pattern (just `focus(id)`
+per interaction) with an **explicit, deterministic render-state model**
+driven by `interface_nuxt`. `project` is a pure renderer of the state it is
+told to be in; it never infers or interprets `VIEW`, `imageClick`, or any
+progression rule.
 
-The single source of truth for project's render state is the tuple
-**`(currentView, imageClick, overviewConfirmed)`**, all owned by `interface_nuxt`'s
-Pinia store. It is resolved into one of four states and emitted over the existing
-socket protocol: `SINGLE` / `FADE` / `FOCUS` / `OVERVIEW`.
+The render-state vocabulary is **project's own**, not interface's: `single`
+/ `split` / `overview`. The wire emits these names verbatim.
+`interface_nuxt` owns the interaction-phase vocabulary (`VIEW_1` / `VIEW_2`
+/ `VIEW_3`) and decides *which render state to emit, and when*, but never
+sends interaction vocabulary on the wire. **VIEW ≠ STATE**: VIEW is an
+interaction phase, STATE is a render state; there is no 1:1 correspondence
+(VIEW-2, for instance, has no corresponding render state — it is the UI
+mirror of an in-flight `single → split` morph).
 
-The wire protocol does **not** change. Only the rules for *when* and *what* to
-emit change.
+Wire emissions are **triggered by interface event handlers** —
+`selectImage`, `enterRelationalView`, `activateCentral`,
+`confirmOverview`, the `onRegister` handshake callback, and the
+history-nav actions. These handlers may reference store state
+(`currentView`, `imageClick`, `historyIndex`, `overviewConfirmed`) as
+**read-only decision context at execution time** — to branch on overview
+confirmation, the branch-depth cap, the VIEW guard, etc. They do not derive
+the emission *from* state reactively; emissions are imperative, fired at
+the moment a handler runs.
+
+The wire protocol (`set-state(name)` and `focus(id)`) does **not** change;
+only the names and the emission rules do.
 
 ---
 
 ## Architectural invariants honored
 
-* `interface_nuxt` owns `VIEW` + `imageClick` + `overviewConfirmed` and decides
-  every transition.
+* `interface_nuxt` owns `VIEW` + `imageClick` + `historyIndex` +
+  `overviewConfirmed` and decides every emission.
 * The socket is **transport only** — it never carries `VIEW` or `imageClick`
   directly, only the resolved `set-state(name)` and `focus(id)` directives.
 * `project` is a pure deterministic renderer of `(state, focus(id), time)`.
 * The system is deterministic, not emergent: given the same sequence of user
   selections, the same sequence of socket emissions occurs.
 * `/api/interaction` (Phase 2 HTTP log) continues to record the **full**
-  behavioral trace including history navigation. It is independent of the socket.
-* History navigation in any state is **UI-local only** — it emits nothing on the
+  behavioral trace including history navigation. It is independent of the
   socket.
+* History navigation is a **UI-level behavior** that produces only
+  `focus(id)` commands on the wire. It does not participate in render-state
+  transitions and is not part of the project state machine.
 
 ---
 
-## State table
+## System model
 
-Drivers: `imageClick` keys `SINGLE` / `FADE` (boot gate only); VIEW-3 entry
-keys `FOCUS`; explicit user confirmation **while at active branch depth
-`>= 10`** keys `OVERVIEW`. **VIEW-2 does not appear here** — it is a UI-only
-phase and is not part of project's state machine.
+Three strict layers:
 
-| Trigger condition                                                       | project state |
-| ----------------------------------------------------------------------- | ------------- |
-| pre-selection (`imageClick = 0`)                                        | `SINGLE`      |
-| first VIEW-1 click — at the moment of the click                         | `FADE`        |
-| VIEW-3 active (any branch depth, until OVERVIEW confirmed)              | `FOCUS`       |
-| user **explicitly confirms** OVERVIEW while at branch depth `>= 10`     | `OVERVIEW`    |
+1. **Project (render engine)** — render states only: `single` / `split` /
+   `overview`. Reacts to `set-state(name, duration?)`. No knowledge of VIEW
+   or UI logic.
+2. **interface_nuxt (UI orchestrator)** — interaction phases: `VIEW_1` /
+   `VIEW_2` / `VIEW_3`. No 1:1 mapping with render states. Decides when to
+   emit wire commands.
+3. **Camera (focus system)** — single command: `focus(id)`. Independent
+   from render state.
 
-OVERVIEW is **never** triggered automatically by reaching depth 10; the
+Wire protocol — only two commands:
+
+* `set-state(name, duration?)` → project render state
+* `focus(id)` → camera movement only
+
+> **Project-internal note.** Project's `STATES` table also defines a
+> `disperse` render state. `interface_nuxt` deliberately never emits it; it
+> is project-internal and reserved for project's own future use.
+
+---
+
+## Render-state transitions (`set-state` emissions)
+
+These are the **only** moments `interface_nuxt` emits `set-state` on the
+wire.
+
+| Interaction event                                                   | Wire emission                |
+| ------------------------------------------------------------------- | ---------------------------- |
+| socket-register bootstrap (no clicks yet, `imageClick = 0`)         | `set-state('single')`        |
+| first VIEW-1 click                                                  | `set-state('split', 4500)`   |
+| user explicitly confirms overview while at branch depth `>= 10`     | `set-state('overview')`      |
+
+VIEW-2 emits nothing on the wire — the morph kicked off at VIEW-1 is
+already in flight. VIEW-3 entry emits no `set-state` — it produces only a
+camera command (see *Camera channel* below).
+
+`overview` is never triggered automatically by reaching depth 10; the
 threshold only makes the state *eligible* for user confirmation. Branch
 depth is `historyIndex + 1`, bounded to `[1..10]` (see *Bounded active
 branch* below).
 
 ---
 
+## Camera channel (`focus` emissions)
+
+`focus(id)` is the camera command. It is **orthogonal to render state** —
+the camera follows the requested id regardless of which render state
+project is in. Emissions happen at the following interaction events:
+
+| Interaction event                                              | Wire emission              |
+| -------------------------------------------------------------- | -------------------------- |
+| VIEW-3 entry (timer or skip)                                   | `focus(storedImageId)`     |
+| VIEW-3 related-image click (`activateCentral`, pre-overview)   | `focus(newImageId)`        |
+| history nav (`stepBack` / `stepForward` / `jumpToHistory`)     | `focus(historicalId)`      |
+| post-overview `activateCentral` (wire-log artifact, see below) | `focus(id)`                |
+
+`focus(id)` is fire-and-forget. It does **not** change render state, does
+**not** affect `imageClick`, and is **not** subject to the branch-depth
+cap. After `overview` is confirmed, `focus(id)` may continue to fire on
+`activateCentral` calls as a wire-log artifact, but `project` **must not**
+use it for spatial rendering or any state change in the terminal `overview`
+state.
+
+---
+
 ## `imageClick` — session-level selection counter (final rules)
 
 `imageClick` is a **strictly monotonic, session-wide selection counter**.
-Within the project-state machine it serves a **single** structural role:
-distinguishing pre-selection (`imageClick === 0` → `SINGLE`) from
-post-selection (`imageClick > 0` → `FADE` / `FOCUS`). Beyond that boot gate,
-`imageClick` is a session-level trace on the HTTP `/api/interaction` log; it
-is **not** the VIEW-3 progression metric and **not** the OVERVIEW eligibility
-driver — see *Bounded active branch* and *OVERVIEW eligibility &
+Within the wire-emission logic it serves a single structural role:
+distinguishing pre-selection (`imageClick === 0` → project is in `single`)
+from post-selection (`imageClick > 0` → project has been told to morph
+into `split`). Beyond this boot gate, `imageClick` is a pure session-level
+event counter recorded only for `/api/interaction` telemetry. It is never
+used as a driver for any state transition, VIEW logic, or overview
+eligibility. See *Bounded active branch* and *overview eligibility &
 confirmation* below.
 
 It counts only new image selection events:
@@ -74,36 +139,34 @@ It counts only new image selection events:
 * History navigation (`stepBack`, `stepForward`, `jumpToHistory`): **no change**
 * VIEW transitions themselves: **no change**
 * `confirmOverview()`: **no change**
-* Any `activateCentral` call after OVERVIEW confirmation, or any
+* Any `activateCentral` call after overview confirmation, or any
   `activateCentral` call refused by the branch-depth cap: **no change**
 
 ---
 
-## Wire behavior (Phase 4 final)
+## Wire behavior notes
 
-| State      | Emitted from                                                | Wire emission                                          |
-| ---------- | ----------------------------------------------------------- | ------------------------------------------------------ |
-| `SINGLE`   | socket-register bootstrap                                   | `set-state('SINGLE')`                                  |
-| `FADE`     | `selectImage` (the first VIEW-1 click)                      | `set-state('FADE', 4500)` — no `focus`                 |
-| `FOCUS`    | `enterRelationalView` (VIEW-3 entry)                        | `set-state('FOCUS')` + `focus(storedImageId)`          |
-| `FOCUS` in flight | `activateCentral` (pre-OVERVIEW)                     | `focus(newImageId)`                                    |
-| `OVERVIEW` | `confirmOverview()` — explicit user action while at branch depth `>= 10` | `set-state('OVERVIEW')` — emitted exactly once  |
-| post-OVERVIEW | `activateCentral` (after confirmation)                   | `focus(id)` — log artifact only; `project` MUST NOT use it |
+**VIEW-2** is a UI-only buffer phase. During VIEW-2 the socket emits
+**nothing** — project is already morphing into `split` because that
+emission fired at the VIEW-1 click moment. VIEW-2's auto-advance timer
+mirrors the same `SPLIT_TRANSITION_MS` value used in the initial
+`set-state('split', duration)` emission, ensuring UI and project remain
+visually aligned **by convention, not by shared runtime state**. VIEW-2 can
+be exited by either the auto-advance timer or an explicit user skip — both
+exits emit only `focus(storedImageId)` at VIEW-3 entry; only the moment
+differs.
 
-**VIEW-2** is a UI-only buffer phase. During VIEW-2 the socket emits **nothing** —
-`FADE` was already set at the click moment in VIEW-1. VIEW-2 lasts 4500ms by
-default (mirroring project's FADE duration) and can be exited either by timer or
-by an explicit user skip. Both exits emit the same `set-state('FOCUS')` +
-`focus(storedImageId)` at VIEW-3 entry; only the moment differs.
+**VIEW-3 entry emits no `set-state`.** The morph that was kicked off at the
+VIEW-1 click is already in flight (or already complete). VIEW-3 entry only
+needs to land the camera on the stored image, which it does with
+`focus(storedImageId)`. If the user skipped VIEW-2 early, project's morph
+naturally truncates on its side — no second `set-state` is needed.
 
-**History navigation** (`stepBack`, `stepForward`, `jumpToHistory`) emits **only**
-`focus(id)` on the wire — where `id` is the resolved past target. It does **not**
-emit `set-state`, **not** change `projectState`, and **not** increment
-`imageClick`. Its sole socket purpose is to keep project's camera tracking the
-user's UI navigation through past selections. (Originally Phase 4 made history
-socket-silent; that was reverted shortly after when it became clear the camera
-needed to follow the visible "central image" during history navigation. State
-machine semantics are unchanged — only `focus(id)` is restored.)
+**History navigation** is a UI-level behavior that produces only
+`focus(id)` commands on the wire. It does not participate in render-state
+transitions and is not part of the project state machine. (Originally
+Phase 4 made history socket-silent; only the camera channel was re-enabled
+shortly after — no render-state or state-machine semantics were affected.)
 
 ---
 
@@ -121,7 +184,7 @@ an unbounded historical log. The branch has a hard maximum depth of
   branches are not retained.
 * The branch is capped at 10 entries. Once `navigationHistory.length === 10`
   and `historyIndex` is at the tip, `activateCentral` cannot append further.
-  The user must either confirm OVERVIEW or step back to make room for a new
+  The user must either confirm overview or step back to make room for a new
   sub-branch.
 * History navigation (`stepBack`, `stepForward`, `jumpToHistory`) only moves
   `historyIndex`; it never adds, removes, or reorders entries.
@@ -129,31 +192,31 @@ an unbounded historical log. The branch has a hard maximum depth of
 Conceptually, the displayed path is always the **currently reconstructed
 active traversal**, not a record of every image the user has ever activated.
 Active branch depth (`historyIndex + 1`, `[1..10]`) is the meaningful
-progression measure for VIEW-3 and the input to OVERVIEW eligibility.
+progression measure for VIEW-3 and the input to overview eligibility.
 `imageClick` is preserved as a session-level selection trace only and is
 **not** an unbounded "how far have we come" gauge.
 
 ---
 
-## OVERVIEW eligibility & confirmation
+## overview eligibility & confirmation
 
 Two pieces of store state:
 
 * `overviewEligible` (derived): `true` when the **currently active branch
-  depth** is at or above the threshold AND OVERVIEW has not yet been
+  depth** is at or above the threshold AND overview has not yet been
   confirmed. Concretely:
   `historyIndex + 1 >= OVERVIEW_THRESHOLD && !overviewConfirmed`.
-* `overviewConfirmed` (boolean flag): `false` initially; set to `true` exactly
-  once by the `confirmOverview()` store action.
+* `overviewConfirmed` (boolean flag): `false` initially; set to `true`
+  exactly once by the `confirmOverview()` store action.
 
 **`imageClick` and `overviewEligible` are not conflated.** `imageClick` is a
-monotonic, session-level selection counter and never decreases. Eligibility is
-**branch-dependent** — derived from the user's current position in the
+monotonic, session-level selection counter and never decreases. Eligibility
+is **branch-dependent** — derived from the user's current position in the
 bounded active branch. The two diverge any time the user steps backward in
-history or activates a new image from an earlier position (which rewrites the
-forward portion of the branch).
+history or activates a new image from an earlier position (which rewrites
+the forward portion of the branch).
 
-| Quantity            | Type                  | Bounds   | Mutates on history nav? | Drives OVERVIEW eligibility? |
+| Quantity            | Type                  | Bounds   | Mutates on history nav? | Drives overview eligibility? |
 | ------------------- | --------------------- | -------- | ----------------------- | ---------------------------- |
 | `imageClick`        | session selection log | `[0, ∞)` | No                      | No                           |
 | `historyIndex + 1`  | active branch depth   | `[1, 10]`| **Yes**                 | **Yes**                      |
@@ -171,43 +234,45 @@ Concrete pre-confirmation behavior:
   visibility.
 
 (Originally Phase 4 keyed eligibility off `imageClick >= 10` and treated
-`navigationHistory` as unbounded. Both were later revised: navigation is now a
-bounded mutable branch capped at 10, and eligibility tracks the active branch
-depth rather than cumulative session activity. The irreversible portion of
-OVERVIEW — set by `confirmOverview()` — still uses `overviewConfirmed === true`
-as its sole and final latch, exactly as before.)
+`navigationHistory` as unbounded. Both were later revised: navigation is now
+a bounded mutable branch capped at 10, and eligibility tracks the active
+branch depth rather than cumulative session activity. The irreversible
+portion of overview — set by `confirmOverview()` — still uses
+`overviewConfirmed === true` as its sole and final latch, exactly as
+before.)
 
 When the user explicitly confirms:
 
 1. `overviewConfirmed = true`
-2. `set-state('OVERVIEW')` emitted exactly once over the socket
+2. `set-state('overview')` emitted exactly once over the socket
 3. `imageClick` is **not** touched
 
-After confirmation OVERVIEW is **terminal and irreversible** for the rest of
-the session — no further `set-state` emissions occur, `imageClick` is frozen,
-and `overviewEligible` collapses to `false` regardless of branch depth.
+After confirmation `overview` is **terminal and irreversible** for the rest
+of the session — no further `set-state` emissions occur, `imageClick` is
+frozen, and `overviewEligible` collapses to `false` regardless of branch
+depth.
 
 ---
 
 ## Defensive structural guard
 
-The post-OVERVIEW mutation prohibition for `activateCentral` is enforced
-**structurally**, not by scattered conditional checks. The function uses a hard
-early-return guard placed immediately after the precondition checks:
+The post-overview mutation prohibition for `activateCentral` is enforced
+**structurally**, not by scattered conditional checks. The function uses a
+hard early-return guard placed immediately after the precondition checks:
 
 ```ts
 function activateCentral(id) {
   if (currentView.value !== 'VIEW_3') return
   if (activeCentralImageId.value === id) return
 
-  // ── HARD GUARD — terminal OVERVIEW state. No mutation below. ──
+  // ── HARD GUARD — terminal overview state. No mutation below. ──
   if (overviewConfirmed.value) {
     emit({ /* central_activate trace */ })   // /api/interaction log
     projectSocket.focus(id)                  // wire log only
     return
   }
 
-  // ── Pre-OVERVIEW only. Provably unreachable post-confirmation. ──
+  // ── Pre-overview only. Provably unreachable post-confirmation. ──
   navigationHistory.value = ...
   imageClick.value += 1
   // ...
@@ -222,99 +287,134 @@ construction.
 
 ## Files modified
 
-### `app/stores/interaction.ts` (atomic rewrite)
+### `app/stores/interaction.ts`
 
-* Added state: `imageClick` (number), `overviewConfirmed` (boolean).
-* Added derived: `projectState` (typed as `'SINGLE' | 'FADE' | 'FOCUS' | 'OVERVIEW'`),
-  `overviewEligible` (boolean — keyed off
+* State: `currentView` (`ViewState`), `navigationHistory` (`ImageId[]`,
+  the **persisted stack**), `historyIndex` (number, the active-position
+  pointer — **active branch logic is derived exclusively from
+  `historyIndex`**), `activeCentralImageId` (nullable `ImageId`),
+  `imageClick` (number), `overviewConfirmed` (boolean).
+* Derived: `overviewEligible` (boolean — keyed off
   `historyIndex + 1 >= OVERVIEW_THRESHOLD && !overviewConfirmed`, i.e. the
-  **active branch depth**, *not* cumulative `imageClick`).
-* Added action: `confirmOverview()` — gated by `overviewEligible`; sets the flag
-  and emits `set-state('OVERVIEW')` exactly once.
-* `selectImage`: removed `projectSocket.focus(id)`; added
-  `projectSocket.setState('FADE', 4500)`; increments `imageClick` (0 → 1).
-* `enterRelationalView`: adds `projectSocket.setState('FOCUS')` +
-  `projectSocket.focus(activeCentralImageId)` on VIEW-3 entry.
-* `activateCentral`: pre-OVERVIEW path increments `imageClick` and extends the
-  branch; post-OVERVIEW guard is a hard early-return that only logs (no
-  mutation). A second structural guard caps the active branch at
-  `OVERVIEW_THRESHOLD = 10` entries: when the branch is at its cap, further
-  activations log to `/api/interaction` for telemetry but neither mutate the
-  store nor emit on the socket. Discarded forward portions of the branch
-  (truncated by activating from a non-tip position) are not retained.
-* `stepBackInHistory` / `stepForwardInHistory` / `jumpToHistory`: emit
-  `projectSocket.focus(activeCentralImageId)` after the mutation so project's
-  camera follows the user's history navigation. They do **not** emit
-  `set-state` and do **not** touch `imageClick` — the state machine and
-  selection counter are unaffected. Phase 2 `/api/interaction` events are
-  emitted as well.
-* Constants: `FADE_DURATION_MS = 4500`, `VIEW_2_AUTO_ADVANCE_MS = FADE_DURATION_MS`,
-  `OVERVIEW_THRESHOLD = 10` — also serves as the active-branch depth cap.
+  **active branch depth**, *not* cumulative `imageClick`). Note: no
+  `projectState` computed — interface does not maintain a parallel
+  render-state value (see *Vocabulary realignment* below).
+* Action: `confirmOverview()` — gated by `overviewEligible`; sets the flag
+  and emits `set-state('overview')` exactly once.
+* `selectImage`: increments `imageClick` (0 → 1), advances VIEW_1 → VIEW_2,
+  emits `projectSocket.setState('split', SPLIT_TRANSITION_MS)` — kicks off
+  the `single → split` morph at the click moment. No `focus(id)` here.
+* `enterRelationalView`: advances to VIEW_3 and emits only
+  `projectSocket.focus(activeCentralImageId)`. **No `set-state`** — the
+  morph is already in flight from the VIEW-1 click.
+* `activateCentral`: pre-overview path increments `imageClick`, truncates
+  `navigationHistory` to `[0..historyIndex]`, appends the new id, and
+  advances `historyIndex` to the new tip. Post-overview guard is a hard
+  early-return that only logs (no mutation). A second structural guard
+  caps the active branch by checking `historyIndex + 1 >= OVERVIEW_THRESHOLD`:
+  when the branch is at its cap, further activations log to
+  `/api/interaction` for telemetry but neither mutate the store nor emit
+  on the socket. Discarded forward portions of the branch (truncated by
+  activating from a non-tip position) are not retained.
+* `stepBackInHistory` / `stepForwardInHistory` / `jumpToHistory`: move
+  `historyIndex` only (never mutate `navigationHistory`), then emit
+  `projectSocket.focus(activeCentralImageId)` so the camera follows. They
+  do **not** emit `set-state` and do **not** touch `imageClick`. Phase 2
+  `/api/interaction` events are emitted as well.
+* Constants: `SPLIT_TRANSITION_MS = 4500`,
+  `VIEW_2_AUTO_ADVANCE_MS = SPLIT_TRANSITION_MS`, `OVERVIEW_THRESHOLD = 10`
+  (also serves as the active-branch depth cap).
 
 ### `app/composables/useProjectSocket.ts`
 
-* Added `setState(name, duration?)` — emits
+* `setState(name, duration?)` — emits
   `socket.emit('message', { type: 'set-state', payload: { name, duration? } })`.
-  Same fire-and-forget semantics as `focus()`.
-* Added `onRegister(cb)` — registers a callback that fires when the relay
-  acknowledges the `register` handshake. Used by the plugin to emit the boot
-  state.
+  Same fire-and-forget semantics as `focus()`. The composable does not
+  constrain `name`; the caller is responsible for using project's
+  vocabulary (`single` / `split` / `overview`).
+* `onRegister(cb)` — registers a callback that fires when the relay
+  acknowledges the `register` handshake. Used by the plugin to emit the
+  boot state.
 
 ### `app/plugins/projectSocket.client.ts`
 
-* Subscribes via `onRegister(() => setState('SINGLE'))` so `project` is told its
-  boot state the moment the relay acknowledges registration.
+* Subscribes via `onRegister(() => setState('single'))` so `project` is
+  told its boot state the moment the relay acknowledges registration.
 
 ### `app/components/views/View3Relational.vue`
 
-* Sidebar now shows `projectState` (color-coded) and `imageClick`.
+* Sidebar shows the bounded active branch (`branch (N/M, max 10)`, where
+  `N = historyIndex + 1` and `M = navigationHistory.length`) and the
+  history list with back/forward controls. No "project state" badge — the
+  previous `projectState`-driven display was removed when the
+  interface-side state vocabulary was retired (see *Vocabulary realignment*).
 * When `overviewEligible` is `true`, an explicit "confirm overview" button
   appears.
-* After confirmation, the eligibility block is replaced by a "terminal state"
-  notice; the rest of VIEW-3 remains navigable.
+* After confirmation, the eligibility block is replaced by a "terminal
+  state" notice; the rest of VIEW-3 remains navigable as a read-only
+  exploration of past state.
 
 ---
 
 ## What did NOT change
 
-* `/api/interaction`, `/api/relations/[componentId]`, `/api/mapping` — same surfaces.
-* `app/types/events.ts`, `useInteractionEmitter`, `server/utils/eventLog.ts` —
-  Phase 2 untouched. The HTTP behavioral log still records every action,
-  including history nav (which now emits nothing to the socket).
-* `assets/mock/umap_component_*.json` and `pickRelations` — still mock random.
-* `interface/`, `project/`, `server/server.js` — untouched.
+* `/api/interaction`, `/api/relations/[componentId]`, `/api/mapping` — same
+  surfaces.
+* `app/types/events.ts`, `useInteractionEmitter`, `server/utils/eventLog.ts`
+  — Phase 2 untouched. The HTTP behavioral log still records every action,
+  including history nav.
+* `assets/mock/umap_component_*.json` and `pickRelations` — still mock
+  random.
+* The wire protocol shape — `{ type, payload }` envelopes with `set-state`
+  and `focus` as the only types — is unchanged. Only the emission rules and
+  the state-name vocabulary were realigned.
+* Project's `STATES` table is project-owned and unchanged. Interface adapts
+  to project's existing vocabulary (`single` / `split` / `overview`).
 
 ---
 
 ## How to verify
 
+The wire contract is defined entirely by the two-command protocol
+(`set-state` and `focus`). The flow below describes the expected wire
+emissions at each interaction step. Project-side or relay-side console
+logs are useful for debugging but are **not** part of the contract — only
+the wire emissions are.
+
 With relay (`node server/server.js` from repo root), `project`, and
 `interface_nuxt` (`npm run dev` → `:3050`) all running:
 
-1. Reload the page in a fresh tab. Browser console:
-   `[socket] registered { ok: true, role: 'interface' }`.
-   CLI listener as `project` should see: `set-state name=SINGLE` (no focus).
+1. Reload the interface tab.
+   Expect on the wire: `set-state('single')` — no `focus`.
 2. Click an image in VIEW-1.
-   Expect: `set-state name=FADE duration=4500` (no focus).
-3. Wait 4.5s (or skip via the VIEW-2 button).
-   Expect: `set-state name=FOCUS` + `focus({ id })`.
+   Expect on the wire: `set-state('split', SPLIT_TRANSITION_MS)` — no
+   `focus`. The `single → split` morph starts immediately on project's
+   side.
+3. Wait `SPLIT_TRANSITION_MS` (or skip via the VIEW-2 control).
+   Expect on the wire: `focus(storedImageId)` — **no `set-state`**. The
+   morph that was already in flight either finishes naturally (auto-advance)
+   or truncates on project's side (skip).
 4. Click related images in VIEW-3.
-   Expect: `focus({ id })` per click. `imageClick` counter in sidebar increments.
+   Expect on the wire: `focus(newImageId)` per click. Branch depth in the
+   sidebar increments.
 5. Click `← back` / `forward →` / a history entry.
-   Expect: **no socket traffic** (only HTTP `/api/interaction`).
-6. Keep clicking related images until the **active branch depth** reaches 10
-   (`historyIndex + 1 = 10`). No `set-state` fires; sidebar shows "confirm
-   overview" button. Further `activateCentral` calls are now no-ops (branch
-   at cap); the wire stays quiet and `imageClick` does not advance.
+   Expect on the wire: `focus(historicalId)` per nav action. No
+   `set-state`. `imageClick` does not change.
+6. Keep clicking related images until the **active branch depth** reaches
+   10 (`historyIndex + 1 = 10`). No `set-state` fires; sidebar shows the
+   "confirm overview" button. Further `activateCentral` calls are now
+   no-ops (branch at cap); the wire stays quiet and `imageClick` does not
+   advance.
 7. Click `← back` once — button disappears (branch depth = 9). Click
    `forward →` — button reappears (depth = 10). Click `← back` to a much
    earlier index, then click a new related image — the forward branch is
    truncated and replaced; button stays hidden until depth returns to 10.
 8. Click "confirm overview" while at depth 10.
-   Expect: `set-state name=OVERVIEW` (exactly once).
+   Expect on the wire: `set-state('overview')` — exactly once.
 9. Click related images after confirmation.
-   Expect: `focus({ id })` only — no `set-state`. Sidebar shows "overview
-   active". Both `imageClick` and the branch are frozen for state purposes.
+   Expect on the wire: `focus({ id })` only — no `set-state`. Sidebar
+   shows "overview active". Both `imageClick` and the branch are frozen for
+   state purposes; project stays in `overview`.
 
 ---
 
