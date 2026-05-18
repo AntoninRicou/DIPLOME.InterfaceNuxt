@@ -5,11 +5,9 @@ import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 import { useProjectSocket } from '~/composables/useProjectSocket'
 
 const VIEW_ORDER: ViewState[] = ['VIEW_1', 'VIEW_2', 'VIEW_3']
-const FADE_DURATION_MS = 4500
-const VIEW_2_AUTO_ADVANCE_MS = FADE_DURATION_MS
+const SPLIT_TRANSITION_MS = 4500
+const VIEW_2_AUTO_ADVANCE_MS = SPLIT_TRANSITION_MS
 const OVERVIEW_THRESHOLD = 10
-
-export type ProjectState = 'SINGLE' | 'FADE' | 'FOCUS' | 'OVERVIEW'
 
 export const useInteractionStore = defineStore('interaction', () => {
   const { emit } = useInteractionEmitter()
@@ -36,13 +34,6 @@ export const useInteractionStore = defineStore('interaction', () => {
   const historyHasForward = computed(
     () => historyIndex.value >= 0 && historyIndex.value < navigationHistory.value.length - 1,
   )
-
-  const projectState = computed<ProjectState>(() => {
-    if (overviewConfirmed.value) return 'OVERVIEW'
-    if (currentView.value === 'VIEW_3') return 'FOCUS'
-    if (imageClick.value === 0) return 'SINGLE'
-    return 'FADE'
-  })
 
   const overviewEligible = computed(
     () => historyIndex.value + 1 >= OVERVIEW_THRESHOLD && !overviewConfirmed.value,
@@ -93,7 +84,8 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: currentView.value,
       clientTimestamp: Date.now(),
     })
-    projectSocket.setState('FADE', FADE_DURATION_MS)
+    projectSocket.setState('split', SPLIT_TRANSITION_MS)
+    projectSocket.focus(id)
   }
 
   function enterRelationalView() {
@@ -111,7 +103,6 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: currentView.value,
       clientTimestamp: Date.now(),
     })
-    projectSocket.setState('FOCUS')
     if (activeCentralImageId.value) projectSocket.focus(activeCentralImageId.value)
   }
 
@@ -166,7 +157,13 @@ export const useInteractionStore = defineStore('interaction', () => {
   function confirmOverview() {
     if (!overviewEligible.value) return
     overviewConfirmed.value = true
-    projectSocket.setState('OVERVIEW')
+    emit({
+      type: 'overview_confirm',
+      imageId: activeCentralImageId.value!,
+      historyIndex: historyIndex.value,
+      clientTimestamp: Date.now(),
+    })
+    projectSocket.setState('overview')
   }
 
   function stepBackInHistory() {
@@ -225,7 +222,6 @@ export const useInteractionStore = defineStore('interaction', () => {
     activeCentralImageId,
     imageClick,
     overviewConfirmed,
-    projectState,
     overviewEligible,
     view2AutoAdvanceMs,
     view2RemainingMs,

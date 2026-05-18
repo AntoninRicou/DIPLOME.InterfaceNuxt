@@ -56,13 +56,6 @@ const store = useInteractionStore()
         </div>
       </div>
 
-      <div class="block">
-        <p class="label">project state</p>
-        <p class="state-value" :class="`state-${store.projectState.toLowerCase()}`">
-          {{ store.projectState }}
-        </p>
-      </div>
-
       <div v-if="store.overviewEligible" class="block overview-eligible">
         <p class="label">overview eligible</p>
         <p class="hint">
@@ -195,19 +188,6 @@ h1 {
   height: 100vh;
   overflow: hidden;
 }
-.state-value {
-  margin: 0;
-  font-family: monospace;
-  letter-spacing: 0.08em;
-  padding: 4px 8px;
-  border: 1px solid #2a2a2e;
-  display: inline-block;
-}
-.state-single   { color: #888; border-color: #444; }
-.state-fade     { color: #c9a35c; border-color: #6e5a36; }
-.state-focus    { color: #5cc987; border-color: #336e4a; }
-.state-overview { color: #9b6ecf; border-color: #553a76; }
-
 .overview-eligible {
   border-left: 2px solid #9b6ecf;
   padding-left: 0.6rem;

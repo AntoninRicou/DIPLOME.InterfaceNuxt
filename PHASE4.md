@@ -86,8 +86,10 @@ wire.
 | user explicitly confirms overview while at branch depth `>= 10`     | `set-state('overview')`      |
 
 VIEW-2 emits nothing on the wire — the morph kicked off at VIEW-1 is
-already in flight. VIEW-3 entry emits no `set-state` — it produces only a
-camera command (see *Camera channel* below).
+already in flight, and the camera target was bound in the same click-time
+emission bundle (see *Camera channel* below). VIEW-3 entry emits no
+`set-state` — it produces only an idempotent re-assertion of the camera
+command.
 
 `overview` is never triggered automatically by reaching depth 10; the
 threshold only makes the state *eligible* for user confirmation. Branch
@@ -104,7 +106,8 @@ project is in. Emissions happen at the following interaction events:
 
 | Interaction event                                              | Wire emission              |
 | -------------------------------------------------------------- | -------------------------- |
-| VIEW-3 entry (timer or skip)                                   | `focus(storedImageId)`     |
+| first VIEW-1 click (co-emitted with `set-state('split', …)`)   | `focus(storedImageId)`     |
+| VIEW-3 entry (timer or skip)                                   | `focus(storedImageId)` (idempotent re-assertion) |
 | VIEW-3 related-image click (`activateCentral`, pre-overview)   | `focus(newImageId)`        |
 | history nav (`stepBack` / `stepForward` / `jumpToHistory`)     | `focus(historicalId)`      |
 | post-overview `activateCentral` (wire-log artifact, see below) | `focus(id)`                |
@@ -148,19 +151,23 @@ It counts only new image selection events:
 
 **VIEW-2** is a UI-only buffer phase. During VIEW-2 the socket emits
 **nothing** — project is already morphing into `split` because that
-emission fired at the VIEW-1 click moment. VIEW-2's auto-advance timer
-mirrors the same `SPLIT_TRANSITION_MS` value used in the initial
-`set-state('split', duration)` emission, ensuring UI and project remain
-visually aligned **by convention, not by shared runtime state**. VIEW-2 can
-be exited by either the auto-advance timer or an explicit user skip — both
-exits emit only `focus(storedImageId)` at VIEW-3 entry; only the moment
-differs.
+emission fired at the VIEW-1 click moment, and project's camera has been
+tracking `storedImageId` since the same click (focus is co-emitted with
+`set-state` at click time). VIEW-2's auto-advance timer mirrors the same
+`SPLIT_TRANSITION_MS` value used in the initial `set-state('split',
+duration)` emission, ensuring UI and project remain visually aligned **by
+convention, not by shared runtime state**. VIEW-2 can be exited by either
+the auto-advance timer or an explicit user skip — both exits emit
+`focus(storedImageId)` as an idempotent re-assertion at VIEW-3 entry; only
+the moment differs.
 
 **VIEW-3 entry emits no `set-state`.** The morph that was kicked off at the
-VIEW-1 click is already in flight (or already complete). VIEW-3 entry only
-needs to land the camera on the stored image, which it does with
-`focus(storedImageId)`. If the user skipped VIEW-2 early, project's morph
-naturally truncates on its side — no second `set-state` is needed.
+VIEW-1 click is already in flight (or already complete), and the camera
+target is already bound. VIEW-3 entry re-emits `focus(storedImageId)` as an
+idempotent re-assertion — project's `focusOn` is idempotent, so this is a
+no-op confirmation rather than a first-time binding. If the user skipped
+VIEW-2 early, project's morph naturally truncates on its side — no second
+`set-state` is needed.
 
 **History navigation** is a UI-level behavior that produces only
 `focus(id)` commands on the wire. It does not participate in render-state
@@ -302,11 +309,16 @@ construction.
 * Action: `confirmOverview()` — gated by `overviewEligible`; sets the flag
   and emits `set-state('overview')` exactly once.
 * `selectImage`: increments `imageClick` (0 → 1), advances VIEW_1 → VIEW_2,
-  emits `projectSocket.setState('split', SPLIT_TRANSITION_MS)` — kicks off
-  the `single → split` morph at the click moment. No `focus(id)` here.
-* `enterRelationalView`: advances to VIEW_3 and emits only
-  `projectSocket.focus(activeCentralImageId)`. **No `set-state`** — the
-  morph is already in flight from the VIEW-1 click.
+  and emits a coupled pair: `projectSocket.setState('split',
+  SPLIT_TRANSITION_MS)` to kick off the `single → split` morph, and
+  `projectSocket.focus(id)` to bind project's camera target at the click
+  moment. Both directives fire in the same handler so the morph and the
+  camera convergence are co-causal with the user's selection.
+* `enterRelationalView`: advances to VIEW_3 and re-emits
+  `projectSocket.focus(activeCentralImageId)` as an idempotent re-assertion.
+  **No `set-state`** — the morph is already in flight from the VIEW-1
+  click, and `focusOn` is idempotent on project's side, so this is a
+  defensive confirmation rather than a first-time binding.
 * `activateCentral`: pre-overview path increments `imageClick`, truncates
   `navigationHistory` to `[0..historyIndex]`, appends the new id, and
   advances `historyIndex` to the new tip. Post-overview guard is a hard
@@ -387,13 +399,16 @@ With relay (`node server/server.js` from repo root), `project`, and
 1. Reload the interface tab.
    Expect on the wire: `set-state('single')` — no `focus`.
 2. Click an image in VIEW-1.
-   Expect on the wire: `set-state('split', SPLIT_TRANSITION_MS)` — no
-   `focus`. The `single → split` morph starts immediately on project's
-   side.
+   Expect on the wire: `set-state('split', SPLIT_TRANSITION_MS)`
+   **immediately followed by** `focus(storedImageId)`. The `single → split`
+   morph starts and the camera begins lerping toward the selected point on
+   project's side from the same moment.
 3. Wait `SPLIT_TRANSITION_MS` (or skip via the VIEW-2 control).
-   Expect on the wire: `focus(storedImageId)` — **no `set-state`**. The
-   morph that was already in flight either finishes naturally (auto-advance)
-   or truncates on project's side (skip).
+   Expect on the wire: `focus(storedImageId)` again — idempotent
+   re-assertion, **no `set-state`**. The morph that was already in flight
+   either finishes naturally (auto-advance) or truncates on project's side
+   (skip); the re-emitted focus is a no-op confirmation because project's
+   `focusOn` is idempotent.
 4. Click related images in VIEW-3.
    Expect on the wire: `focus(newImageId)` per click. Branch depth in the
    sidebar increments.

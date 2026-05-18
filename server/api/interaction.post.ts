@@ -25,6 +25,8 @@ function isValidEvent(input: unknown): input is InteractionEvent {
         typeof e.toIndex === 'number' &&
         typeof e.toImageId === 'string'
       )
+    case 'overview_confirm':
+      return typeof e.imageId === 'string' && typeof e.historyIndex === 'number'
     default:
       return false
   }

@@ -192,8 +192,8 @@ render state** — it is a UI-only buffer that mirrors the in-flight `single
 | Interaction event                                                       | Wire emission                          | Resulting render state |
 | ----------------------------------------------------------------------- | -------------------------------------- | ---------------------- |
 | socket-register bootstrap (no clicks yet, `imageClick = 0`)             | `set-state('single')`                  | `single`               |
-| first VIEW-1 click                                                      | `set-state('split', 4500)`             | `single → split` (4500ms morph) |
-| VIEW-3 entry (timer or skip — morph already in flight)                  | `focus(storedImageId)` only            | `split` (no state change) |
+| first VIEW-1 click                                                      | `set-state('split', 4500)` + `focus(storedImageId)` | `single → split` (4500ms morph) |
+| VIEW-3 entry (timer or skip — morph already in flight)                  | `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change) |
 | VIEW-3 related-image click (`activateCentral`)                          | `focus(newImageId)`                    | `split` (no state change) |
 | history nav (`stepBack` / `stepForward` / `jumpToHistory`)              | `focus(historicalId)`                  | `split` (no state change) |
 | user **explicitly confirms** overview while at branch depth `>= 10`     | `set-state('overview')`                | `split → overview`     |
@@ -261,10 +261,13 @@ move project's camera to track the user's UI navigation through past
 selections.
 
 **VIEW-3 entry emits no `set-state`.** The `single → split` morph is already
-underway (or already complete) from the VIEW-1 click. VIEW-3 entry only
-needs to land the camera on the stored image, which it does with
-`focus(storedImageId)`. If the user skips VIEW-2 early, project's morph
-naturally truncates — no second `set-state` is needed.
+underway (or already complete) from the VIEW-1 click, and project's camera
+has been tracking `storedImageId` since that click moment. VIEW-3 entry
+re-emits `focus(storedImageId)` as an idempotent re-assertion of the same
+target the click already established — project's `focusOn` is idempotent,
+so this is a no-op confirmation, not a first-time binding. If the user
+skips VIEW-2 early, project's morph naturally truncates — no second
+`set-state` is needed.
 
 ### overview eligibility & confirmation
 
@@ -436,13 +439,16 @@ When the first image is selected in VIEW-1:
 * the system transitions immediately and permanently to VIEW-2
 * `project` receives `set-state('split', 4500)` — kicking off a 4500ms
   `single → split` morph **at the click moment**
+* `project` also receives `focus(storedImageId)` in the same emission
+  bundle — the camera target is bound at click time so the morph and the
+  camera convergence are co-causal with the user's selection
 
-**No `focus(id)` is emitted at this stage.**
-
-The first `focus(id)` is emitted only later, upon VIEW-3 entry, with
-`focus(storedImageId)`. VIEW-3 entry emits **no** `set-state` of its own —
-the morph that was kicked off here is already in flight (or already complete)
-by then.
+VIEW-3 entry emits **no** `set-state` of its own — the morph that was kicked
+off here is already in flight (or already complete) by then. VIEW-3 entry
+**re-emits** `focus(storedImageId)` as an idempotent re-assertion of the
+target established at click time; project's `focusOn` is idempotent by
+construction, so this is a no-op confirmation rather than a first-time
+binding.
 
 ### Split transition duration
 
@@ -465,9 +471,12 @@ skip action. The skip is purely a UI-side trigger:
 
 Transition timeline:
 
-1. VIEW-1 click → emits `set-state('split', 4500)` **immediately**.
-2. VIEW-2 begins and runs for up to 4500ms (or until user skip).
-3. On either exit, VIEW-3 entry emits `focus(storedImageId)` (no `set-state`).
+1. VIEW-1 click → emits `set-state('split', 4500)` **and**
+   `focus(storedImageId)` together, **immediately**.
+2. VIEW-2 begins and runs for up to 4500ms (or until user skip). Project's
+   camera lerps toward `storedImageId` for the duration of the morph.
+3. On either exit, VIEW-3 entry emits `focus(storedImageId)` again as an
+   idempotent re-assertion (no `set-state`).
 
 Both exit paths produce the **same** deterministic emission sequence; only the
 timing of step 3 varies. Project's response is project's own deterministic
@@ -512,12 +521,14 @@ VIEW-2 can end via two equivalent UI triggers:
 Both triggers result in the same deterministic emission at VIEW-3 entry:
 
 ```
-focus(storedImageId)            // no set-state — split morph already in flight
+focus(storedImageId)            // idempotent re-assertion — no set-state,
+                                // focus was already emitted at the click
 ```
 
-Only the *moment* of VIEW-3 entry varies between the two triggers. If the
-user skips early, the camera lands on the stored image while project's morph
-is still finishing — project handles that gracefully on its side.
+Only the *moment* of VIEW-3 entry varies between the two triggers. The
+camera target was bound at click time, so project is already converging on
+`storedImageId` regardless of when (or whether) VIEW-3 re-asserts it; the
+re-assertion is a defensive confirmation, not a first-time binding.
 
 ### Constraints
 

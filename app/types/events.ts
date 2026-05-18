@@ -38,12 +38,19 @@ export interface HistoryJumpEvent extends BaseEvent {
   toImageId: ImageId
 }
 
+export interface OverviewConfirmEvent extends BaseEvent {
+  type: 'overview_confirm'
+  imageId: ImageId
+  historyIndex: number
+}
+
 export type InteractionEvent =
   | ViewAdvanceEvent
   | CentralActivateEvent
   | HistoryStepBackEvent
   | HistoryStepForwardEvent
   | HistoryJumpEvent
+  | OverviewConfirmEvent
 
 export type InteractionEventType = InteractionEvent['type']
 
