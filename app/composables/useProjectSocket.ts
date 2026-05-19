@@ -104,9 +104,19 @@ export function useProjectSocket() {
     return true
   }
 
+  function setMask(opacity: number, duration = 0): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-mask', opacity, duration)
+      return false
+    }
+    socket.emit('message', { type: 'set-mask', payload: { opacity, duration } })
+    return true
+  }
+
   function isConnected(): boolean {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, isConnected }
 }

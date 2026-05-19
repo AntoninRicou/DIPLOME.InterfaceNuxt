@@ -3,221 +3,241 @@ import { useInteractionStore } from '~/stores/interaction'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
 
 const store = useInteractionStore()
+
+const MAX_BRANCH_DEPTH = 10
+
+function dotStateAt(i: number): 'current' | 'past' | 'future' | 'empty' {
+  if (i >= store.navigationHistory.length) return 'empty'
+  if (i === store.historyIndex) return 'current'
+  if (i < store.historyIndex) return 'past'
+  return 'future'
+}
+
+function onDotClick(i: number) {
+  if (i < store.navigationHistory.length) store.jumpToHistory(i)
+}
 </script>
 
 <template>
   <section class="view view-3">
-    <aside class="sidebar">
-      <header>
-        <span class="tag">VIEW-3</span>
-        <h1>relational</h1>
-      </header>
-
-      <div class="block">
-        <p class="label">central image</p>
-        <p class="value">{{ store.activeCentralImageId ?? '—' }}</p>
-      </div>
-
-      <div class="block">
-        <p class="label">
-          branch ({{ store.historyIndex + 1 }}/{{ store.navigationHistory.length }}, max 10)
-        </p>
-        <ol class="history">
-          <li
-            v-for="(id, i) in store.navigationHistory"
-            :key="id + ':' + i"
-            :class="{
-              current: i === store.historyIndex,
-              future: i > store.historyIndex,
-            }"
-            tabindex="0"
-            @click="store.jumpToHistory(i)"
-            @keydown.enter="store.jumpToHistory(i)"
-            @keydown.space.prevent="store.jumpToHistory(i)"
-          >
-            {{ id }}
-          </li>
-        </ol>
-        <div class="nav-buttons">
-          <button
-            class="back"
-            :disabled="!store.historyHasPrevious"
-            @click="store.stepBackInHistory()"
-          >
-            ← back
-          </button>
-          <button
-            class="back"
-            :disabled="!store.historyHasForward"
-            @click="store.stepForwardInHistory()"
-          >
-            forward →
-          </button>
-        </div>
-      </div>
-
-      <div v-if="store.overviewEligible" class="block overview-eligible">
-        <p class="label">overview eligible</p>
-        <p class="hint">
-          You've reached {{ store.historyIndex + 1 }} images in this branch.
-          Confirm to switch project into OVERVIEW mode.
-        </p>
-        <button class="confirm" @click="store.confirmOverview()">
-          confirm overview
-        </button>
-      </div>
-
-      <div v-else-if="store.overviewConfirmed" class="block overview-confirmed">
-        <p class="label">overview active</p>
-        <p class="hint">
-          Terminal state. Clicks still log on the wire but no longer drive progression.
-        </p>
-      </div>
-    </aside>
+    <div
+      v-if="store.view2ExitReason === 'auto'"
+      class="reveal-overlay"
+      aria-hidden="true"
+    />
 
     <div class="grid">
-      <RelationComponent component-id="component_1" label="component-1" />
-      <RelationComponent component-id="component_2" label="component-2" />
-      <RelationComponent component-id="component_3" label="component-3" />
-      <RelationComponent component-id="component_4" label="component-4" />
+      <RelationComponent component-id="component_1" label="component-1" position="tl" />
+      <RelationComponent component-id="component_2" label="component-2" position="tr" />
+      <RelationComponent component-id="component_3" label="component-3" position="bl" />
+      <RelationComponent component-id="component_4" label="component-4" position="br" />
     </div>
+
+    <div class="center-anchor" aria-hidden="true">
+      <p class="anchor-label">central</p>
+      <p class="anchor-id">{{ store.activeCentralImageId ?? '—' }}</p>
+    </div>
+
+    <div v-if="store.overviewEligible" class="overview-control">
+      <button class="confirm" @click="store.confirmOverview()">
+        confirm overview ({{ store.historyIndex + 1 }}/{{ MAX_BRANCH_DEPTH }})
+      </button>
+    </div>
+    <div v-else-if="store.overviewConfirmed" class="overview-control confirmed">
+      overview active
+    </div>
+
+    <nav class="history-strip" aria-label="navigation history">
+      <button
+        class="strip-nav"
+        :disabled="!store.historyHasPrevious"
+        aria-label="step back"
+        @click="store.stepBackInHistory()"
+      >◄</button>
+      <ol class="strip-dots">
+        <li
+          v-for="i in MAX_BRANCH_DEPTH"
+          :key="i"
+          :class="dotStateAt(i - 1)"
+          :tabindex="i - 1 < store.navigationHistory.length ? 0 : -1"
+          :title="store.navigationHistory[i - 1] ?? ''"
+          @click="onDotClick(i - 1)"
+          @keydown.enter="onDotClick(i - 1)"
+          @keydown.space.prevent="onDotClick(i - 1)"
+        >
+          <span class="dot" />
+        </li>
+      </ol>
+      <button
+        class="strip-nav"
+        :disabled="!store.historyHasForward"
+        aria-label="step forward"
+        @click="store.stepForwardInHistory()"
+      >►</button>
+    </nav>
   </section>
 </template>
 
 <style scoped>
 .view-3 {
-  min-height: 100vh;
+  position: relative;
+  width: 100vw;
+  height: 100vh;
   background: #0d0d10;
   color: #e8e8e8;
-  display: grid;
-  grid-template-columns: 260px 1fr;
-}
-.sidebar {
-  border-right: 1px solid #2a2a2e;
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+  overflow: hidden;
   font-family: monospace;
-  font-size: 0.8rem;
 }
-.tag {
-  display: inline-block;
-  font-size: 0.7rem;
-  letter-spacing: 0.1em;
-  padding: 2px 8px;
-  border: 1px solid #444;
-  border-radius: 2px;
-  color: #aaa;
+
+@keyframes reveal-fade {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
-h1 {
-  font-weight: 300;
-  font-family: sans-serif;
-  margin: 0.5rem 0 0;
+.reveal-overlay {
+  position: fixed;
+  inset: 0;
+  background: #1a1a1a;
+  z-index: 100;
+  pointer-events: none;
+  animation: reveal-fade 400ms ease-out forwards;
 }
-.block .label {
-  font-size: 0.7rem;
-  color: #777;
-  margin: 0 0 0.25rem;
-}
-.value {
-  margin: 0;
-  word-break: break-all;
-  color: #d0d0d0;
-}
-.history {
-  margin: 0 0 0.5rem;
-  padding: 0;
-  list-style: none;
-  max-height: 200px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.history li {
-  color: #888;
-  padding: 2px 4px;
-  word-break: break-all;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-.history li:hover,
-.history li:focus {
-  border-color: #444;
-  outline: none;
-  background: #16161a;
-}
-.history li.current {
-  color: #fff;
-  background: #1c1c22;
-  border-color: #555;
-}
-.history li.future {
-  color: #555;
-}
-.nav-buttons {
-  display: flex;
-  gap: 0.35rem;
-  margin-top: 0.25rem;
-}
-.back {
-  padding: 0.35rem 0.6rem;
-  background: transparent;
-  color: #ccc;
-  border: 1px solid #5a5a66;
-  font-family: monospace;
-  font-size: 0.7rem;
-  cursor: pointer;
-}
-.back:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.back:not(:disabled):hover {
-  background: #1e1e24;
-  border-color: #888;
-}
+
 .grid {
+  position: absolute;
+  inset: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
   gap: 1px;
-  background: #2a2a2e;
-  padding: 1px;
-  height: 100vh;
-  overflow: hidden;
+  background: #1a1a1e;
 }
-.overview-eligible {
-  border-left: 2px solid #9b6ecf;
-  padding-left: 0.6rem;
+
+.center-anchor {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  pointer-events: none;
+  text-align: center;
+  padding: 0.55rem 0.95rem;
+  background: rgba(13, 13, 16, 0.85);
+  border: 1px solid #3a3a44;
+  min-width: 9rem;
 }
-.overview-eligible .hint,
-.overview-confirmed .hint {
-  font-family: sans-serif;
-  font-size: 0.75rem;
-  color: #aaa;
-  margin: 0 0 0.5rem;
-  line-height: 1.4;
+.anchor-label {
+  font-size: 0.6rem;
+  letter-spacing: 0.18em;
+  color: #6a6a72;
+  margin: 0 0 0.25rem;
+  text-transform: uppercase;
+}
+.anchor-id {
+  font-size: 0.82rem;
+  color: #e8e8e8;
+  margin: 0;
+  word-break: break-all;
+}
+
+.overview-control {
+  position: absolute;
+  bottom: 4.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
 }
 .confirm {
-  padding: 0.5rem 0.8rem;
-  background: #9b6ecf;
-  color: #0d0d10;
+  padding: 0.5rem 0.95rem;
+  background: rgba(155, 110, 207, 0.12);
+  color: #cda6f0;
   border: 1px solid #9b6ecf;
   font-family: monospace;
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
   cursor: pointer;
-  font-weight: 600;
+  transition: background 150ms ease-out;
 }
 .confirm:hover {
-  background: #b58cda;
-  border-color: #b58cda;
+  background: rgba(155, 110, 207, 0.28);
 }
-.overview-confirmed {
-  border-left: 2px solid #5a5a66;
-  padding-left: 0.6rem;
-  opacity: 0.7;
+.confirmed {
+  font-size: 0.62rem;
+  color: #888;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #5a5a66;
+  background: rgba(13, 13, 16, 0.7);
+}
+
+.history-strip {
+  position: absolute;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.8rem;
+  background: rgba(13, 13, 16, 0.72);
+  border: 1px solid #2a2a2e;
+}
+.strip-nav {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-family: monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.15rem 0.35rem;
+}
+.strip-nav:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.strip-nav:not(:disabled):hover {
+  color: #ddd;
+}
+.strip-dots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.strip-dots li {
+  padding: 0.25rem;
+  outline: none;
+  cursor: pointer;
+}
+.strip-dots li.empty {
+  cursor: default;
+}
+.strip-dots li .dot {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4a4a52;
+  transition: background 150ms ease-out, transform 150ms ease-out, border-color 150ms ease-out;
+  box-sizing: border-box;
+}
+.strip-dots li.past .dot { background: #8a8a92; }
+.strip-dots li.current .dot {
+  background: #e8e8e8;
+  transform: scale(1.45);
+}
+.strip-dots li.future .dot { background: #3a3a42; }
+.strip-dots li.empty .dot {
+  background: transparent;
+  border: 1px solid #2a2a2e;
+  width: 5px;
+  height: 5px;
+}
+.strip-dots li:not(.empty):hover .dot,
+.strip-dots li:not(.empty):focus .dot {
+  background: #c0c0c8;
 }
 </style>

@@ -7,6 +7,7 @@ import { useProjectSocket } from '~/composables/useProjectSocket'
 const VIEW_ORDER: ViewState[] = ['VIEW_1', 'VIEW_2', 'VIEW_3']
 const SPLIT_TRANSITION_MS = 4500
 const VIEW_2_AUTO_ADVANCE_MS = SPLIT_TRANSITION_MS
+const MASK_REVEAL_MS = 400
 const OVERVIEW_THRESHOLD = 10
 
 export const useInteractionStore = defineStore('interaction', () => {
@@ -23,6 +24,7 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   const view2AutoAdvanceMs = VIEW_2_AUTO_ADVANCE_MS
   const view2RemainingMs = ref(0)
+  const view2ExitReason = ref<'auto' | 'skip' | null>(null)
 
   let view2Timer: ReturnType<typeof setInterval> | null = null
   let view2EnteredAt = 0
@@ -54,7 +56,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     view2Timer = setInterval(() => {
       const elapsed = Date.now() - view2EnteredAt
       view2RemainingMs.value = Math.max(0, view2AutoAdvanceMs - elapsed)
-      if (view2RemainingMs.value <= 0) enterRelationalView()
+      if (view2RemainingMs.value <= 0) enterRelationalView('auto')
     }, 50)
   }
 
@@ -84,12 +86,14 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: currentView.value,
       clientTimestamp: Date.now(),
     })
+    projectSocket.setMask(1, 0)
     projectSocket.setState('split', SPLIT_TRANSITION_MS)
     projectSocket.focus(id)
   }
 
-  function enterRelationalView() {
+  function enterRelationalView(reason: 'auto' | 'skip' = 'auto') {
     if (currentView.value !== 'VIEW_2') return
+    view2ExitReason.value = reason
     stopView2Timer()
     if (activeCentralImageId.value && navigationHistory.value.length === 0) {
       navigationHistory.value.push(activeCentralImageId.value)
@@ -103,6 +107,7 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: currentView.value,
       clientTimestamp: Date.now(),
     })
+    projectSocket.setMask(0, reason === 'auto' ? MASK_REVEAL_MS : 0)
     if (activeCentralImageId.value) projectSocket.focus(activeCentralImageId.value)
   }
 
@@ -231,6 +236,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     overviewEligible,
     view2AutoAdvanceMs,
     view2RemainingMs,
+    view2ExitReason,
     isInView1,
     isInView2,
     isInView3,

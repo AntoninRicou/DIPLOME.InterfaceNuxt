@@ -191,9 +191,10 @@ render state** — it is a UI-only buffer that mirrors the in-flight `single
 
 | Interaction event                                                       | Wire emission                          | Resulting render state |
 | ----------------------------------------------------------------------- | -------------------------------------- | ---------------------- |
-| socket-register bootstrap or reconnect (no clicks yet, `imageClick = 0`) | `path-clear` + `set-state('single')`  | `single` (full reset)  |
-| first VIEW-1 click                                                      | `set-state('split', 4500)` + `focus(storedImageId)` | `single → split` (4500ms morph) |
-| VIEW-3 entry (timer or skip — morph already in flight)                  | `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change) |
+| socket-register bootstrap or reconnect (no clicks yet, `imageClick = 0`) | `path-clear` + `set-state('single')` + `set-mask(0, 0)` | `single` (full reset; mask transparent) |
+| first VIEW-1 click                                                      | `set-mask(1, 0)` + `set-state('split', 4500)` + `focus(storedImageId)` | `single → split` (4500ms morph, hidden behind opaque mask) |
+| VIEW-3 entry via timer (auto)                                           | `set-mask(0, 400)` + `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change; mask reveals over 400ms) |
+| VIEW-3 entry via skip                                                   | `set-mask(0, 0)` + `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change; instant cut to whatever frame project is on) |
 | VIEW-3 related-image click (`activateCentral`, pre-overview, pre-cap)   | `focus(newId)` + `path-segment(prevId, newId)`, prefixed by `path-truncate(historyIndex)` if mid-branch | `split` (no state change) |
 | VIEW-3 related-image click (`activateCentral`, at cap or post-overview) | post-overview: `focus(newId)` only — at cap: **nothing** on the wire | `split` (no state change; read-only) |
 | history nav (`stepBack` / `stepForward` / `jumpToHistory`)              | `focus(historicalId)`                  | `split` (no state change) |
@@ -273,11 +274,12 @@ skips VIEW-2 early, project's morph naturally truncates — no second
 ### Boot reset sequence
 
 On every `register` event between `interface_nuxt` and `project` (initial
-connect and reconnect), `interface_nuxt` emits the following pair, in
+connect and reconnect), `interface_nuxt` emits the following trio, in
 order:
 
 1. `path-clear`
 2. `set-state('single')`
+3. `set-mask(0, 0)`
 
 This is the canonical session-reset handshake. No aggregate `reset-session`
 wire verb exists; composition is sufficient because the wire vocabulary is
@@ -295,12 +297,15 @@ deliberately minimal and each constituent already carries clean semantics.
   clears any previous point highlight. This makes `set-state('single')`
   alone sufficient to reset camera + focus state without introducing a
   separate `focus-clear` directive.
+* `set-mask(0, 0)` snaps the project-side render mask to fully transparent
+  with no transition (see *VIEW-2 — RENDER MASK*). Defensive: ensures the
+  mask is not stuck visible from a prior session or a crashed transition.
 
-Ordering between the two emissions is cosmetic — the two subsystems
-(`pathTrace` and `stateManager`) are independent and do not interact —
-but `path-clear` fires first so the path wipe is visible before the
-layout transitions away from whatever rendered state preceded the
-reconnect.
+Ordering between the three emissions is cosmetic — the three subsystems
+(`pathTrace`, `stateManager`, and the render mask DOM element) are
+independent and do not interact — but the listed order is preferred so
+that the path wipe is visible before the layout transitions away from
+whatever rendered state preceded the reconnect.
 
 **Outcome of a hard refresh of `interface_nuxt`:**
 
@@ -499,8 +504,12 @@ When the first image is selected in VIEW-1:
 * the selection is stored in the interaction state
 * `imageClick` is incremented (0 → 1)
 * the system transitions immediately and permanently to VIEW-2
+* `project` receives `set-mask(1, 0)` — snapping the project-side render
+  mask to fully opaque so the morph kickoff frame is hidden (see
+  *VIEW-2 — RENDER MASK*). This MUST be emitted **before** `set-state`
+  in the same bundle; `socket.io-client` preserves emission order
 * `project` receives `set-state('split', 4500)` — kicking off a 4500ms
-  `single → split` morph **at the click moment**
+  `single → split` morph **at the click moment**, behind the opaque mask
 * `project` also receives `focus(storedImageId)` in the same emission
   bundle — the camera target is bound at click time so the morph and the
   camera convergence are co-causal with the user's selection
@@ -533,15 +542,19 @@ skip action. The skip is purely a UI-side trigger:
 
 Transition timeline:
 
-1. VIEW-1 click → emits `set-state('split', 4500)` **and**
-   `focus(storedImageId)` together, **immediately**.
+1. VIEW-1 click → emits `set-mask(1, 0)`, then `set-state('split', 4500)`,
+   then `focus(storedImageId)` — bundled, **immediately**, in that order.
+   The mask snaps to opaque first so the morph kickoff frame is hidden.
 2. VIEW-2 begins and runs for up to 4500ms (or until user skip). Project's
-   camera lerps toward `storedImageId` for the duration of the morph.
-3. On either exit, VIEW-3 entry emits `focus(storedImageId)` again as an
-   idempotent re-assertion (no `set-state`).
+   camera lerps toward `storedImageId` for the duration of the morph,
+   behind the opaque mask. The mask hides the spatial morph entirely.
+3. On exit, VIEW-3 entry emits `set-mask(0, duration)` and re-emits
+   `focus(storedImageId)`. `duration` differs by exit path:
+   * auto: `set-mask(0, 400)` — 400ms reveal of the settled split state.
+   * skip: `set-mask(0, 0)` — instant cut to whatever frame project is on.
 
-Both exit paths produce the **same** deterministic emission sequence; only the
-timing of step 3 varies. Project's response is project's own deterministic
+Both exit paths produce the **same** wire identity for `focus`; only the
+mask's `duration` differs. Project's response is project's own deterministic
 decision — if the morph is still in flight when VIEW-3 entry lands the
 camera, project handles the truncation internally.
 
@@ -575,28 +588,36 @@ there is one source of truth, and it lives in `interface_nuxt`.
 
 ### Exit conditions
 
-VIEW-2 can end via two equivalent UI triggers:
+VIEW-2 can end via two distinct UI triggers, which produce **different**
+mask emissions but identical `focus` emissions:
 
-* Automatic completion when the `SPLIT_TRANSITION_MS` timer elapses.
-* Optional user skip action in `interface_nuxt`.
+* Automatic completion when the `SPLIT_TRANSITION_MS` timer elapses — emits
+  `set-mask(0, 400)` (perceptual reveal) followed by
+  `focus(storedImageId)`.
+* Optional user skip action in `interface_nuxt` — emits `set-mask(0, 0)`
+  (instant cut) followed by `focus(storedImageId)`.
 
-Both triggers result in the same deterministic emission at VIEW-3 entry:
+The `focus` emission is identical on both paths and idempotent:
 
 ```
 focus(storedImageId)            // idempotent re-assertion — no set-state,
                                 // focus was already emitted at the click
 ```
 
-Only the *moment* of VIEW-3 entry varies between the two triggers. The
-camera target was bound at click time, so project is already converging on
-`storedImageId` regardless of when (or whether) VIEW-3 re-asserts it; the
-re-assertion is a defensive confirmation, not a first-time binding.
+Only the *moment* of VIEW-3 entry and the mask's `duration` differ between
+the two triggers. The camera target was bound at click time, so project is
+already converging on `storedImageId` regardless of when (or whether)
+VIEW-3 re-asserts it; the re-assertion is a defensive confirmation, not a
+first-time binding. See *VIEW-2 — RENDER MASK* for the full mask contract.
 
 ### Constraints
 
-* Skip does not alter the duration already on the wire.
+* Skip does not alter the `set-state('split', …)` duration already on the
+  wire — project's morph continues to its natural completion.
 * Skip does not affect `imageClick`.
 * Skip does not introduce any additional render state.
+* Skip does change the mask emission's `duration` (`0` instead of `400`),
+  which is a perceptual difference but not a render-state difference.
 * `interface_nuxt` owns `SPLIT_TRANSITION_MS`; the wire carries that value
   as the second argument to `set-state('split', …)`.
 * VIEW-2 is purely a visual / UX transition layer.
@@ -882,6 +903,134 @@ project-internal; `interface_nuxt` does not orchestrate it.
 
 ---
 
+## VIEW-2 — RENDER MASK
+
+VIEW-2 has a **project-side render mask** — a fullscreen DOM overlay
+rendered by `project` directly above its four canvas containers. It exists
+to physically hide the `single → split` morph during the VIEW-2 buffer
+phase, since `interface_nuxt` and `project` occupy separate viewports and
+an `interface_nuxt` DOM overlay cannot reach `project`'s canvas.
+
+The mask is **a perceptual veil only**:
+
+* DOM/CSS overlay (`<div id="render-mask">`), no WebGL, no shader
+* no participation in `project`'s render loop
+* no interaction with the state machine, point system, path renderer,
+  focus state, or any other project subsystem
+* opacity is the only animated property
+* zero spatial meaning
+
+This is the **second explicit project-side exception** to the "do not
+modify project" rule, alongside the path-rendering directive surface (see
+*VIEW-3 — PATH RENDERING*). Both exceptions are scoped tightly: pure
+rendering surfaces driven by explicit `interface_nuxt` directives, with no
+project-side interpretation, derivation, or interaction logic.
+
+### Wire vocabulary
+
+One directive, flowing from `interface_nuxt` to `project`:
+
+* `set-mask({ opacity, duration })` — animate the mask's opacity to the
+  given value over `duration` milliseconds. `opacity ∈ [0, 1]`,
+  `duration` is clamped to `>= 0`. When `duration === 0` the change is
+  instantaneous (no CSS transition).
+
+`opacity` and `duration` are the only values on the wire. Color, z-index,
+layout, positioning, and animation easing are project-internal rendering
+concerns. `interface_nuxt` is color-blind and easing-blind by design.
+
+### Emission rules
+
+`interface_nuxt` emits `set-mask` at exactly **four** moments:
+
+| Moment                                                    | Emission              | Effect                                                |
+| --------------------------------------------------------- | --------------------- | ----------------------------------------------------- |
+| socket-register (boot or reconnect)                       | `set-mask(0, 0)`      | Defensive: ensure mask is transparent on cold boot.   |
+| First VIEW-1 click, **before** `set-state('split', 4500)` | `set-mask(1, 0)`      | Snap mask to opaque, hide morph kickoff frame.        |
+| VIEW-3 entry via timer (auto path)                        | `set-mask(0, 400)`    | Fade reveal of settled split state over 400ms.        |
+| VIEW-3 entry via skip (user action)                       | `set-mask(0, 0)`      | Instant cut; user explicitly chose to bypass reveal.  |
+
+The reveal duration `400` is owned by `interface_nuxt` as the constant
+`MASK_REVEAL_MS`. It runs on the wire as `set-mask(0, 400)`; the constant
+itself is not on the wire.
+
+The ordering at the VIEW-1 click moment is **load-bearing**:
+
+* `set-mask(1, 0)` MUST be emitted **before** `set-state('split', 4500)`.
+* `socket.io-client` preserves emission order on a single connection, so
+  `project` applies the mask snap before it begins the morph. Without that
+  ordering the user would briefly see the morph kickoff frame.
+
+The skip exit path is **structurally different** from the auto exit:
+
+* Auto: `set-mask(0, 400)` — perceptual reveal.
+* Skip: `set-mask(0, 0)` — perceptual cut. Whatever frame `project` is
+  currently rendering becomes visible the moment the user clicks skip.
+
+Both paths preserve the same wire identity for `focus(storedImageId)` at
+VIEW-3 entry; only the `set-mask` emission's `duration` differs.
+
+### Synchronization
+
+There is **no coordinated synchronization** between the mask and the
+morph. Both timelines derive from the same `interface_nuxt`-owned constant
+`SPLIT_TRANSITION_MS = 4500`, which keys both the `set-state('split', …)`
+duration and the VIEW-2 auto-advance timer. The mask is snapped to opaque
+at click time and remains opaque until the auto-advance fires (at
+`SPLIT_TRANSITION_MS`) or the user skips. They cannot drift because there
+is nothing to coordinate.
+
+### Actions that do NOT emit `set-mask`
+
+* VIEW-3-internal actions (`activateCentral`, `stepBack`, `stepForward`,
+  `jumpToHistory`, `confirmOverview`) — the mask is not used inside
+  VIEW-3.
+* `enterRelationalView` other than as described above — only one mask
+  emission per VIEW-3 entry, at entry.
+* History navigation — emits **only** `focus(id)`, never `set-mask`.
+
+### Project-side rendering contract
+
+`project` exposes one DOM element, `<div id="render-mask">`, sibling to
+the four `<div id="container-*">` canvas containers. Default CSS:
+
+* `position: fixed; inset: 0` — covers the full viewport
+* `pointer-events: none` — never intercepts input
+* `z-index: 1000` — above all four canvases
+* `opacity: 0` — transparent by default
+* `background: #1a1a1a` — color chosen inside `project`
+
+On wire receipt of `set-mask(opacity, duration)`:
+
+* If `duration === 0`: set `transition: none`, then set `opacity` — change
+  is instantaneous.
+* If `duration > 0`: set `transition: opacity ${duration}ms linear`, force
+  a reflow (`void el.offsetWidth`), then set `opacity` — change animates.
+
+The forced reflow is required so the browser registers the new transition
+value before the opacity change; without it consecutive style assignments
+can be batched and the transition skipped.
+
+### Invariants
+
+* `set-mask` never touches `project`'s state machine, render loop, point
+  system, path renderer, or focus state. It is **purely a DOM style
+  mutation** on a single element.
+* The mask is **client-only visual state**. Not persisted on the server,
+  not in `localStorage`, not on the wire beyond the per-event directive.
+* Color and easing are project-internal. `interface_nuxt` only sends
+  `opacity` + `duration`.
+* `set-mask` does NOT participate in the deterministic render-state
+  pipeline (`set-state` + `focus` + path directives). It is a pure
+  perceptual overlay layered on top.
+* Boot handshake idempotency: `set-mask(0, 0)` at register is defensive —
+  it leaves the mask transparent regardless of prior state.
+* The mask is a **physical companion** to the interface-side VIEW-2
+  surface and VIEW-3 reveal overlay, which mask `interface_nuxt`'s own
+  viewport. The two surfaces are independent — each system masks itself.
+
+---
+
 # CURRENT DEVELOPMENT SCOPE
 
 Current phase:
@@ -891,12 +1040,23 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with one explicit exception**: the user-driven
-path-rendering directive surface inside `project` — `path-segment`,
-`path-truncate`, and the `pathTrace` primitive they drive — is the canonical
-visual path system and is permitted to evolve. The legacy `pathPlayer` /
-`simulatePath` machinery in `project` must remain untouched and unreferenced
-from `interface_nuxt`. See *VIEW-3 — PATH RENDERING*.
+Do not modify project, **with two explicit exceptions**:
+
+1. The user-driven path-rendering directive surface inside `project` —
+   `path-segment`, `path-truncate`, and the `pathTrace` primitive they
+   drive — is the canonical visual path system and is permitted to
+   evolve. The legacy `pathPlayer` / `simulatePath` machinery in
+   `project` must remain untouched and unreferenced from
+   `interface_nuxt`. See *VIEW-3 — PATH RENDERING*.
+2. The render-mask directive surface inside `project` — `set-mask`, the
+   `<div id="render-mask">` DOM element, and its CSS — is a perceptual
+   veil over project's canvas during the VIEW-2 buffer phase. It is a
+   pure DOM/CSS overlay with no render-loop, state-machine, or
+   interaction-logic participation. See *VIEW-2 — RENDER MASK*.
+
+Both exceptions are scoped tightly: pure rendering surfaces driven by
+explicit `interface_nuxt` directives. No project-side interpretation,
+derivation, or interaction logic is permitted inside either surface.
 
 At this stage:
 

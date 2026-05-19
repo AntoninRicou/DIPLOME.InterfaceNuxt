@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
+import { useDisperseLayout } from '~/composables/useDisperseLayout'
 
 const store = useInteractionStore()
 
@@ -7,6 +9,18 @@ const { data, pending, error } = await useFetch<{ total: number; ids: string[] }
   '/api/mapping',
   { query: { limit: 60 } },
 )
+
+const stage = ref<HTMLElement | null>(null)
+const ids = computed(() => data.value?.ids ?? [])
+const { positions } = useDisperseLayout(ids, stage)
+
+function cellStyle(id: string) {
+  const p = positions.value.get(id)
+  if (!p) return { opacity: 0 }
+  return {
+    transform: `translate3d(${p.x}px, ${p.y}px, 0) translate(-50%, -50%)`,
+  }
+}
 
 function onSelect(id: string) {
   store.selectImage(id)
@@ -24,13 +38,14 @@ function onSelect(id: string) {
     <div v-if="pending" class="status">loading…</div>
     <div v-else-if="error" class="status error">failed to load mapping</div>
 
-    <ul v-else class="grid" role="listbox">
+    <ul v-else ref="stage" class="disperse" role="listbox">
       <li
         v-for="id in data?.ids"
         :key="id"
         class="cell"
         role="option"
         tabindex="0"
+        :style="cellStyle(id)"
         @click="onSelect(id)"
         @keydown.enter="onSelect(id)"
         @keydown.space.prevent="onSelect(id)"
@@ -70,29 +85,37 @@ h1 {
   color: #888;
   margin: 0;
 }
-.grid {
+.disperse {
   list-style: none;
   padding: 0;
   margin: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 0.5rem;
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 10rem);
+  overflow: hidden;
 }
 .cell {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 140px;
   border: 1px solid #2a2a2e;
   background: #16161a;
-  padding: 0.75rem;
+  padding: 0.5rem 0.75rem;
   font-family: monospace;
   font-size: 0.75rem;
   color: #c0c0c0;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
+  will-change: transform;
+  pointer-events: auto;
 }
 .cell:hover,
 .cell:focus {
   background: #1e1e24;
   border-color: #5a5a66;
   outline: none;
+  z-index: 1;
 }
 .cell-id {
   word-break: break-all;
