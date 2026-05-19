@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
+import { view3Interpretations } from '~/view3/view3Interpretations'
 
 const props = defineProps<{
   componentId: string
@@ -8,6 +9,12 @@ const props = defineProps<{
   position?: 'tl' | 'tr' | 'bl' | 'br'
 }>()
 const store = useInteractionStore()
+
+const interpretation = computed(() => view3Interpretations[props.componentId])
+const interpretationActive = computed(() => store.view3InterpretationMode)
+// Panels are always centered in their quadrant; alignment in the data layer
+// is an optional override for the text within the panel itself.
+const panelAlign = computed(() => interpretation.value?.align ?? 'center')
 
 const centralImageId = computed(() => store.activeCentralImageId)
 
@@ -33,14 +40,22 @@ function onRelatedClick(id: string) {
 </script>
 
 <template>
-  <article class="rel" :data-position="position ?? 'tl'">
+  <article
+    class="rel"
+    :class="{ 'is-inert': interpretationActive }"
+    :data-position="position ?? 'tl'"
+  >
     <span class="quarter-tag">{{ label }}</span>
 
     <div v-if="!centralImageId" class="status">no central image</div>
     <div v-else-if="pending" class="status">querying…</div>
     <div v-else-if="error" class="status error">error</div>
 
-    <div v-else class="constellation">
+    <div
+      v-else
+      class="constellation"
+      :class="{ suppressed: interpretationActive }"
+    >
       <button
         v-for="(id, i) in cells"
         :key="id"
@@ -51,6 +66,15 @@ function onRelatedClick(id: string) {
         {{ id }}
       </button>
     </div>
+
+    <aside
+      v-if="interpretationActive && interpretation"
+      class="interpretation-panel"
+      :data-align="panelAlign"
+    >
+      <p class="panel-title">{{ interpretation.title }}</p>
+      <p class="panel-body">{{ interpretation.body }}</p>
+    </aside>
   </article>
 </template>
 
@@ -63,6 +87,15 @@ function onRelatedClick(id: string) {
 }
 .rel:hover {
   background: #16161c;
+}
+
+/* ── interpretation mode — structural inertness ──
+   Disables the interactive layer entirely. Hover selectors below never
+   match because the element no longer receives pointer events; cells'
+   reveal-on-hover, focus amplification, and clicks all go dormant by
+   construction rather than by per-state override. */
+.rel.is-inert {
+  pointer-events: none;
 }
 
 .quarter-tag {
@@ -98,6 +131,15 @@ function onRelatedClick(id: string) {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  transition: opacity 240ms ease-out, filter 240ms ease-out;
+}
+
+/* ── interpretation mode field suppression ──
+   single perceptual rule per container: pushed back as a background field. */
+.constellation.suppressed {
+  pointer-events: none;
+  opacity: 0.4;
+  filter: blur(1px);
 }
 
 .cell {
@@ -175,4 +217,39 @@ function onRelatedClick(id: string) {
 .rel[data-position="br"] .cell-2 { bottom: 10%; right: 52%; }
 .rel[data-position="br"] .cell-3 { bottom: 48%; right: 26%; }
 .rel[data-position="br"] .cell-4 { bottom: 60%; right: 58%; }
+
+/* ── interpretation overlay ──
+   Centered inside the quadrant. No chrome — text floats directly over the
+   suppressed field as a sharp semantic layer. Reuses the quadrant's own
+   coordinate system (the .rel positioning context). */
+.interpretation-panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  max-width: 18rem;
+  font-family: monospace;
+  pointer-events: none;
+  text-align: center;
+}
+.panel-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #888;
+}
+.panel-body {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  font-family: sans-serif;
+  color: #e8e8e8;
+}
+
+/* optional alignment override from the data layer; default is centered */
+.interpretation-panel[data-align="start"] { text-align: left; }
+.interpretation-panel[data-align="end"] { text-align: right; }
+.interpretation-panel[data-align="center"] { text-align: center; }
 </style>

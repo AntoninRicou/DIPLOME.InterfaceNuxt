@@ -33,7 +33,20 @@ function onDotClick(i: number) {
       <RelationComponent component-id="component_4" label="component-4" position="br" />
     </div>
 
-    <div class="center-anchor" aria-hidden="true">
+    <button
+      class="interpret-control"
+      :class="{ active: store.view3InterpretationMode }"
+      :aria-pressed="store.view3InterpretationMode"
+      @click="store.toggleView3Interpretation()"
+    >
+      interpret
+    </button>
+
+    <div
+      class="center-anchor"
+      :class="{ suppressed: store.view3InterpretationMode }"
+      aria-hidden="true"
+    >
       <p class="anchor-label">central</p>
       <p class="anchor-id">{{ store.activeCentralImageId ?? '—' }}</p>
     </div>
@@ -124,6 +137,14 @@ function onDotClick(i: number) {
   background: rgba(13, 13, 16, 0.85);
   border: 1px solid #3a3a44;
   min-width: 9rem;
+  transition: opacity 240ms ease-out, filter 240ms ease-out;
+}
+/* unified field suppression during interpretation mode — same rule as
+   .constellation.suppressed in RelationComponent so the central reference
+   recedes with the relational field as a single perceptual background. */
+.center-anchor.suppressed {
+  opacity: 0.4;
+  filter: blur(1px);
 }
 .anchor-label {
   font-size: 0.6rem;
@@ -145,6 +166,33 @@ function onDotClick(i: number) {
   left: 50%;
   transform: translateX(-50%);
   z-index: 12;
+}
+
+.interpret-control {
+  position: absolute;
+  top: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  padding: 0.45rem 0.95rem;
+  background: rgba(13, 13, 16, 0.7);
+  color: #888;
+  border: 1px solid #2a2a2e;
+  font-family: monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: lowercase;
+  cursor: pointer;
+  transition: background 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out;
+}
+.interpret-control:hover {
+  color: #ddd;
+  border-color: #5a5a66;
+}
+.interpret-control.active {
+  background: rgba(232, 232, 232, 0.92);
+  color: #0d0d10;
+  border-color: #e8e8e8;
 }
 .confirm {
   padding: 0.5rem 0.95rem;

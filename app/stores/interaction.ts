@@ -5,7 +5,7 @@ import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 import { useProjectSocket } from '~/composables/useProjectSocket'
 
 const VIEW_ORDER: ViewState[] = ['VIEW_1', 'VIEW_2', 'VIEW_3']
-const SPLIT_TRANSITION_MS = 4500
+const SPLIT_TRANSITION_MS = 10500
 const VIEW_2_AUTO_ADVANCE_MS = SPLIT_TRANSITION_MS
 const MASK_REVEAL_MS = 400
 const OVERVIEW_THRESHOLD = 10
@@ -21,6 +21,8 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   const imageClick = ref(0)
   const overviewConfirmed = ref(false)
+
+  const view3InterpretationMode = ref(false)
 
   const view2AutoAdvanceMs = VIEW_2_AUTO_ADVANCE_MS
   const view2RemainingMs = ref(0)
@@ -226,6 +228,10 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.focus(activeCentralImageId.value)
   }
 
+  function toggleView3Interpretation() {
+    view3InterpretationMode.value = !view3InterpretationMode.value
+  }
+
   return {
     currentView,
     navigationHistory,
@@ -249,5 +255,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     stepBackInHistory,
     stepForwardInHistory,
     jumpToHistory,
+    view3InterpretationMode,
+    toggleView3Interpretation,
   }
 })
