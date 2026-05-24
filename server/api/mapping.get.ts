@@ -15,9 +15,10 @@ async function loadIds(): Promise<string[]> {
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
-  const limit = Number(query.limit) > 0 ? Math.min(Number(query.limit), 500) : 60
-
+  const rawLimit = Number(query.limit)
   const ids = await loadIds()
+  const limit = rawLimit > 0 ? Math.min(rawLimit, ids.length) : ids.length
+
   return {
     total: ids.length,
     ids: ids.slice(0, limit),

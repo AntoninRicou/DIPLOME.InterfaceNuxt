@@ -50,7 +50,7 @@ function onSelect(id: string) {
         @keydown.enter="onSelect(id)"
         @keydown.space.prevent="onSelect(id)"
       >
-        <span class="cell-id">{{ id }}</span>
+        <AtlasThumb :id="id" fit="width" />
       </li>
     </ul>
   </section>
@@ -101,10 +101,6 @@ h1 {
   width: 140px;
   border: 1px solid #2a2a2e;
   background: #16161a;
-  padding: 0.5rem 0.75rem;
-  font-family: monospace;
-  font-size: 0.75rem;
-  color: #c0c0c0;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
   will-change: transform;
@@ -116,9 +112,6 @@ h1 {
   border-color: #5a5a66;
   outline: none;
   z-index: 1;
-}
-.cell-id {
-  word-break: break-all;
 }
 .status {
   padding: 1rem;

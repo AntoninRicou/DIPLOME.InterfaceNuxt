@@ -63,7 +63,7 @@ function onRelatedClick(id: string) {
         :title="id"
         @click="onRelatedClick(id)"
       >
-        {{ id }}
+        <AtlasThumb :id="id" fit="width" />
       </button>
     </div>
 
@@ -145,18 +145,9 @@ function onRelatedClick(id: string) {
 .cell {
   position: absolute;
   width: 5.4rem;
-  height: 5.4rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 0.4rem;
   border: 1px solid #2a2a2e;
   background: rgba(20, 20, 26, 0.7);
-  font-family: monospace;
-  font-size: 0.6rem;
-  color: #a8a8b0;
-  text-align: center;
-  word-break: break-all;
   cursor: pointer;
   opacity: 0.05;
   pointer-events: none;
@@ -164,8 +155,7 @@ function onRelatedClick(id: string) {
     opacity 260ms ease-out,
     transform 200ms ease-out,
     box-shadow 200ms ease-out,
-    border-color 200ms ease-out,
-    color 200ms ease-out;
+    border-color 200ms ease-out;
   box-sizing: border-box;
 }
 

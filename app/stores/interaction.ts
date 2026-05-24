@@ -5,8 +5,8 @@ import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 import { useProjectSocket } from '~/composables/useProjectSocket'
 
 const VIEW_ORDER: ViewState[] = ['VIEW_1', 'VIEW_2', 'VIEW_3']
-const SPLIT_TRANSITION_MS = 10500
-const VIEW_2_AUTO_ADVANCE_MS = SPLIT_TRANSITION_MS
+const SPLIT_MORPH_MS = 500
+const VIEW_2_AUTO_ADVANCE_MS = 10500
 const MASK_REVEAL_MS = 400
 const OVERVIEW_THRESHOLD = 10
 
@@ -91,7 +91,7 @@ export const useInteractionStore = defineStore('interaction', () => {
       clientTimestamp: Date.now(),
     })
     projectSocket.setMask(1, 0)
-    projectSocket.setState('split', SPLIT_TRANSITION_MS)
+    projectSocket.setState('split', SPLIT_MORPH_MS)
     projectSocket.focus(id)
   }
 
