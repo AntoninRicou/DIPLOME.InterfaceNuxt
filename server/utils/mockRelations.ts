@@ -10,6 +10,7 @@ export interface UmapPoint {
 export interface UmapDataset {
   componentId: string
   points: UmapPoint[]
+  byId: Map<string, UmapPoint>
 }
 
 const cache = new Map<string, UmapDataset>()
@@ -39,7 +40,11 @@ export async function loadUmapDataset(componentId: string): Promise<UmapDataset 
     const raw = await readFile(path, 'utf8')
     const parsed = JSON.parse(raw) as UmapPoint[] | UmapFileWrapper
     const points: UmapPoint[] = Array.isArray(parsed) ? parsed : (parsed.points ?? [])
-    const dataset: UmapDataset = { componentId, points }
+    const byId = new Map<string, UmapPoint>()
+    for (const p of points) {
+      if (typeof p?.id === 'string') byId.set(p.id, p)
+    }
+    const dataset: UmapDataset = { componentId, points, byId }
     cache.set(componentId, dataset)
     return dataset
   } catch {
@@ -47,38 +52,29 @@ export async function loadUmapDataset(componentId: string): Promise<UmapDataset 
   }
 }
 
-function hashString(s: string): number {
-  let h = 2166136261
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return h >>> 0
-}
-
-function mulberry32(seed: number) {
-  return function () {
-    seed |= 0
-    seed = (seed + 0x6d2b79f5) | 0
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-// Mock proximity: random pick, deterministic by (componentId, centralImageId).
-// To be replaced with real Euclidean nearest-neighbor on (x, y) coordinates.
-// Endpoint surface stays unchanged.
+// Euclidean k-nearest-neighbor on (x, y), per-dataset. Ordering is invariant
+// to per-dataset scale, so no cross-dataset normalization is needed. Returns
+// [] if the centralImageId is not in this dataset — a routine case, since
+// the four quadrant datasets do not share id populations.
 export function pickRelations(
   dataset: UmapDataset,
   centralImageId: string,
   count = 8,
 ): string[] {
-  const rng = mulberry32(hashString(dataset.componentId) ^ hashString(centralImageId))
-  const candidates = dataset.points.filter((p) => p.id !== centralImageId).map((p) => p.id)
-  for (let i = candidates.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
-    ;[candidates[i], candidates[j]] = [candidates[j]!, candidates[i]!]
+  const center = dataset.byId.get(centralImageId)
+  if (!center) return []
+
+  const cx = center.x
+  const cy = center.y
+  const distances: Array<{ id: string; d2: number }> = []
+  for (const p of dataset.points) {
+    if (p.id === centralImageId) continue
+    if (typeof p.x !== 'number' || typeof p.y !== 'number') continue
+    if (Number.isNaN(p.x) || Number.isNaN(p.y)) continue
+    const dx = p.x - cx
+    const dy = p.y - cy
+    distances.push({ id: p.id, d2: dx * dx + dy * dy })
   }
-  return candidates.slice(0, count)
+  distances.sort((a, b) => a.d2 - b.d2)
+  return distances.slice(0, count).map((d) => d.id)
 }
