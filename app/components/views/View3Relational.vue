@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useInteractionStore } from '~/stores/interaction'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
+import CentralImage from '~/components/CentralImage.vue'
 
 const store = useInteractionStore()
 
@@ -65,8 +66,11 @@ function onDotClick(i: number) {
       :class="{ suppressed: store.view3InterpretationMode }"
       aria-hidden="true"
     >
-      <p class="anchor-label">central</p>
-      <p class="anchor-id">{{ store.activeCentralImageId ?? '—' }}</p>
+      <CentralImage
+        :ids="store.centralStack"
+        :active-index="store.centralStackActiveIndex"
+        :expanded="store.overviewConfirmed"
+      />
     </div>
 
     <div v-if="store.overviewEligible" class="overview-control">
@@ -150,11 +154,8 @@ function onDotClick(i: number) {
   transform: translate(-50%, -50%);
   z-index: 10;
   pointer-events: none;
-  text-align: center;
-  padding: 0.55rem 0.95rem;
-  background: rgba(13, 13, 16, 0.85);
-  border: 1px solid #3a3a44;
-  min-width: 9rem;
+  width: 22vmin;
+  height: 22vmin;
   transition: opacity 240ms ease-out, filter 240ms ease-out;
 }
 /* unified field suppression during interpretation mode — same rule as
@@ -163,19 +164,6 @@ function onDotClick(i: number) {
 .center-anchor.suppressed {
   opacity: 0.4;
   filter: blur(1px);
-}
-.anchor-label {
-  font-size: 0.6rem;
-  letter-spacing: 0.18em;
-  color: #6a6a72;
-  margin: 0 0 0.25rem;
-  text-transform: uppercase;
-}
-.anchor-id {
-  font-size: 0.82rem;
-  color: #e8e8e8;
-  margin: 0;
-  word-break: break-all;
 }
 
 .overview-control {

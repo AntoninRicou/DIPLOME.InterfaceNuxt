@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
+import CentralImage from '~/components/CentralImage.vue'
 
 const store = useInteractionStore()
 
@@ -10,8 +11,9 @@ const remainingSeconds = computed(() => Math.ceil(store.view2RemainingMs / 1000)
 <template>
   <section class="view-2">
     <div class="content">
-      <p class="label">selected image</p>
-      <p class="id">{{ store.activeCentralImageId ?? '—' }}</p>
+      <div class="central-slot">
+        <CentralImage :ids="store.centralStack" :active-index="store.centralStackActiveIndex" />
+      </div>
 
       <p class="placeholder">
         Entering a relational space.
@@ -49,20 +51,10 @@ const remainingSeconds = computed(() => Math.ceil(store.view2RemainingMs / 1000)
   max-width: 520px;
   padding: 2rem;
 }
-.label {
-  font-family: monospace;
-  font-size: 0.7rem;
-  color: #777;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  margin: 0 0 0.5rem;
-}
-.id {
-  font-family: monospace;
-  font-size: 0.95rem;
-  color: #d0d0d0;
-  margin: 0 0 2.5rem;
-  word-break: break-all;
+.central-slot {
+  width: 280px;
+  height: 280px;
+  margin: 0 auto 2.5rem;
 }
 .placeholder {
   font-size: 0.95rem;

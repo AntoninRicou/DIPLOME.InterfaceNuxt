@@ -19,6 +19,29 @@ export const useInteractionStore = defineStore('interaction', () => {
   const historyIndex = ref(-1)
   const activeCentralImageId = ref<ImageId | null>(null)
 
+  // Visual deck used by `CentralImage`. Mirrors `navigationHistory` (the
+  // bounded mutable active branch), with a VIEW-2 fallback to the just-
+  // selected image while `navigationHistory` is still empty.
+  //
+  // - history nav (stepBack/stepForward/jumpToHistory) does NOT mutate
+  //   `navigationHistory`; the component lifts `centralStackActiveIndex`
+  //   (= historyIndex) to the top z-index so the active image visually
+  //   comes back on top while the others remain staggered behind.
+  // - new mid-branch selection truncates `navigationHistory` forward
+  //   and appends — `centralStack` reflects that automatically, matching
+  //   the `path-truncate` analogue on the project-side path.
+  //
+  // Interface-only — never on the wire.
+  const centralStack = computed<ImageId[]>(() => {
+    if (navigationHistory.value.length > 0) return navigationHistory.value
+    if (activeCentralImageId.value) return [activeCentralImageId.value]
+    return []
+  })
+  const centralStackActiveIndex = computed<number>(() => {
+    if (navigationHistory.value.length > 0) return historyIndex.value
+    return 0
+  })
+
   const imageClick = ref(0)
   const overviewConfirmed = ref(false)
 
@@ -244,6 +267,8 @@ export const useInteractionStore = defineStore('interaction', () => {
     navigationHistory,
     historyIndex,
     activeCentralImageId,
+    centralStack,
+    centralStackActiveIndex,
     imageClick,
     overviewConfirmed,
     overviewEligible,
