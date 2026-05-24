@@ -274,12 +274,13 @@ skips VIEW-2 early, project's morph naturally truncates — no second
 ### Boot reset sequence
 
 On every `register` event between `interface_nuxt` and `project` (initial
-connect and reconnect), `interface_nuxt` emits the following trio, in
-order:
+connect and reconnect), `interface_nuxt` emits the following four
+directives, in order:
 
 1. `path-clear`
 2. `set-state('single')`
 3. `set-mask(0, 0)`
+4. `set-canvas-bg(store.canvasBackground)`
 
 This is the canonical session-reset handshake. No aggregate `reset-session`
 wire verb exists; composition is sufficient because the wire vocabulary is
@@ -300,12 +301,18 @@ deliberately minimal and each constituent already carries clean semantics.
 * `set-mask(0, 0)` snaps the project-side render mask to fully transparent
   with no transition (see *VIEW-2 — RENDER MASK*). Defensive: ensures the
   mask is not stuck visible from a prior session or a crashed transition.
+* `set-canvas-bg(store.canvasBackground)` synchronizes project's canvas
+  background to the interface-side store value (see *CANVAS BACKGROUND*).
+  The interface is the authoritative owner; on every register the current
+  store value is re-emitted so a freshly-connected project lands on the
+  correct background regardless of its prior state.
 
-Ordering between the three emissions is cosmetic — the three subsystems
-(`pathTrace`, `stateManager`, and the render mask DOM element) are
-independent and do not interact — but the listed order is preferred so
-that the path wipe is visible before the layout transitions away from
-whatever rendered state preceded the reconnect.
+Ordering between the four emissions is cosmetic — the four subsystems
+(`pathTrace`, `stateManager`, the render mask DOM element, and the
+`<body>` `data-canvas-bg` attribute) are independent and do not interact —
+but the listed order is preferred so that the path wipe is visible before
+the layout transitions away from whatever rendered state preceded the
+reconnect.
 
 **Outcome of a hard refresh of `interface_nuxt`:**
 
@@ -1031,6 +1038,100 @@ can be batched and the transition skipped.
 
 ---
 
+## CANVAS BACKGROUND
+
+VIEW-3 exposes a user-facing toggle to swap project's canvas background
+between two presentation modes — `'black'` and `'gradient'`. The actual
+backgrounds live in `project`'s CSS; `interface_nuxt` only sends an
+explicit mode directive.
+
+The background swap is **a perceptual presentation toggle only**:
+
+* CSS rules selecting on `body[data-canvas-bg="..."]`, no WebGL, no shader
+* no participation in `project`'s render loop
+* no interaction with the state machine, point system, path renderer,
+  focus state, or any other project subsystem
+* the only mutation is a single DOM `data-canvas-bg` attribute on `<body>`
+* zero spatial meaning
+
+This is the **third explicit project-side exception** to the "do not
+modify project" rule, alongside the path-rendering directive surface (see
+*VIEW-3 — PATH RENDERING*) and the render-mask directive surface (see
+*VIEW-2 — RENDER MASK*). All three exceptions are scoped tightly: pure
+rendering surfaces driven by explicit `interface_nuxt` directives, with no
+project-side interpretation, derivation, or interaction logic.
+
+### Wire vocabulary
+
+One directive, flowing from `interface_nuxt` to `project`:
+
+* `set-canvas-bg({ mode })` — set `body[data-canvas-bg]` to the given mode.
+  `mode ∈ { 'black', 'gradient' }`. Unknown modes are dropped with a warning.
+
+`mode` is the only value on the wire. Color, gradient stops, attachment,
+and any other style detail are project-internal rendering concerns. The
+set of available modes is fixed and defined by `project`'s CSS;
+`interface_nuxt` only references modes by name.
+
+### Emission rules
+
+`interface_nuxt` emits `set-canvas-bg` at:
+
+| Moment                                       | Emission                              | Effect                                       |
+| -------------------------------------------- | ------------------------------------- | -------------------------------------------- |
+| socket-register (boot or reconnect)          | `set-canvas-bg(store.canvasBackground)` | Sync project to interface-side store value. |
+| User clicks `black` or `gradient` in VIEW-3  | `set-canvas-bg(mode)`                 | Apply the user's selection.                  |
+
+The interface holds the authoritative value as `canvasBackground` in the
+store. On every register — including reconnects — the current store value
+is re-emitted so a freshly-connected project lands on the correct
+background regardless of its prior state.
+
+### Actions that do NOT emit `set-canvas-bg`
+
+* Any non-VIEW-3 action (VIEW-1 selection, VIEW-2 skip, etc.).
+* Any VIEW-3 progression action (`activateCentral`, `confirmOverview`,
+  history navigation, etc.) — the background is orthogonal to render
+  state and never changes implicitly.
+
+### Project-side rendering contract
+
+`project` selects on `body[data-canvas-bg="<mode>"]` in `style.css`. Each
+mode rule fully overrides `.container`'s background to the corresponding
+presentation. The default (no attribute set) falls back to `#000000` so a
+cold boot before any wire emission is well-defined.
+
+On wire receipt of `set-canvas-bg({ mode })`:
+
+* Validate `mode` is one of the accepted values; drop with a warning
+  otherwise.
+* Set `document.body.dataset.canvasBg = mode`. No render-loop interaction,
+  no style mutation beyond the attribute.
+
+### Invariants
+
+* `set-canvas-bg` never touches `project`'s state machine, render loop,
+  point system, path renderer, or focus state. It is **purely a DOM
+  attribute mutation** on `<body>`.
+* The background mode is **client-only visual state**. Not persisted on
+  the server, not in `localStorage`, not on the wire beyond the per-event
+  directive.
+* All presentation specifics (colors, gradients, attachment) are
+  project-internal. `interface_nuxt` only sends the mode name.
+* `set-canvas-bg` does NOT participate in the deterministic render-state
+  pipeline (`set-state` + `focus` + path directives). It is a pure
+  perceptual presentation toggle layered on top.
+* Boot handshake: `set-canvas-bg(store.canvasBackground)` is emitted at
+  every register so project's background reflects the interface store on
+  reconnect.
+* The set of available modes is **owned by project's CSS**. Adding a new
+  mode requires adding both a `body[data-canvas-bg="..."]` rule in
+  `project/src/style.css` AND extending the accepted-modes validation in
+  `project/src/commands.js`'s `setCanvasBg` AND `interface_nuxt`'s
+  `setCanvasBg` emitter typing.
+
+---
+
 # CURRENT DEVELOPMENT SCOPE
 
 Current phase:
@@ -1040,7 +1141,7 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with two explicit exceptions**:
+Do not modify project, **with three explicit exceptions**:
 
 1. The user-driven path-rendering directive surface inside `project` —
    `path-segment`, `path-truncate`, and the `pathTrace` primitive they
@@ -1053,10 +1154,16 @@ Do not modify project, **with two explicit exceptions**:
    veil over project's canvas during the VIEW-2 buffer phase. It is a
    pure DOM/CSS overlay with no render-loop, state-machine, or
    interaction-logic participation. See *VIEW-2 — RENDER MASK*.
+3. The canvas-background directive surface inside `project` —
+   `set-canvas-bg`, the `body[data-canvas-bg="..."]` selector rules in
+   `style.css`, and the `<body>` `data-canvas-bg` attribute — is a
+   perceptual presentation toggle for the canvases' backdrop. It is a
+   pure DOM/CSS overlay with no render-loop, state-machine, or
+   interaction-logic participation. See *CANVAS BACKGROUND*.
 
-Both exceptions are scoped tightly: pure rendering surfaces driven by
-explicit `interface_nuxt` directives. No project-side interpretation,
-derivation, or interaction logic is permitted inside either surface.
+All three exceptions are scoped tightly: pure rendering surfaces driven
+by explicit `interface_nuxt` directives. No project-side interpretation,
+derivation, or interaction logic is permitted inside any of them.
 
 At this stage:
 

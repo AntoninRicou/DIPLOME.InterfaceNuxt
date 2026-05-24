@@ -33,14 +33,32 @@ function onDotClick(i: number) {
       <RelationComponent component-id="component_4" label="component-4" position="br" />
     </div>
 
-    <button
-      class="interpret-control"
-      :class="{ active: store.view3InterpretationMode }"
-      :aria-pressed="store.view3InterpretationMode"
-      @click="store.toggleView3Interpretation()"
-    >
-      interpret
-    </button>
+    <div class="top-controls">
+      <button
+        class="bg-toggle"
+        :class="{ active: store.canvasBackground === 'black' }"
+        :aria-pressed="store.canvasBackground === 'black'"
+        @click="store.setCanvasBackground('black')"
+      >
+        black
+      </button>
+      <button
+        class="interpret-control"
+        :class="{ active: store.view3InterpretationMode }"
+        :aria-pressed="store.view3InterpretationMode"
+        @click="store.toggleView3Interpretation()"
+      >
+        interpret
+      </button>
+      <button
+        class="bg-toggle"
+        :class="{ active: store.canvasBackground === 'gradient' }"
+        :aria-pressed="store.canvasBackground === 'gradient'"
+        @click="store.setCanvasBackground('gradient')"
+      >
+        gradient
+      </button>
+    </div>
 
     <div
       class="center-anchor"
@@ -168,12 +186,18 @@ function onDotClick(i: number) {
   z-index: 12;
 }
 
-.interpret-control {
+.top-controls {
   position: absolute;
   top: 1.25rem;
   left: 50%;
   transform: translateX(-50%);
   z-index: 12;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.interpret-control,
+.bg-toggle {
   padding: 0.45rem 0.95rem;
   background: rgba(13, 13, 16, 0.7);
   color: #888;
@@ -185,11 +209,13 @@ function onDotClick(i: number) {
   cursor: pointer;
   transition: background 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out;
 }
-.interpret-control:hover {
+.interpret-control:hover,
+.bg-toggle:hover {
   color: #ddd;
   border-color: #5a5a66;
 }
-.interpret-control.active {
+.interpret-control.active,
+.bg-toggle.active {
   background: rgba(232, 232, 232, 0.92);
   color: #0d0d10;
   border-color: #e8e8e8;

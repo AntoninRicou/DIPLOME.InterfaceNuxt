@@ -114,9 +114,19 @@ export function useProjectSocket() {
     return true
   }
 
+  function setCanvasBg(mode: 'black' | 'gradient'): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-canvas-bg', mode)
+      return false
+    }
+    socket.emit('message', { type: 'set-canvas-bg', payload: { mode } })
+    return true
+  }
+
   function isConnected(): boolean {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, isConnected }
 }

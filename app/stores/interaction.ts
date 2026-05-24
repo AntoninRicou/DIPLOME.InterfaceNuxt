@@ -24,6 +24,8 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   const view3InterpretationMode = ref(false)
 
+  const canvasBackground = ref<'black' | 'gradient'>('black')
+
   const view2AutoAdvanceMs = VIEW_2_AUTO_ADVANCE_MS
   const view2RemainingMs = ref(0)
   const view2ExitReason = ref<'auto' | 'skip' | null>(null)
@@ -232,6 +234,11 @@ export const useInteractionStore = defineStore('interaction', () => {
     view3InterpretationMode.value = !view3InterpretationMode.value
   }
 
+  function setCanvasBackground(mode: 'black' | 'gradient') {
+    canvasBackground.value = mode
+    projectSocket.setCanvasBg(mode)
+  }
+
   return {
     currentView,
     navigationHistory,
@@ -257,5 +264,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     jumpToHistory,
     view3InterpretationMode,
     toggleView3Interpretation,
+    canvasBackground,
+    setCanvasBackground,
   }
 })
