@@ -14,6 +14,16 @@ export interface UmapDataset {
 
 const cache = new Map<string, UmapDataset>()
 
+// Each relation component pulls proximity from the same UMAP that the
+// corresponding canvas in project renders, so component-N and canvas-N
+// share a coordinate space.
+const COMPONENT_DATASET_FILES: Record<string, string> = {
+  component_1: 'projection_2d.json',
+  component_2: 'umap_book2.json',
+  component_3: 'umap_subjects_embeddings2.json',
+  component_4: 'umap_replay.json',
+}
+
 interface UmapFileWrapper {
   count?: number
   method?: string
@@ -22,7 +32,9 @@ interface UmapFileWrapper {
 
 export async function loadUmapDataset(componentId: string): Promise<UmapDataset | null> {
   if (cache.has(componentId)) return cache.get(componentId)!
-  const path = resolve(process.cwd(), 'assets/mock', `umap_${componentId}.json`)
+  const filename = COMPONENT_DATASET_FILES[componentId]
+  if (!filename) return null
+  const path = resolve(process.cwd(), 'assets/mock', filename)
   try {
     const raw = await readFile(path, 'utf8')
     const parsed = JSON.parse(raw) as UmapPoint[] | UmapFileWrapper

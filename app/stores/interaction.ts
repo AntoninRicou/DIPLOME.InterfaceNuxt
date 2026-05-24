@@ -24,7 +24,7 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   const view3InterpretationMode = ref(false)
 
-  const canvasBackground = ref<'black' | 'gradient'>('black')
+  const canvasBackground = ref<'black' | 'gradient'>('gradient')
 
   const view2AutoAdvanceMs = VIEW_2_AUTO_ADVANCE_MS
   const view2RemainingMs = ref(0)

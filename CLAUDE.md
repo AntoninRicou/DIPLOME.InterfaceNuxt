@@ -192,7 +192,7 @@ render state** — it is a UI-only buffer that mirrors the in-flight `single
 | Interaction event                                                       | Wire emission                          | Resulting render state |
 | ----------------------------------------------------------------------- | -------------------------------------- | ---------------------- |
 | socket-register bootstrap or reconnect (no clicks yet, `imageClick = 0`) | `path-clear` + `set-state('single')` + `set-mask(0, 0)` | `single` (full reset; mask transparent) |
-| first VIEW-1 click                                                      | `set-mask(1, 0)` + `set-state('split', 4500)` + `focus(storedImageId)` | `single → split` (4500ms morph, hidden behind opaque mask) |
+| first VIEW-1 click                                                      | `set-mask(1, 0)` + `set-state('split', 10500)` + `focus(storedImageId)` | `single → split` (10500ms morph, hidden behind opaque mask) |
 | VIEW-3 entry via timer (auto)                                           | `set-mask(0, 400)` + `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change; mask reveals over 400ms) |
 | VIEW-3 entry via skip                                                   | `set-mask(0, 0)` + `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change; instant cut to whatever frame project is on) |
 | VIEW-3 related-image click (`activateCentral`, pre-overview, pre-cap)   | `focus(newId)` + `path-segment(prevId, newId)`, prefixed by `path-truncate(historyIndex)` if mid-branch | `split` (no state change) |
@@ -515,7 +515,7 @@ When the first image is selected in VIEW-1:
   mask to fully opaque so the morph kickoff frame is hidden (see
   *VIEW-2 — RENDER MASK*). This MUST be emitted **before** `set-state`
   in the same bundle; `socket.io-client` preserves emission order
-* `project` receives `set-state('split', 4500)` — kicking off a 4500ms
+* `project` receives `set-state('split', 10500)` — kicking off a 10500ms
   `single → split` morph **at the click moment**, behind the opaque mask
 * `project` also receives `focus(storedImageId)` in the same emission
   bundle — the camera target is bound at click time so the morph and the
@@ -531,7 +531,7 @@ binding.
 ### Split transition duration
 
 The duration of the `single → split` morph is owned by `interface_nuxt` as a
-single constant (`SPLIT_TRANSITION_MS = 4500`). It is passed on the wire as
+single constant (`SPLIT_TRANSITION_MS = 10500`). It is passed on the wire as
 the second argument to `set-state('split', SPLIT_TRANSITION_MS)`, and the
 same constant drives VIEW-2's auto-advance timer. So both project's
 on-canvas morph and interface's UI buffer derive from one source of truth
@@ -549,10 +549,10 @@ skip action. The skip is purely a UI-side trigger:
 
 Transition timeline:
 
-1. VIEW-1 click → emits `set-mask(1, 0)`, then `set-state('split', 4500)`,
+1. VIEW-1 click → emits `set-mask(1, 0)`, then `set-state('split', 10500)`,
    then `focus(storedImageId)` — bundled, **immediately**, in that order.
    The mask snaps to opaque first so the morph kickoff frame is hidden.
-2. VIEW-2 begins and runs for up to 4500ms (or until user skip). Project's
+2. VIEW-2 begins and runs for up to 10500ms (or until user skip). Project's
    camera lerps toward `storedImageId` for the duration of the morph,
    behind the opaque mask. The mask hides the spatial morph entirely.
 3. On exit, VIEW-3 entry emits `set-mask(0, duration)` and re-emits
@@ -584,7 +584,7 @@ and the wire emits **nothing** during VIEW-2; the relevant
 `set-state('split', SPLIT_TRANSITION_MS)` already fired at the VIEW-1 click
 moment.
 
-The morph duration is owned by `interface_nuxt` (`SPLIT_TRANSITION_MS = 4500`).
+The morph duration is owned by `interface_nuxt` (`SPLIT_TRANSITION_MS = 10500`).
 The same constant drives both:
 
 * the duration argument sent on the wire to project, and
@@ -953,7 +953,7 @@ concerns. `interface_nuxt` is color-blind and easing-blind by design.
 | Moment                                                    | Emission              | Effect                                                |
 | --------------------------------------------------------- | --------------------- | ----------------------------------------------------- |
 | socket-register (boot or reconnect)                       | `set-mask(0, 0)`      | Defensive: ensure mask is transparent on cold boot.   |
-| First VIEW-1 click, **before** `set-state('split', 4500)` | `set-mask(1, 0)`      | Snap mask to opaque, hide morph kickoff frame.        |
+| First VIEW-1 click, **before** `set-state('split', 10500)` | `set-mask(1, 0)`      | Snap mask to opaque, hide morph kickoff frame.        |
 | VIEW-3 entry via timer (auto path)                        | `set-mask(0, 400)`    | Fade reveal of settled split state over 400ms.        |
 | VIEW-3 entry via skip (user action)                       | `set-mask(0, 0)`      | Instant cut; user explicitly chose to bypass reveal.  |
 
@@ -963,7 +963,7 @@ itself is not on the wire.
 
 The ordering at the VIEW-1 click moment is **load-bearing**:
 
-* `set-mask(1, 0)` MUST be emitted **before** `set-state('split', 4500)`.
+* `set-mask(1, 0)` MUST be emitted **before** `set-state('split', 10500)`.
 * `socket.io-client` preserves emission order on a single connection, so
   `project` applies the mask snap before it begins the morph. Without that
   ordering the user would briefly see the morph kickoff frame.
@@ -981,7 +981,7 @@ VIEW-3 entry; only the `set-mask` emission's `duration` differs.
 
 There is **no coordinated synchronization** between the mask and the
 morph. Both timelines derive from the same `interface_nuxt`-owned constant
-`SPLIT_TRANSITION_MS = 4500`, which keys both the `set-state('split', …)`
+`SPLIT_TRANSITION_MS = 10500`, which keys both the `set-state('split', …)`
 duration and the VIEW-2 auto-advance timer. The mask is snapped to opaque
 at click time and remains opaque until the auto-advance fires (at
 `SPLIT_TRANSITION_MS`) or the user skips. They cannot drift because there
