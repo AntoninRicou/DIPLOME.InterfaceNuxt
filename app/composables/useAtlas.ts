@@ -61,5 +61,11 @@ export function useAtlas() {
     return atlas.value?.images[id]?.aspect ?? 1
   }
 
-  return { atlas, getThumbStyle, getAspect }
+  function getNaturalSize(id: string): { width: number; height: number } | null {
+    const meta = atlas.value?.images[id]
+    if (!meta) return null
+    return { width: meta.width, height: meta.height }
+  }
+
+  return { atlas, getThumbStyle, getAspect, getNaturalSize }
 }

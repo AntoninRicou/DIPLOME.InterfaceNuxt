@@ -15,7 +15,7 @@ const ids = computed(() => data.value?.ids ?? [])
 const { positions } = useDisperseLayout(ids, stage)
 
 function cellStyle(id: string) {
-  const p = positions.value.get(id)
+  const p = positions.value.get(id) 
   if (!p) return { opacity: 0 }
   return {
     transform: `translate3d(${p.x}px, ${p.y}px, 0) translate(-50%, -50%)`,

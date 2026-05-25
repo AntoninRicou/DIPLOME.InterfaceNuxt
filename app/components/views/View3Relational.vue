@@ -20,7 +20,7 @@ function onDotClick(i: number) {
 </script>
 
 <template>
-  <section class="view view-3">
+  <section class="view view-3" :class="`bg-${store.canvasBackground}`">
     <div
       v-if="store.view2ExitReason === 'auto'"
       class="reveal-overlay"
@@ -41,7 +41,7 @@ function onDotClick(i: number) {
         :aria-pressed="store.canvasBackground === 'black'"
         @click="store.setCanvasBackground('black')"
       >
-        black
+        night
       </button>
       <button
         class="interpret-control"
@@ -119,9 +119,71 @@ function onDotClick(i: number) {
   width: 100vw;
   height: 100vh;
   background: #0d0d10;
+  background-attachment: fixed;
+  background-size: 100vw 100vh;
+  background-position: 0 0;
   color: #e8e8e8;
   overflow: hidden;
   font-family: monospace;
+}
+/* Grid cross — mirrors project's body::before (project/src/style.css L67-86)
+   so the 2×2 split reads as the same structural surface in both apps.
+   Project shows it whenever data-state is "split" or "overview"; in
+   interface_nuxt, VIEW-3 mounts iff project is in split or overview, so
+   the cross is unconditionally visible here. */
+.view-3::before {
+  content: "";
+  position: absolute;
+  inset: 1.5%;
+  pointer-events: none;
+  z-index: 5;
+  background:
+    linear-gradient(to bottom,
+      transparent calc(50% - 0.5px),
+      rgba(166, 154, 128, 0.85) calc(50% - 0.5px),
+      rgba(166, 154, 128, 0.85) calc(50% + 0.5px),
+      transparent calc(50% + 0.5px)),
+    linear-gradient(to right,
+      transparent calc(50% - 0.5px),
+      rgba(166, 154, 128, 0.85) calc(50% - 0.5px),
+      rgba(166, 154, 128, 0.85) calc(50% + 0.5px),
+      transparent calc(50% + 0.5px));
+}
+/* canvas-background modes mirror project's setting (project/src/style.css).
+   The 10-layer radial stacks are copied verbatim so both surfaces read as
+   one continuous atmosphere. RelationComponent panels have no background of
+   their own — the gradient shows through them directly. */
+.view-3.bg-black {
+  background:
+    radial-gradient(ellipse 22% 20% at 25% 25%, rgba(65, 60, 60, 0.45) 0%, rgba(65, 60, 60, 0) 100%),
+    radial-gradient(ellipse 18% 16% at 30% 18%, rgba(58, 55, 55, 0.4) 0%, rgba(58, 55, 55, 0) 100%),
+    radial-gradient(ellipse 24% 22% at 75% 25%, rgba(45, 50, 65, 0.55) 0%, rgba(45, 50, 65, 0) 100%),
+    radial-gradient(ellipse 18% 16% at 72% 32%, rgba(58, 58, 60, 0.4) 0%, rgba(58, 58, 60, 0) 100%),
+    radial-gradient(ellipse 22% 20% at 25% 75%, rgba(62, 58, 58, 0.45) 0%, rgba(62, 58, 58, 0) 100%),
+    radial-gradient(ellipse 18% 16% at 22% 68%, rgba(40, 45, 55, 0.5) 0%, rgba(40, 45, 55, 0) 100%),
+    radial-gradient(ellipse 22% 20% at 75% 75%, rgba(35, 42, 60, 0.6) 0%, rgba(35, 42, 60, 0) 100%),
+    radial-gradient(ellipse 18% 16% at 78% 80%, rgba(55, 53, 55, 0.4) 0%, rgba(55, 53, 55, 0) 100%),
+    radial-gradient(ellipse 28% 24% at 50% 50%, rgba(25, 30, 45, 0.45) 0%, rgba(25, 30, 45, 0) 100%),
+    linear-gradient(170deg, #1f2538 0%, #252a3a 35%, #363438 60%, #1c2030 85%, #14182a 100%);
+  background-attachment: fixed;
+  background-size: 100vw 100vh;
+  background-position: 0 0;
+}
+.view-3.bg-gradient {
+  background:
+    radial-gradient(ellipse 22% 20% at 25% 25%, rgba(238, 224, 196, 0.7) 0%, rgba(238, 224, 196, 0) 100%),
+    radial-gradient(ellipse 18% 16% at 30% 18%, rgba(220, 205, 175, 0.55) 0%, rgba(220, 205, 175, 0) 100%),
+    radial-gradient(ellipse 24% 22% at 75% 25%, rgba(185, 188, 192, 0.65) 0%, rgba(185, 188, 192, 0) 100%),
+    radial-gradient(ellipse 18% 16% at 72% 32%, rgba(200, 196, 188, 0.5) 0%, rgba(200, 196, 188, 0) 100%),
+    radial-gradient(ellipse 22% 20% at 25% 75%, rgba(215, 208, 192, 0.6) 0%, rgba(215, 208, 192, 0) 100%),
+    radial-gradient(ellipse 18% 16% at 22% 68%, rgba(175, 178, 180, 0.55) 0%, rgba(175, 178, 180, 0) 100%),
+    radial-gradient(ellipse 22% 20% at 75% 75%, rgba(165, 172, 182, 0.65) 0%, rgba(165, 172, 182, 0) 100%),
+    radial-gradient(ellipse 18% 16% at 78% 80%, rgba(195, 188, 175, 0.5) 0%, rgba(195, 188, 175, 0) 100%),
+    radial-gradient(ellipse 28% 24% at 50% 50%, rgba(170, 170, 168, 0.4) 0%, rgba(170, 170, 168, 0) 100%),
+    linear-gradient(170deg, #9aa6b0 0%, #a8a8a4 35%, #b0a896 60%, #8e96a0 85%, #6f7884 100%);
+  background-attachment: fixed;
+  background-size: 100vw 100vh;
+  background-position: 0 0;
 }
 
 @keyframes reveal-fade {
@@ -144,7 +206,8 @@ function onDotClick(i: number) {
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
   gap: 1px;
-  background: #1a1a1e;
+  /* No background — the gradient from .view-3 must pass through unfiltered.
+     The 1px gap reveals the gradient itself as the seam between quadrants. */
 }
 
 .center-anchor {

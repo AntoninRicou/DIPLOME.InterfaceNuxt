@@ -8,10 +8,61 @@ const props = withDefaults(defineProps<{
   expanded?: boolean
 }>(), { activeIndex: -1, expanded: false })
 
+const { getNaturalSize } = useAtlas()
+
 const RADIUS_VMIN = 22
 const SCALE_OTHER = 0.35
 const SCALE_ACTIVE = 0.5
-const STACK_STAGGER_VMIN = 1.0
+
+// vmin per source pixel. Picks the visual range each image renders in —
+// small atlas images stay small, large ones grow. Tune by feel.
+const VMIN_PER_PIXEL = 0.055
+// Fallback dimensions when atlas metadata isn't loaded yet (first frame).
+const FALLBACK_VMIN = 26
+// Per-image size variation. Source atlas has ~two-thirds of images pinned to
+// max-edge = 500px (Flickr normalization), so natural pixel dims collapse to
+// the same width or height across many images. A deterministic hash-derived
+// scale multiplier per image breaks this collision: identical aspect images
+// still render at noticeably different footprints. The same id always maps
+// to the same scale, so the variation is stable, not random per render.
+const SIZE_VARIATION_MIN = 0.85
+const SIZE_VARIATION_MAX = 1.25
+
+// Aspect-balance penalty. Square-ish images render full size; extreme
+// aspects render smaller overall so they don't visually dominate. Aspect
+// ratio is preserved (no distortion) — only the overall scale is reduced.
+// 0 = no penalty (extreme aspects still huge); higher = more aggressive.
+const ASPECT_PENALTY_STRENGTH = 0.15
+const ASPECT_PENALTY_FLOOR = 0.55
+
+function hashScale(id: string): number {
+  // FNV-1a 32-bit hash → uniform in [SIZE_VARIATION_MIN, SIZE_VARIATION_MAX].
+  let h = 2166136261
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  const u = (h >>> 0) / 0xffffffff
+  return SIZE_VARIATION_MIN + u * (SIZE_VARIATION_MAX - SIZE_VARIATION_MIN)
+}
+
+function aspectBalance(aspectRatio: number): number {
+  // Log-distance from a 1:1 square. 0 for square, ~1 for 2:1, ~2 for 4:1, ~3 for 8:1.
+  const logDist = Math.abs(Math.log2(aspectRatio))
+  return Math.max(ASPECT_PENALTY_FLOOR, 1 - logDist * ASPECT_PENALTY_STRENGTH)
+}
+
+function naturalDimsVmin(id: string) {
+  const size = getNaturalSize(id)
+  const scale = hashScale(id)
+  if (!size) return { width: FALLBACK_VMIN * scale, height: FALLBACK_VMIN * scale }
+  const balance = aspectBalance(size.width / size.height)
+  const k = VMIN_PER_PIXEL * scale * balance
+  return {
+    width: size.width * k,
+    height: size.height * k,
+  }
+}
 
 function layerStyle(i: number) {
   const n = props.ids.length
@@ -21,16 +72,19 @@ function layerStyle(i: number) {
   // nav-history order beneath it.
   const z = isActive ? n + 1 : i + 1
   const center = 'translate(-50%, -50%)'
+  const dims = naturalDimsVmin(props.ids[i]!)
+
   if (!props.expanded || n === 0) {
-    // Stagger offset by signed distance from active: older entries (below
-    // activeIdx) lean one way, newer entries (above) lean the other —
-    // so on stepBack the previous "top" image slides out of center while
-    // the new active glides in.
-    const distance = activeIdx - i
-    const offset = distance * STACK_STAGGER_VMIN
+    // Collapsed stack: every layer piles at the exact geometric center,
+    // each at its own natural size derived from the atlas pixel dims.
+    // A new active that's larger than the previous will cover them; a
+    // smaller active will let the older edges show. That asymmetry is
+    // intended — it IS the natural variation.
     return {
       zIndex: z,
-      transform: `${center} translate(${offset}vmin, ${offset}vmin) scale(1)`,
+      width: `${dims.width}vmin`,
+      height: `${dims.height}vmin`,
+      transform: `${center} scale(1)`,
     }
   }
   const angle = -Math.PI / 2 + (i / n) * Math.PI * 2
@@ -39,6 +93,8 @@ function layerStyle(i: number) {
   const scale = isActive ? SCALE_ACTIVE : SCALE_OTHER
   return {
     zIndex: z,
+    width: `${dims.width}vmin`,
+    height: `${dims.height}vmin`,
     transform: `${center} translate(${x}vmin, ${y}vmin) scale(${scale})`,
   }
 }
@@ -68,13 +124,17 @@ function layerStyle(i: number) {
   position: absolute;
   top: 50%;
   left: 50%;
-  height: 22vmin;
+  /* width/height set per-layer inline from the atlas pixel dimensions
+     (see layerStyle). Each image renders at its own natural footprint. */
   transform-origin: center center;
-  transition: transform 700ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  transition:
+    transform 700ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    width 700ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    height 700ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .layer :deep(.atlas-thumb) {
+  width: 100%;
   height: 100%;
-  width: auto;
   max-width: none;
   max-height: none;
 }

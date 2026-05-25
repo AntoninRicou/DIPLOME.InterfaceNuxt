@@ -934,6 +934,153 @@ project-internal; `interface_nuxt` does not orchestrate it.
 
 ---
 
+## VIEW-2 / VIEW-3 — CENTRAL IMAGE STACK
+
+The **central image stack** is the interface-side visualization of the
+user's currently active relational reference: the same `navigationHistory`
+prefix that the project-side path renders as edges, rendered here as a
+**deck of stacked thumbnails** centered on screen (VIEW-2) or between the
+four relation panels (VIEW-3). It is a purely DOM component owned by
+`interface_nuxt` — `project` is unaware of it, and nothing about it
+crosses the socket.
+
+The stack is the visual companion to *VIEW-3 — PATH RENDERING*: path
+draws the **edges** of `navigationHistory`, central stack draws the
+**nodes**. Both are derived views of the same underlying interaction
+memory.
+
+### Component surface
+
+One reusable component, `app/components/CentralImage.vue`, mounted in
+two places:
+
+* `View2Transition.vue` — centered in the VIEW-2 buffer screen, replacing
+  the earlier textual "selected image / id" block.
+* `View3Relational.vue` — at the existing `.center-anchor` slot, between
+  the four `RelationComponent` panels. Inherits the existing
+  `.suppressed` interpretation-mode rule (opacity + blur).
+
+The component is **presentational and dumb**: it accepts three props —
+`ids: ImageId[]`, `activeIndex: number`, `expanded: boolean` — and reads
+no store. The parent view binds those props to the store's derived
+values.
+
+Each id is rendered via `AtlasThumb` (the existing atlas-resolution
+component), giving every layer its **natural aspect ratio**, not a forced
+square. Layers are absolutely positioned and centered via
+`translate(-50%, -50%)`; the `.center-anchor` box only sets the centering
+reference — it does **not** clip the layers (no `overflow: hidden`), so
+images of different aspect ratios show their edges around each other.
+
+### Derived store state
+
+`centralStack` and `centralStackActiveIndex` are **computed** values
+exposed from the interaction store. There is no independent stack array
+or mutation helper — the stack is a view of the existing
+`navigationHistory` / `historyIndex` / `activeCentralImageId` triple:
+
+```ts
+centralStack = navigationHistory.length > 0
+  ? navigationHistory
+  : (activeCentralImageId ? [activeCentralImageId] : [])
+
+centralStackActiveIndex = navigationHistory.length > 0 ? historyIndex : 0
+```
+
+The VIEW-2 fallback exists because `navigationHistory` only receives its
+first push at VIEW-3 entry (see *NAVIGATION MEMORY* and the
+`enterRelationalView` flow in *VIEW-1*), but the central image needs to
+render during VIEW-2 right after the VIEW-1 selection. The fallback
+yields the single-element deck `[activeCentralImageId]` until the first
+real navigation entry exists.
+
+`imageClick` is **not** consulted. It remains the session-level
+selection counter; the stack is a structural view of the active branch,
+not of cumulative click history.
+
+### Rendering rules
+
+The component computes per-layer `transform` and `z-index` from
+`(i, activeIndex, ids.length, expanded)`. Three concerns are layered on
+top of each other:
+
+1. **Z-order.** The layer at `activeIndex` is elevated to `z = n + 1`
+   (top of the deck). All other layers keep their nav-history order
+   (`z = i + 1`). The active image is therefore **always visually on
+   top**, regardless of where it sits in `navigationHistory`.
+2. **Stack mode** (`expanded === false`). Each layer is offset by the
+   **signed** distance from active:
+   ```
+   distance = activeIndex - i
+   offset = distance * STACK_STAGGER_VMIN   // 1.0vmin
+   transform = translate(offset, offset)
+   ```
+   Older entries (below activeIndex) lean one way (down-right), newer
+   entries (above activeIndex) lean the other (up-left). Active sits at
+   the origin. The directional split is what makes step-back motion
+   visible: the previous active glides up-left while the new active
+   glides in to center.
+3. **Circle mode** (`expanded === true`, gated on
+   `store.overviewConfirmed`). Each layer is placed at
+   `angle_i = -π/2 + (i / n) * 2π`, radius `RADIUS_VMIN = 22`. The
+   active layer scales to `SCALE_ACTIVE = 0.5`, others to
+   `SCALE_OTHER = 0.35`. Ordering follows `centralStack` (= nav history)
+   index, starting at 12 o'clock and walking clockwise.
+
+A single CSS transition on `transform` (700ms, `cubic-bezier(0.22, 0.61,
+0.36, 1)`) drives every visual change: stagger reshuffles on history
+nav, deck-to-circle expansion on `confirmOverview()`, and circle staying
+put thereafter. Z-index changes are instantaneous (not transitionable)
+but coincide with transforms, so the active layer's rise to the top
+reads as a clean "card flip to front."
+
+### Behavior across interaction events
+
+| Interaction event                                     | Effect on `centralStack`              | Effect on `activeIndex`        |
+| ----------------------------------------------------- | -------------------------------------- | ------------------------------- |
+| VIEW-1 first click (`selectImage`)                    | `[id]` (VIEW-2 fallback)               | `0`                             |
+| VIEW-3 entry (`enterRelationalView`)                  | `[id]` (now via `navigationHistory`)   | `0`                             |
+| VIEW-3 related click (`activateCentral`, pre-cap, pre-overview) | append (and truncate forward if mid-branch) | new `historyIndex`         |
+| `stepBack` / `stepForward` / `jumpToHistory`          | unchanged (deck preserved)             | new `historyIndex` (active rises to top z) |
+| `activateCentral` at cap or post-overview             | unchanged                              | unchanged                       |
+| `confirmOverview`                                     | unchanged                              | unchanged (deck animates into circle)      |
+
+The two structural behaviors that came from the user-side requirement
+"the right image comes back to top on history nav" and "above images are
+removed when picking a new mid-branch image" are both **automatic
+consequences** of the derived design:
+
+* History nav doesn't touch `navigationHistory` (per *NAVIGATION MEMORY*
+  and *VIEW-3 — PATH RENDERING*), so the deck stays — only
+  `activeIndex` moves and the component re-renders with a new top
+  layer.
+* Mid-branch `activateCentral` already truncates `navigationHistory`
+  forward before appending; since `centralStack` *is* that array, the
+  forward entries disappear from the deck in the same tick the new
+  entry is added. This mirrors `path-truncate` on the wire and
+  preserves the "deck = active branch" invariant.
+
+### Invariants
+
+* `centralStack` always equals `navigationHistory` once VIEW-3 has been
+  entered; before that, it equals `[activeCentralImageId]` or `[]`.
+* `centralStackActiveIndex` always equals `historyIndex` once VIEW-3 has
+  been entered; before that, it is `0` (or unused if the stack is
+  empty).
+* The active image is **always** the visually top layer of the deck, in
+  every mode (stack or circle).
+* The deck is **client-only visual state**. Not persisted on the server,
+  not in `localStorage`, not on the wire. Page reload destroys it;
+  subsequent interactions rebuild it from `navigationHistory`.
+* No new socket vocabulary. `CentralImage` is a pure DOM view of
+  existing interaction state — it does **not** add a project-side
+  exception in the sense of *VIEW-3 — PATH RENDERING*,
+  *VIEW-2 — RENDER MASK*, or *CANVAS BACKGROUND*.
+* `imageClick` is independent and must not be conflated with the
+  stack's length or active index.
+
+---
+
 ## VIEW-2 — RENDER MASK
 
 VIEW-2 has a **project-side render mask** — a fullscreen DOM overlay

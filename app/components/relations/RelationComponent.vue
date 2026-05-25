@@ -81,12 +81,11 @@ function onRelatedClick(id: string) {
 <style scoped>
 .rel {
   position: relative;
-  background: #131316;
+  /* No background of its own — the panel is embedded directly in the
+     VIEW-3 atmospheric backdrop (project's gradient stack, mirrored in
+     View3Relational). Spatial separation comes from the grid seams and
+     the cells themselves, not a solid panel fill. */
   overflow: hidden;
-  transition: background-color 180ms ease-out;
-}
-.rel:hover {
-  background: #16161c;
 }
 
 /* ── interpretation mode — structural inertness ──
@@ -144,10 +143,13 @@ function onRelatedClick(id: string) {
 
 .cell {
   position: absolute;
-  width: 5.4rem;
-  padding: 0.4rem;
-  border: 1px solid #2a2a2e;
-  background: rgba(20, 20, 26, 0.7);
+  width: 12vmin;
+  /* No padding, no background — the AtlasThumb fills the cell edge to edge.
+     The transparent border preserves a 1px layout slot so hover's
+     border-color: #7a7a85 can fill in without shifting layout. */
+  padding: 0;
+  border: 0px solid transparent;
+  background: transparent;
   cursor: pointer;
   opacity: 0.05;
   pointer-events: none;
@@ -157,7 +159,40 @@ function onRelatedClick(id: string) {
     box-shadow 200ms ease-out,
     border-color 200ms ease-out;
   box-sizing: border-box;
+
+  /* ── Vector cascade ──
+     Each cell is anchored at the same per-quadrant base point (set by
+     .rel[data-position="*"] below) and then translated along a single
+     coupled vector (--dx, --dy) by index × step. This is a true diagonal
+     flow — no axis-biased grid. Hover scale composes with the translate
+     via --cell-scale so the position transform is never overwritten.
+
+     Step is split per axis (vw for horizontal, vh for vertical) so the
+     vector reaches the opposite corner of a non-square quadrant. It's
+     still one coupled motion per cell — both components grow together by
+     index — just calibrated to the quadrant's actual aspect ratio. With
+     14vw/14vh the cell-4 endpoint lands at ~84% of each axis from anchor,
+     close to the opposite corner across typical viewport aspects. */
+  --i: 0;
+  --dx: 0;
+  --dy: 0;
+  --step-x: 11vw;
+  --step-y: 11vh;
+  --cell-scale: 1;
+  transform:
+    translate(
+      calc(var(--i) * var(--step-x) * var(--dx)),
+      calc(var(--i) * var(--step-y) * var(--dy))
+    )
+    scale(var(--cell-scale));
 }
+
+/* Cascade stacking — innermost (most-relevant) suggestion sits on top;
+   outer cells fan out behind it like a deck of cards. */
+.cell-1 { z-index: 4; --i: 0; }
+.cell-2 { z-index: 3; --i: 1; }
+.cell-3 { z-index: 2; --i: 2; }
+.cell-4 { z-index: 1; --i: 3; }
 
 /* component hover → constellation reveals */
 .rel:hover .cell {
@@ -165,16 +200,17 @@ function onRelatedClick(id: string) {
   pointer-events: auto;
 }
 
-/* per-cell focus amplification */
+/* per-cell focus amplification — composes with the cascade translate via
+   --cell-scale so the cell's diagonal position is preserved. */
 .rel:hover .cell:hover,
 .rel:hover .cell:focus-visible {
   opacity: 1;
-  transform: scale(1.1);
+  --cell-scale: 1.1;
   border-color: #7a7a85;
   color: #f0f0f4;
   box-shadow: 0 0 22px 2px rgba(200, 200, 220, 0.18);
   outline: none;
-  z-index: 3;
+  z-index: 5;
 }
 
 /* siblings of focused cell soften */
@@ -183,30 +219,22 @@ function onRelatedClick(id: string) {
   opacity: 0.45;
 }
 
-/* ── constellation positions (asymmetric, mirrored per corner) ── */
-/* top-left quadrant */
-.rel[data-position="tl"] .cell-1 { top: 20%; left: 14%; }
-.rel[data-position="tl"] .cell-2 { top: 10%; left: 52%; }
-.rel[data-position="tl"] .cell-3 { top: 48%; left: 26%; }
-.rel[data-position="tl"] .cell-4 { top: 60%; left: 58%; }
+/* ── per-quadrant anchor + direction vector ──
+   Each quadrant anchors all four of its cells at a single base corner,
+   then the cascade direction (--dx, --dy) carries them along the quadrant's
+   anti-diagonal. The transform on .cell does the actual displacement via
+   index × step × direction. One coupled vector per cell — no axis-biased
+   positioning, no deformed grid.
 
-/* top-right quadrant — horizontal mirror */
-.rel[data-position="tr"] .cell-1 { top: 20%; right: 14%; }
-.rel[data-position="tr"] .cell-2 { top: 10%; right: 52%; }
-.rel[data-position="tr"] .cell-3 { top: 48%; right: 26%; }
-.rel[data-position="tr"] .cell-4 { top: 60%; right: 58%; }
-
-/* bottom-left quadrant — vertical mirror */
-.rel[data-position="bl"] .cell-1 { bottom: 20%; left: 14%; }
-.rel[data-position="bl"] .cell-2 { bottom: 10%; left: 52%; }
-.rel[data-position="bl"] .cell-3 { bottom: 48%; left: 26%; }
-.rel[data-position="bl"] .cell-4 { bottom: 60%; left: 58%; }
-
-/* bottom-right quadrant — both mirrors */
-.rel[data-position="br"] .cell-1 { bottom: 20%; right: 14%; }
-.rel[data-position="br"] .cell-2 { bottom: 10%; right: 52%; }
-.rel[data-position="br"] .cell-3 { bottom: 48%; right: 26%; }
-.rel[data-position="br"] .cell-4 { bottom: 60%; right: 58%; }
+       TL ─ anchor at TR corner → (-X, +Y) sweep toward BL
+       TR ─ anchor at TL corner → (+X, +Y) sweep toward BR
+       BL ─ anchor at BR corner → (-X, -Y) sweep toward TL
+       BR ─ anchor at BL corner → (+X, -Y) sweep toward TR
+*/
+.rel[data-position="tl"] .cell { top: 10%;    right: 10%;  --dx: -1; --dy:  1; }
+.rel[data-position="tr"] .cell { top: 10%;    left: 10%;   --dx:  1; --dy:  1; }
+.rel[data-position="bl"] .cell { bottom: 10%; right: 10%;  --dx: -1; --dy: -1; }
+.rel[data-position="br"] .cell { bottom: 10%; left: 10%;   --dx:  1; --dy: -1; }
 
 /* ── interpretation overlay ──
    Centered inside the quadrant. No chrome — text floats directly over the
