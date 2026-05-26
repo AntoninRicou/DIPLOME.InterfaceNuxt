@@ -1008,24 +1008,34 @@ top of each other:
    (top of the deck). All other layers keep their nav-history order
    (`z = i + 1`). The active image is therefore **always visually on
    top**, regardless of where it sits in `navigationHistory`.
-2. **Stack mode** (`expanded === false`). Each layer is offset by the
-   **signed** distance from active:
-   ```
-   distance = activeIndex - i
-   offset = distance * STACK_STAGGER_VMIN   // 1.0vmin
-   transform = translate(offset, offset)
-   ```
-   Older entries (below activeIndex) lean one way (down-right), newer
-   entries (above activeIndex) lean the other (up-left). Active sits at
-   the origin. The directional split is what makes step-back motion
-   visible: the previous active glides up-left while the new active
-   glides in to center.
+2. **Stack mode** (`expanded === false`). Every layer piles at the
+   **exact geometric center** via `translate(-50%, -50%) scale(1)`. The
+   active sits on top via z-index; older layers sit underneath at full
+   opacity with no positional offset. History nav and new activations do
+   not displace any layer — only the z-index rotation moves the active
+   to the top. Peek-out around the active is driven entirely by
+   per-image dimensions (item 4), not by a stagger animation.
 3. **Circle mode** (`expanded === true`, gated on
    `store.overviewConfirmed`). Each layer is placed at
    `angle_i = -π/2 + (i / n) * 2π`, radius `RADIUS_VMIN = 22`. The
    active layer scales to `SCALE_ACTIVE = 0.5`, others to
    `SCALE_OTHER = 0.35`. Ordering follows `centralStack` (= nav history)
    index, starting at 12 o'clock and walking clockwise.
+4. **Per-image natural dimensions.** Each layer is sized from its source
+   pixel dims in the atlas metadata, scaled by a single
+   `VMIN_PER_PIXEL` factor with two stable per-image modulations:
+   * a **hash-derived size variation** keyed off the image id — breaks
+     the visual collision created by the source atlas normalizing most
+     images to a 500px max edge (so two portraits with identical aspect
+     no longer render at identical size);
+   * an **aspect-balance penalty** that reduces the overall scale of
+     extreme-aspect images (no aspect distortion), so ribbons don't
+     visually dominate squares.
+   Both modulations are deterministic — same image id always yields the
+   same footprint. Same-aspect images therefore don't collapse to
+   identical visual sizes, and peek-out between stacked layers in stack
+   mode is a structural consequence of these dimensions, not an
+   animation effect.
 
 A single CSS transition on `transform` (700ms, `cubic-bezier(0.22, 0.61,
 0.36, 1)`) drives every visual change: stagger reshuffles on history
@@ -1078,6 +1088,66 @@ consequences** of the derived design:
   *VIEW-2 — RENDER MASK*, or *CANVAS BACKGROUND*.
 * `imageClick` is independent and must not be conflated with the
   stack's length or active index.
+
+---
+
+## VIEW-3 — RELATION CASCADE
+
+Inside each `RelationComponent`, the four candidate suggestion cells lay
+out as a **vector cascade along the quadrant's anti-diagonal** — not a
+list, grid, or scattered constellation. This is the layout *inside* the
+2×2 quadrant grid defined in *VIEW-3 — COMPONENT LAYOUT*.
+
+### Vector model
+
+```text
+cell_position = anchor + index × step × direction_vector
+```
+
+* **anchor** — one base corner per quadrant, set via one `top|bottom` +
+  one `left|right` value. Cell-1 (innermost suggestion) sits here.
+* **direction_vector** — `(--dx, --dy)` in `(±1, ±1)` set per
+  `data-position`, so each quadrant's cascade points along its
+  anti-diagonal toward the opposite corner.
+* **step** — split per axis (`--step-x` in `vw`, `--step-y` in `vh`) so
+  the vector reaches the opposite corner of a non-square quadrant. The
+  motion is still **one coupled vector per cell** — both axes advance
+  together by index — just calibrated to the quadrant's aspect ratio.
+* **index** — `--i` from 0 to 3 per cell.
+
+The cell transform is
+`translate(i × step_x × dx, i × step_y × dy) scale(var(--cell-scale))`.
+Hover focus composes via `--cell-scale` so the cascade position is never
+overwritten by focus state. Tuning the cascade across all four quadrants
+is done from one set of variables on `.cell` — no per-cell
+hand-positioning.
+
+### Latent → focal grammar
+
+Preserved on top of the cascade:
+
+* **Field default**: cells at near-zero opacity, pointer-events off — a
+  quiet latent layer over the backdrop.
+* **Component hover**: cells fade in and re-enable interaction.
+* **Cell focus** (`:hover` or `:focus-visible`): focused cell amplifies
+  via `--cell-scale` plus border-color + box-shadow; siblings soften via
+  `:has()`.
+
+### Cell rendering contract
+
+Cells contain `AtlasThumb` instances and render **bare** — no padding,
+no visible background, no visible border in the default state. A
+transparent 1px border preserves a layout slot so hover's `border-color`
+can fill in without shifting layout. Cell width is in `vmin`; cell
+height follows from each thumb's intrinsic aspect ratio.
+
+Z-index stacks **cell-1 frontmost, cell-4 backmost** — innermost
+(most-relevant) suggestion sits on top of the cascade; the focused cell
+elevates above all siblings while held.
+
+The server returns up to 8 related images per component; the client
+slices to 4 for the cascade. Increasing this number requires extending
+the cascade's per-cell index rules accordingly.
 
 ---
 
@@ -1307,6 +1377,78 @@ On wire receipt of `set-canvas-bg({ mode })`:
   `project/src/style.css` AND extending the accepted-modes validation in
   `project/src/commands.js`'s `setCanvasBg` AND `interface_nuxt`'s
   `setCanvasBg` emitter typing.
+
+---
+
+## VIEW-3 — VISUAL CONTINUITY WITH PROJECT
+
+`interface_nuxt`'s surface is composed to read as **one continuous field
+with project**, not as a separate UI floating over project's canvas.
+Several structural decisions support this — the atmospheric backdrop is
+shared across all three views, the grid cross is VIEW-3-specific (it
+mirrors project's split/overview marker), and a global viewport reset
+keeps the surface flush. All are **presentational invariants**, not
+visual polish.
+
+### Atmospheric backdrop mirrored from project
+
+Project's two `body[data-canvas-bg="..."]` rules — `black` and `gradient`
+— are mirrored into `interface_nuxt` as **two global unscoped utility
+classes in `app.vue`**: `.bg-black` and `.bg-gradient`. The 10-layer
+multi-radial gradient stacks are copied verbatim from
+`project/src/style.css`, along with `background-attachment: fixed`,
+`background-size: 100vw 100vh`, and `background-position: 0 0`.
+
+All three views opt in by applying the class on their root element:
+
+| View    | Class binding                                  | Behavior                                              |
+| ------- | ---------------------------------------------- | ----------------------------------------------------- |
+| VIEW-1  | hardcoded `bg-gradient`                        | always day (selection screen, before any toggle).     |
+| VIEW-2  | hardcoded `bg-gradient`                        | always day (one-shot transition buffer, no toggle).   |
+| VIEW-3  | dynamic `bg-${store.canvasBackground}`         | toggleable via VIEW-3's `night`/`gradient` buttons.   |
+
+The same `setCanvasBackground` store action that mutates VIEW-3's class
+binding also emits the `set-canvas-bg` wire directive to project (see
+*CANVAS BACKGROUND*), so both `interface_nuxt` and `project` switch
+modes in lockstep from one state source.
+
+Specificity caveat: because the gradient classes are **global and
+unscoped**, any scoped `background: ...` rule on a view's root element
+will silently win against them (Vue scoped styles add a data-attribute
+that bumps specificity). Views must therefore **not** declare a scoped
+`background` on the root they apply `.bg-*` to — set color, padding,
+transitions, etc. there, but leave `background` to the global class.
+
+Consequence on VIEW-3 specifically: the `.grid` container and every
+`RelationComponent` panel have **no background of their own**. Adding
+any fill — even a translucent gap color or a hover lift — tints the
+entire surface and breaks the continuity. Spatial separation between
+quadrants comes from the grid cross (below) and the cells themselves,
+not panel fills.
+
+If project's gradient values change in `style.css`, the two app.vue
+classes must update with them. This is the single point of duplication;
+it exists because the two systems must visually agree as one
+atmosphere.
+
+### Grid cross mirrored from project
+
+`.view-3::before` reproduces project's `body::before` cross — two 1px
+`linear-gradient` lines crossing at 50%/50%, inset 1.5% from viewport
+edges, in project's exact stroke color. The cross is unconditionally
+visible in VIEW-3 because VIEW-3 only ever mounts while project is in
+`split` or `overview` (the same conditions project gates its own cross
+on). The 2×2 component split then aligns pixel-for-pixel with project's
+canvas seams.
+
+### Global viewport reset
+
+`app.vue` declares an unscoped global style that zeroes
+`html` / `body` / `#__nuxt` margin and padding and sets
+`overflow: hidden`. Without it, the browser's default 8px body margin
+pushes the viewport-sized VIEW-3 surface past the viewport, producing a
+16px scroll range on each axis. The reset is global because the issue
+is global — any page using `100vw / 100vh` is affected.
 
 ---
 

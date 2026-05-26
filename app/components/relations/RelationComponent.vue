@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import { view3Interpretations } from '~/view3/view3Interpretations'
 
@@ -37,6 +37,38 @@ const cells = computed(() => (data.value?.related ?? []).slice(0, 4))
 function onRelatedClick(id: string) {
   store.activateCentral(id)
 }
+
+// ── Cascade reveal direction ──
+// Determined on each mouseenter from where the cursor crossed the
+// quadrant border. 'forward' = innermost (cell-1) appears first, cells
+// fan outward; 'reverse' = outermost (cell-4) appears first, cells flow
+// inward. The threshold is distance-from-anchor in normalized
+// coordinates: close to the anchor corner → reveal away from cursor
+// (forward); far from anchor → reveal toward cursor (reverse). This
+// gives the cascade a directional reading depending on entry side,
+// analogous to a clockwise/counter-clockwise sweep on a circular layout.
+const revealDirection = ref<'forward' | 'reverse'>('forward')
+
+function onMouseEnter(e: MouseEvent) {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const x = (e.clientX - rect.left) / rect.width
+  const y = (e.clientY - rect.top) / rect.height
+
+  // Each quadrant anchors cell-1 at a specific corner.
+  let ax = 0
+  let ay = 0
+  switch (props.position) {
+    case 'tl': ax = 1; ay = 0; break // TR corner of quadrant
+    case 'tr': ax = 0; ay = 0; break // TL corner
+    case 'bl': ax = 1; ay = 1; break // BR corner
+    case 'br': ax = 0; ay = 1; break // BL corner
+  }
+
+  // 0..√2; >0.7 ≈ past the diagonal midpoint, i.e. cursor entered from
+  // the outer half of the quadrant.
+  const dist = Math.hypot(x - ax, y - ay)
+  revealDirection.value = dist < 0.7 ? 'forward' : 'reverse'
+}
 </script>
 
 <template>
@@ -44,6 +76,8 @@ function onRelatedClick(id: string) {
     class="rel"
     :class="{ 'is-inert': interpretationActive }"
     :data-position="position ?? 'tl'"
+    :data-reveal="revealDirection"
+    @mouseenter="onMouseEnter"
   >
     <span class="quarter-tag">{{ label }}</span>
 
@@ -153,8 +187,12 @@ function onRelatedClick(id: string) {
   cursor: pointer;
   opacity: 0.05;
   pointer-events: none;
+  /* Opacity transition takes a per-cell delay (--reveal-delay) only on
+     the reveal direction; on un-hover the variable reverts to 0ms so all
+     cells fade out together. Other transitions stay un-delayed so cell
+     focus amplification fires immediately. */
   transition:
-    opacity 260ms ease-out,
+    opacity 260ms ease-out var(--reveal-delay, 0ms),
     transform 200ms ease-out,
     box-shadow 200ms ease-out,
     border-color 200ms ease-out;
@@ -194,10 +232,18 @@ function onRelatedClick(id: string) {
 .cell-3 { z-index: 2; --i: 2; }
 .cell-4 { z-index: 1; --i: 3; }
 
-/* component hover → constellation reveals */
+/* component hover → cascade reveals with per-cell stagger.
+   Direction depends on where the cursor crossed the quadrant border
+   (set by onMouseEnter): forward = innermost first, reverse = outermost
+   first. 80ms step yields ~240ms total stagger across 4 cells. */
 .rel:hover .cell {
   opacity: 0.85;
   pointer-events: auto;
+  /* Default = forward direction; overridden by data-reveal below. */
+  --reveal-delay: calc(var(--i) * 80ms);
+}
+.rel:hover[data-reveal="reverse"] .cell {
+  --reveal-delay: calc((3 - var(--i)) * 80ms);
 }
 
 /* per-cell focus amplification — composes with the cascade translate via

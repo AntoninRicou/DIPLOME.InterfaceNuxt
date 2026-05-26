@@ -1,32 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import CentralImage from '~/components/CentralImage.vue'
 
 const store = useInteractionStore()
-
-const remainingSeconds = computed(() => Math.ceil(store.view2RemainingMs / 1000))
 </script>
 
 <template>
-  <section class="view-2">
-    <div class="content">
-      <div class="central-slot">
-        <CentralImage :ids="store.centralStack" :active-index="store.centralStackActiveIndex" />
-      </div>
-
-      <p class="placeholder">
-        Entering a relational space.
-        The system is repositioning around your selection.
-        Hold a moment.
-      </p>
-
-      <p class="countdown">{{ remainingSeconds }}</p>
-
-      <button class="skip" @click="store.enterRelationalView('skip')">
-        skip
-      </button>
+  <section class="view-2 bg-gradient">
+    <div class="central-slot">
+      <CentralImage :ids="store.centralStack" :active-index="store.centralStackActiveIndex" />
     </div>
+
+    <p class="caption">
+      Four modes of proximity, each shaping relations differently:<br>
+      Mirror (visual), Trace (source), Shift (semantic), Replay (collaborative).
+    </p>
   </section>
 </template>
 
@@ -35,55 +23,40 @@ const remainingSeconds = computed(() => Math.ceil(store.view2RemainingMs / 1000)
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* Backdrop comes from the global `.bg-gradient` class (app.vue) — same
+   day gradient as VIEW-3 in gradient mode and as project. Hardcoded
+   rather than bound to store.canvasBackground because VIEW-2 only ever
+   shows once per session, before any toggle is reachable. */
 .view-2 {
   position: fixed;
   inset: 0;
-  background: #1a1a1a;
   color: #e8e8e8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 100;
   animation: view2-fade-in 200ms ease-out forwards;
 }
-.content {
-  text-align: center;
-  max-width: 520px;
-  padding: 2rem;
-}
+
+/* Image anchored at true viewport centre so it sits exactly where VIEW-3's
+   .center-anchor will land — no positional jump on transition. */
 .central-slot {
-  width: 280px;
-  height: 280px;
-  margin: 0 auto 2.5rem;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 22vmin;
+  height: 22vmin;
 }
-.placeholder {
+
+.caption {
+  position: absolute;
+  bottom: 3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: 36rem;
+  text-align: center;
   font-size: 0.95rem;
   line-height: 1.6;
-  color: #a0a0a0;
-  margin: 0 0 3rem;
-}
-.countdown {
-  font-family: monospace;
-  font-size: 3rem;
-  font-weight: 300;
-  color: #fff;
-  margin: 0 0 2rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-.skip {
-  background: transparent;
-  color: #777;
-  border: 1px solid #3a3a3e;
-  font-family: monospace;
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
-  padding: 0.45rem 1.2rem;
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
-}
-.skip:hover {
-  color: #ccc;
-  border-color: #666;
+  color: #2a2e36;
 }
 </style>

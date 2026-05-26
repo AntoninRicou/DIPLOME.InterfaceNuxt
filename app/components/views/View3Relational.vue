@@ -39,25 +39,28 @@ function onDotClick(i: number) {
         class="bg-toggle"
         :class="{ active: store.canvasBackground === 'black' }"
         :aria-pressed="store.canvasBackground === 'black'"
+        aria-label="night background"
         @click="store.setCanvasBackground('black')"
       >
-        night
+        <span class="dot dot-black" aria-hidden="true" />
       </button>
       <button
         class="interpret-control"
         :class="{ active: store.view3InterpretationMode }"
         :aria-pressed="store.view3InterpretationMode"
+        aria-label="toggle interpretation mode"
         @click="store.toggleView3Interpretation()"
       >
-        interpret
+        +
       </button>
       <button
         class="bg-toggle"
         :class="{ active: store.canvasBackground === 'gradient' }"
         :aria-pressed="store.canvasBackground === 'gradient'"
+        aria-label="day background"
         @click="store.setCanvasBackground('gradient')"
       >
-        gradient
+        <span class="dot dot-white" aria-hidden="true" />
       </button>
     </div>
 
@@ -118,10 +121,10 @@ function onDotClick(i: number) {
   position: relative;
   width: 100vw;
   height: 100vh;
-  background: #0d0d10;
-  background-attachment: fixed;
-  background-size: 100vw 100vh;
-  background-position: 0 0;
+  /* Background comes from the global .bg-black / .bg-gradient class in
+     app.vue, applied via :class="bg-${store.canvasBackground}". Setting
+     `background` here would win against the global class due to scoped
+     style specificity. */
   color: #e8e8e8;
   overflow: hidden;
   font-family: monospace;
@@ -149,42 +152,9 @@ function onDotClick(i: number) {
       rgba(166, 154, 128, 0.85) calc(50% + 0.5px),
       transparent calc(50% + 0.5px));
 }
-/* canvas-background modes mirror project's setting (project/src/style.css).
-   The 10-layer radial stacks are copied verbatim so both surfaces read as
-   one continuous atmosphere. RelationComponent panels have no background of
-   their own — the gradient shows through them directly. */
-.view-3.bg-black {
-  background:
-    radial-gradient(ellipse 22% 20% at 25% 25%, rgba(65, 60, 60, 0.45) 0%, rgba(65, 60, 60, 0) 100%),
-    radial-gradient(ellipse 18% 16% at 30% 18%, rgba(58, 55, 55, 0.4) 0%, rgba(58, 55, 55, 0) 100%),
-    radial-gradient(ellipse 24% 22% at 75% 25%, rgba(45, 50, 65, 0.55) 0%, rgba(45, 50, 65, 0) 100%),
-    radial-gradient(ellipse 18% 16% at 72% 32%, rgba(58, 58, 60, 0.4) 0%, rgba(58, 58, 60, 0) 100%),
-    radial-gradient(ellipse 22% 20% at 25% 75%, rgba(62, 58, 58, 0.45) 0%, rgba(62, 58, 58, 0) 100%),
-    radial-gradient(ellipse 18% 16% at 22% 68%, rgba(40, 45, 55, 0.5) 0%, rgba(40, 45, 55, 0) 100%),
-    radial-gradient(ellipse 22% 20% at 75% 75%, rgba(35, 42, 60, 0.6) 0%, rgba(35, 42, 60, 0) 100%),
-    radial-gradient(ellipse 18% 16% at 78% 80%, rgba(55, 53, 55, 0.4) 0%, rgba(55, 53, 55, 0) 100%),
-    radial-gradient(ellipse 28% 24% at 50% 50%, rgba(25, 30, 45, 0.45) 0%, rgba(25, 30, 45, 0) 100%),
-    linear-gradient(170deg, #1f2538 0%, #252a3a 35%, #363438 60%, #1c2030 85%, #14182a 100%);
-  background-attachment: fixed;
-  background-size: 100vw 100vh;
-  background-position: 0 0;
-}
-.view-3.bg-gradient {
-  background:
-    radial-gradient(ellipse 22% 20% at 25% 25%, rgba(238, 224, 196, 0.7) 0%, rgba(238, 224, 196, 0) 100%),
-    radial-gradient(ellipse 18% 16% at 30% 18%, rgba(220, 205, 175, 0.55) 0%, rgba(220, 205, 175, 0) 100%),
-    radial-gradient(ellipse 24% 22% at 75% 25%, rgba(185, 188, 192, 0.65) 0%, rgba(185, 188, 192, 0) 100%),
-    radial-gradient(ellipse 18% 16% at 72% 32%, rgba(200, 196, 188, 0.5) 0%, rgba(200, 196, 188, 0) 100%),
-    radial-gradient(ellipse 22% 20% at 25% 75%, rgba(215, 208, 192, 0.6) 0%, rgba(215, 208, 192, 0) 100%),
-    radial-gradient(ellipse 18% 16% at 22% 68%, rgba(175, 178, 180, 0.55) 0%, rgba(175, 178, 180, 0) 100%),
-    radial-gradient(ellipse 22% 20% at 75% 75%, rgba(165, 172, 182, 0.65) 0%, rgba(165, 172, 182, 0) 100%),
-    radial-gradient(ellipse 18% 16% at 78% 80%, rgba(195, 188, 175, 0.5) 0%, rgba(195, 188, 175, 0) 100%),
-    radial-gradient(ellipse 28% 24% at 50% 50%, rgba(170, 170, 168, 0.4) 0%, rgba(170, 170, 168, 0) 100%),
-    linear-gradient(170deg, #9aa6b0 0%, #a8a8a4 35%, #b0a896 60%, #8e96a0 85%, #6f7884 100%);
-  background-attachment: fixed;
-  background-size: 100vw 100vh;
-  background-position: 0 0;
-}
+/* Canvas-background modes live globally in app.vue (`.bg-black` /
+   `.bg-gradient`) — shared across all views. .view-3 just applies the
+   right class via `:class="bg-${store.canvasBackground}"`. */
 
 @keyframes reveal-fade {
   from { opacity: 1; }
@@ -237,16 +207,24 @@ function onDotClick(i: number) {
   z-index: 12;
 }
 
+/* 3-column grid spanning the full viewport width: side buttons live in
+   1fr columns and hug the centre; the interpret-control sits in the
+   auto-sized middle column, which is the viewport's geometric centre
+   regardless of how wide `night` / `gradient` text are. */
 .top-controls {
   position: absolute;
   top: 1.25rem;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
   z-index: 12;
-  display: flex;
-  gap: 0.5rem;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
+  gap: 0.5rem;
+  padding: 0 1rem;
 }
+.top-controls > .bg-toggle:first-of-type { justify-self: end; }
+.top-controls > .bg-toggle:last-of-type  { justify-self: start; }
 .interpret-control,
 .bg-toggle {
   padding: 0.45rem 0.95rem;
@@ -260,16 +238,72 @@ function onDotClick(i: number) {
   cursor: pointer;
   transition: background 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out;
 }
-.interpret-control:hover,
-.bg-toggle:hover {
-  color: #ddd;
-  border-color: #5a5a66;
+
+/* Background toggles are now circle-icon buttons. The colored dot itself
+   represents the mode (black = night, white = day); the button frame is
+   stripped so only the dot is visible. */
+.bg-toggle {
+  background: transparent;
+  border-color: transparent;
+  padding: 0;
+  width: 1.8rem;
+  height: 1.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.interpret-control.active,
-.bg-toggle.active {
-  background: rgba(232, 232, 232, 0.92);
-  color: #0d0d10;
-  border-color: #e8e8e8;
+.bg-toggle .dot {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  display: block;
+  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
+}
+.bg-toggle .dot-black {
+  background: #0d0d10;
+  /* Faint outline so the black dot stays visible against the black
+     background mode without merging into it. */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+.bg-toggle .dot-white {
+  background: #ffffff;
+  /* Same idea inverted — keeps the white dot legible on the bright day
+     gradient. */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+.bg-toggle:hover .dot {
+  transform: scale(1.15);
+}
+.bg-toggle.active .dot {
+  /* Active mode: outline ring around the dot to mark current selection. */
+  box-shadow: 0 0 0 1px currentColor, 0 0 0 3px rgba(255, 255, 255, 0.55);
+}
+.bg-toggle.active .dot-black { color: #0d0d10; }
+.bg-toggle.active .dot-white { color: #ffffff; }
+/* Interpret control is a single-glyph icon — no background, no border.
+   The glyph is centered in a square box via flex so its visual centre
+   sits on the button's geometric centre (typography baseline alone
+   would leave it slightly low). Color is deliberately dark enough to
+   read against the bright day gradient. */
+.interpret-control {
+  background: transparent;
+  border-color: transparent;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  line-height: 1;
+  letter-spacing: 0;
+  color: #1a1d24;
+}
+.interpret-control:hover {
+  color: #000;
+}
+.interpret-control.active {
+  color: #000;
 }
 .confirm {
   padding: 0.5rem 0.95rem;

@@ -28,7 +28,7 @@ function onSelect(id: string) {
 </script>
 
 <template>
-  <section class="view view-1">
+  <section class="view view-1 bg-gradient">
     <header class="view-header">
       <span class="tag">VIEW-1</span>
       <h1>disperse</h1>
@@ -61,7 +61,9 @@ function onSelect(id: string) {
   padding: 2rem;
   min-height: 100vh;
   color: #e8e8e8;
-  background: #0d0d10;
+  /* Background comes from the global .bg-gradient class in app.vue
+     (applied alongside view-1 on the section). Scoped specificity would
+     win against the global class otherwise. */
 }
 .view-header {
   margin-bottom: 1.5rem;
