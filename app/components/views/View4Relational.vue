@@ -28,10 +28,10 @@ function onDotClick(i: number) {
     />
 
     <div class="grid">
-      <RelationComponent component-id="component_1" label="component-1" position="tl" />
-      <RelationComponent component-id="component_2" label="component-2" position="tr" />
-      <RelationComponent component-id="component_3" label="component-3" position="bl" />
-      <RelationComponent component-id="component_4" label="component-4" position="br" />
+      <RelationComponent component-id="component_1" label="Mirror" position="tl" />
+      <RelationComponent component-id="component_2" label="Trace" position="tr" />
+      <RelationComponent component-id="component_3" label="Shift" position="bl" />
+      <RelationComponent component-id="component_4" label="Replay" position="br" />
     </div>
 
     <div class="top-controls">

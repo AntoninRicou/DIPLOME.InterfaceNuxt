@@ -5,9 +5,6 @@ import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 import { useProjectSocket } from '~/composables/useProjectSocket'
 import { useViewStateStore } from '~/stores/viewState'
 
-const SPLIT_MORPH_MS = 500
-const VIEW_2_AUTO_ADVANCE_MS = 10500
-const MASK_REVEAL_MS = 400
 const OVERVIEW_THRESHOLD = 10
 
 export const useInteractionStore = defineStore('interaction', () => {
@@ -49,12 +46,29 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   const canvasBackground = ref<'black' | 'gradient'>('gradient')
 
-  const view2AutoAdvanceMs = VIEW_2_AUTO_ADVANCE_MS
-  const view2RemainingMs = ref(0)
+  // Set by `enterRelationalView` when the VIEW_3 → VIEW_4 trigger (the
+  // "next" chevron after the four-quadrant zoom-in flow) fires, consumed by
+  // View4Relational's reveal-overlay animation.
   const view2ExitReason = ref<'auto' | 'skip' | null>(null)
 
-  let view2Timer: ReturnType<typeof setInterval> | null = null
-  let view2EnteredAt = 0
+  // Per-canvas zoom-in tracking for VIEW_3. Each entry flips to `true` once
+  // the user clicks the corresponding quadrant cross — that emits
+  // `set-canvas-zoom` so the standalone project zooms canvas[i] from the
+  // overview cameraZ to split's cameraZ on the selected image. When all
+  // four are true the "next" chevron appears, and clicking it advances to
+  // VIEW_4 with project visually already in split.
+  const canvasZoomed = ref<boolean[]>([false, false, false, false])
+  const allCanvasesZoomed = computed(() => canvasZoomed.value.every(Boolean))
+
+  function zoomCanvas(canvasIndex: number) {
+    if (!viewState.is('TRANSITION')) return
+    if (canvasIndex < 0 || canvasIndex > 3) return
+    if (canvasZoomed.value[canvasIndex]) return
+    const id = activeCentralImageId.value
+    if (!id) return
+    canvasZoomed.value = canvasZoomed.value.map((v, i) => i === canvasIndex ? true : v)
+    projectSocket.setCanvasZoom(canvasIndex, id)
+  }
 
   const historyHasPrevious = computed(() => historyIndex.value > 0)
   const historyHasForward = computed(
@@ -65,23 +79,26 @@ export const useInteractionStore = defineStore('interaction', () => {
     () => historyIndex.value + 1 >= OVERVIEW_THRESHOLD && !overviewConfirmed.value,
   )
 
-  function stopView2Timer() {
-    if (view2Timer) {
-      clearInterval(view2Timer)
-      view2Timer = null
-    }
-  }
-
-  function startView2Timer() {
-    stopView2Timer()
-    if (import.meta.server) return
-    view2EnteredAt = Date.now()
-    view2RemainingMs.value = view2AutoAdvanceMs
-    view2Timer = setInterval(() => {
-      const elapsed = Date.now() - view2EnteredAt
-      view2RemainingMs.value = Math.max(0, view2AutoAdvanceMs - elapsed)
-      if (view2RemainingMs.value <= 0) enterRelationalView('auto')
-    }, 50)
+  function enterEntryView() {
+    if (!viewState.is('EXPLANATION')) return
+    const from = viewState.current
+    viewState.advance()
+    emit({
+      type: 'view_advance',
+      from,
+      to: viewState.current,
+      clientTimestamp: Date.now(),
+    })
+    // Hidden-morph on the project screen: fade mask to opaque, swap
+    // single → overview behind the cover, fade mask back to reveal the
+    // settled overview. EXPLANATION has no in-view hold timer (unlike
+    // VIEW-2's 10.5s buffer) so the mask itself bookends the morph
+    // symmetrically here.
+    const FADE_MS = 400
+    const MORPH_MS = 500
+    projectSocket.setMask(1, FADE_MS)
+    setTimeout(() => projectSocket.setState('overview', MORPH_MS), FADE_MS)
+    setTimeout(() => projectSocket.setMask(0, FADE_MS), FADE_MS + MORPH_MS)
   }
 
   function selectImage(id: ImageId) {
@@ -90,7 +107,6 @@ export const useInteractionStore = defineStore('interaction', () => {
     imageClick.value += 1
     const from = viewState.current
     viewState.advance()
-    startView2Timer()
     emit({
       type: 'central_activate',
       imageId: id,
@@ -104,15 +120,18 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: viewState.current,
       clientTimestamp: Date.now(),
     })
-    projectSocket.setMask(1, 0)
-    projectSocket.setState('split', SPLIT_MORPH_MS)
+    // Project stays in `overview` through VIEW_2 → VIEW_3. No mask snap,
+    // no state morph here — only bind the camera target to the selection
+    // so the eventual overview→split morph (fired on VIEW_3 → VIEW_4)
+    // converges on the right image. View-3 auto-advance timer is disabled
+    // (no startView2Timer call) per the new flow; the transition out of
+    // VIEW_3 will be driven by a future explicit trigger.
     projectSocket.focus(id)
   }
 
   function enterRelationalView(reason: 'auto' | 'skip' = 'auto') {
     if (!viewState.is('TRANSITION')) return
     view2ExitReason.value = reason
-    stopView2Timer()
     if (activeCentralImageId.value && navigationHistory.value.length === 0) {
       navigationHistory.value.push(activeCentralImageId.value)
       historyIndex.value = 0
@@ -125,8 +144,18 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: viewState.current,
       clientTimestamp: Date.now(),
     })
-    projectSocket.setMask(0, reason === 'auto' ? MASK_REVEAL_MS : 0)
+    // Instant state-name flip. The four per-canvas zoom-in overrides
+    // applied during VIEW_3's cross flow have already brought every
+    // canvas to split's cameraZ on the selected image — so flipping the
+    // state name with duration 0 produces no visible change here, while
+    // still releasing the overrides (cleared on goTo) and unlocking the
+    // pan-on-focus behavior project needs for VIEW_4's history nav and
+    // relational clicks.
+    projectSocket.setState('split', 0)
     if (activeCentralImageId.value) projectSocket.focus(activeCentralImageId.value)
+    // Reset per-canvas zoom flags so a future return to VIEW_3 starts
+    // clean. (No backward navigation today, but cheap and defensive.)
+    canvasZoomed.value = [false, false, false, false]
   }
 
   function activateCentral(id: ImageId) {
@@ -270,11 +299,13 @@ export const useInteractionStore = defineStore('interaction', () => {
     imageClick,
     overviewConfirmed,
     overviewEligible,
-    view2AutoAdvanceMs,
-    view2RemainingMs,
     view2ExitReason,
+    canvasZoomed,
+    allCanvasesZoomed,
+    zoomCanvas,
     historyHasPrevious,
     historyHasForward,
+    enterEntryView,
     selectImage,
     enterRelationalView,
     activateCentral,

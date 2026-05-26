@@ -134,9 +134,19 @@ export function useProjectSocket() {
     return true
   }
 
+  function setCanvasZoom(canvasIndex: number, imageId: string): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-canvas-zoom', canvasIndex, imageId)
+      return false
+    }
+    socket.emit('message', { type: 'set-canvas-zoom', payload: { canvasIndex, imageId } })
+    return true
+  }
+
   function isConnected(): boolean {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, setCanvasZoom, isConnected }
 }

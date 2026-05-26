@@ -142,6 +142,36 @@ onBeforeUnmount(() => {
   overflow: hidden;
   background: #000;
 }
+
+/* Grid cross — mirrors the cross in VIEW-1 / VIEW-3 / VIEW-4 so the
+   structural seam reads as continuous across the whole view chain. Split
+   into two pseudo-elements (horizontal in ::before, vertical in ::after)
+   to stay animation-ready (matches View1Explanation's pattern). No draw
+   animation here — static, fully visible from mount. Sits at z-index 5,
+   above the iframe; the .central-slot hover preview at z-index 10 stays
+   on top. */
+.view-0::before,
+.view-0::after {
+  content: "";
+  position: absolute;
+  background: rgba(166, 154, 128, 0.85);
+  pointer-events: none;
+  z-index: 5;
+}
+.view-0::before {
+  left: 1.5%;
+  right: 1.5%;
+  top: 50%;
+  height: 1px;
+  margin-top: -0.5px;
+}
+.view-0::after {
+  top: 1.5%;
+  bottom: 1.5%;
+  left: 50%;
+  width: 1px;
+  margin-left: -0.5px;
+}
 .project-frame {
   position: absolute;
   inset: 0;

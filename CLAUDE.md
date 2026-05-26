@@ -123,20 +123,46 @@ They are not traditional routes or pages.
 
 The progression is:
 
-VIEW-0 → VIEW-2 → VIEW-3
+VIEW_0 → VIEW_1 → VIEW_2 → VIEW_3 → VIEW_4
 
-VIEW-0 is the canvas-disperse entry phase (an iframe-embedded instance of
-`project` running locally inside `interface_nuxt`). It replaces the earlier
-DOM-based VIEW-1, which has been removed entirely — there is no
-intermediate DOM-list selector and no fallback path. Clicking an image on
-the canvas drives `selectImage` and jumps directly to VIEW-2.
+* **VIEW_0 (ONBOARDING)** — gradient-backdrop title screen ("PROXIMA"). Click
+  anywhere to advance. No project emissions; the standalone project sits in
+  its boot `single` state throughout.
+* **VIEW_1 (EXPLANATION)** — gradient backdrop with the structural cross
+  drawing from center over the full panel runtime. Two rotating text panels
+  describing the tool, 5 s each. A `>` skip chevron is available; the
+  advance also fires automatically when the last panel finishes. On
+  advance, `enterEntryView` emits a hidden-morph sequence
+  (`set-mask(1, 400)` → `set-state('overview', 500)` → `set-mask(0, 400)`)
+  so the standalone project transitions `single → overview` behind the
+  opaque mask.
+* **VIEW_2 (ENTRY)** — canvas-disperse entry phase, an iframe-embedded
+  instance of `project` running locally inside `interface_nuxt`. The
+  standalone project is in `overview`. Clicking a sprite on the iframe
+  fires `selectImage`, which emits only `focus(id)` (no `set-state` —
+  project stays in overview) and advances to VIEW_3.
+* **VIEW_3 (TRANSITION)** — the four-quadrant zoom-in step. Project starts
+  in `overview`. The user clicks four `+` crosses, one centered in each
+  quadrant. Each click fires `set-canvas-zoom` so the standalone visually
+  morphs canvas-by-canvas from overview to a split-like rendering on the
+  selected image (see *VIEW_3 — QUADRANT ZOOM MECHANIC*). When all four
+  are zoomed, the modes caption + corner labels + advance `+` button fade
+  in. Clicking advance fires `setState('split', 0)` (instant state-name
+  flip — no visible change, since the overrides already match split) and
+  advances to VIEW_4.
+* **VIEW_4 (RELATIONAL)** — the main relational interface. Project is in
+  `split`. Four named relation components — **Mirror** (tl), **Trace**
+  (tr), **Shift** (bl), **Replay** (br) — surround the centered image (see
+  *VIEW_4 — COMPONENT LAYOUT* and *VIEW_4 — RELATION CASCADE*).
 
-Once the system enters VIEW-3, it must never return to:
+Once the system enters VIEW_4, it must never return to:
 
-* VIEW-0
-* VIEW-2
+* VIEW_0
+* VIEW_1
+* VIEW_2
+* VIEW_3
 
-However, navigation inside VIEW-3 remains reversible.
+However, navigation inside VIEW_4 remains reversible.
 
 The user must be able to:
 
@@ -145,6 +171,177 @@ The user must be able to:
 * move backward through navigation history
 
 The irreversible logic only applies to the global progression of views.
+
+### Historical numbering note
+
+Earlier in the project's life, the view chain ran `VIEW-0 → VIEW-2 → VIEW-3`
+(numbering with no VIEW-1, since the old DOM-list VIEW-1 had already been
+removed). The numbering was shifted to make room for ONBOARDING and
+EXPLANATION at the head of the flow:
+
+| Old (pre-rename) | New (current) | Phase alias |
+| ---------------- | ------------- | ----------- |
+| —                | VIEW_0        | ONBOARDING  |
+| —                | VIEW_1        | EXPLANATION |
+| VIEW-0           | VIEW_2        | ENTRY       |
+| VIEW-2           | VIEW_3        | TRANSITION  |
+| VIEW-3           | VIEW_4        | RELATIONAL  |
+
+Some older subsections below were written under the previous numbering and
+may still refer to "VIEW-0", "VIEW-2", "VIEW-3". Translate via the table:
+the *roles* of those phases are unchanged. The `viewState` store carries
+both the positional id (`VIEW_X`) and a role-based phase alias
+(`ENTRY` / `TRANSITION` / `RELATIONAL` / ...); guards in `interaction.ts`
+go through the phase, not the id (see *VIEW STATE MANAGER*).
+
+---
+
+## VIEW STATE MANAGER
+
+View routing is owned by a dedicated Pinia store at
+[`app/stores/viewState.ts`](app/stores/viewState.ts), separate from the
+interaction store. It is the **single semantic boundary** between
+positional view ids and the components that render them.
+
+### Three concerns, one file
+
+1. **Ordered progression** — the canonical forward chain.
+
+   ```ts
+   const VIEW_ORDER: readonly ViewState[] =
+     ['VIEW_0', 'VIEW_1', 'VIEW_2', 'VIEW_3', 'VIEW_4'] as const
+   ```
+
+2. **Component registry** — view id → component. The *only* place where
+   view-id strings meet `.vue` files.
+
+   ```ts
+   const REGISTRY: Record<ViewState, Component> = {
+     VIEW_0: markRaw(View0Onboarding),
+     VIEW_1: markRaw(View1Explanation),
+     VIEW_2: markRaw(View2Disperse),
+     VIEW_3: markRaw(View3Transition),
+     VIEW_4: markRaw(View4Relational),
+   }
+   ```
+
+   `markRaw` prevents Pinia from making component definitions reactive
+   (cheap + avoids devtools warnings).
+
+3. **Role-based phase aliases** — a parallel mapping from positional id to
+   semantic phase name. Decouples interaction logic from view numbering.
+
+   ```ts
+   export type Phase =
+     | 'ONBOARDING' | 'EXPLANATION' | 'ENTRY' | 'TRANSITION' | 'RELATIONAL'
+
+   const PHASE_BY_VIEW: Record<ViewState, Phase> = {
+     VIEW_0: 'ONBOARDING',
+     VIEW_1: 'EXPLANATION',
+     VIEW_2: 'ENTRY',
+     VIEW_3: 'TRANSITION',
+     VIEW_4: 'RELATIONAL',
+   }
+   ```
+
+   The `Record<ViewState, Phase>` typing is load-bearing: adding a new
+   `ViewState` literal forces a matching `PHASE_BY_VIEW` entry or the file
+   fails to compile.
+
+### Public surface
+
+```ts
+{
+  current: Ref<ViewState>,                  // 'VIEW_0' initially
+  activeComponent: ComputedRef<Component>,  // REGISTRY[current.value]
+  order: readonly ViewState[],
+  is(phase: Phase): boolean,                // PHASE_BY_VIEW[current] === phase
+  advance(): void,                          // next id in `order`, no-op at end
+  goTo(name: ViewState): void,              // direct set, no-op for unknown
+}
+```
+
+### Architectural constraints
+
+These are load-bearing — violating any of them re-introduces the coupling
+this manager exists to eliminate.
+
+1. **`viewState.ts` must not import `interaction.ts`.** The dependency
+   direction is one-way:
+   - `pages/index.vue` → `useViewStateStore()`
+   - `stores/interaction.ts` → `useViewStateStore()`
+   - `stores/viewState.ts` → no app-store imports
+
+2. **`viewState.ts` owns routing concerns only.** Its public surface is
+   exactly the six entries above — no socket logic, no navigation history,
+   no `selectImage`, no relational logic, no telemetry emissions.
+
+3. **`interaction.ts` owns interaction state and side effects.**
+   `selectImage`, `activateCentral`, `enterEntryView`, `enterRelationalView`,
+   `navigationHistory`, `historyIndex`, `overviewConfirmed`, `imageClick`,
+   all `projectSocket.*` calls, all `useInteractionEmitter` events. Its
+   handlers do their existing work and end with `viewState.advance()` /
+   `viewState.goTo(...)`.
+
+4. **The registry is the semantic boundary.** View ids and component
+   files meet only in `viewState.ts`. Renaming a view id (or inserting a
+   new phase) touches the union in `types/interaction.ts` plus
+   `viewState.ts` — nothing else.
+
+### `is(phase)` not `=== 'VIEW_X'`
+
+`interaction.ts` guards on the phase, never on the view-id literal:
+
+```ts
+// in interaction.ts
+function selectImage(id: ImageId) {
+  if (!viewState.is('ENTRY')) return       // not: viewState.current !== 'VIEW_2'
+  ...
+}
+function activateCentral(id: ImageId) {
+  if (!viewState.is('RELATIONAL')) return  // not: viewState.current !== 'VIEW_4'
+  ...
+}
+```
+
+Renaming `VIEW_4` → `VIEW_5` later only touches `viewState.ts` (registry +
+`PHASE_BY_VIEW` + initial); `interaction.ts` compiles clean because the
+phase name `RELATIONAL` is untouched. Telemetry payloads
+(`view_advance.from`, `view_advance.to`) carry raw view ids — they are
+pass-throughs of `viewState.current`, so a rename automatically updates
+the wire value with no source edit. That's the correct shape of coupling
+(downstream consumers want to know which id, not which phase).
+
+### Render dispatch
+
+[`pages/index.vue`](app/pages/index.vue) renders the active component via
+Vue's `<Transition>` wrapper around `<component :is>`:
+
+```vue
+<main class="bg-gradient">
+  <Transition name="view">
+    <component
+      :is="viewState.activeComponent"
+      :key="viewState.current"
+    />
+  </Transition>
+</main>
+```
+
+* `:key="viewState.current"` forces Vue to fully unmount + remount the
+  outgoing/incoming component on every view change — preserves the
+  lifecycle semantics the original `v-if` / `v-else-if` chain had
+  (`onMounted` / `onBeforeUnmount` always fire), which matters because
+  several views own timers, hover listeners, or iframe instances.
+* `<Transition name="view">` (no `mode`, so default cross-fade) overlaps
+  both views during a 350 ms opacity tween. `pointer-events: none` on
+  `.view-leave-active` keeps the outgoing view from catching clicks.
+* `<main class="bg-gradient">` keeps the day gradient continuous through
+  the brief overlap (no dark flash). Per CLAUDE.md's existing specificity
+  caveat, `<main>` must NOT declare a scoped `background` — the global
+  `.bg-gradient` would lose to the higher-specificity scoped rule.
+
+---
 
 ---
 
@@ -192,23 +389,27 @@ vocabulary.
 
 ### State table
 
-Drivers: the first VIEW-0 click keys the `single → split` morph; explicit
-user confirmation **while at branch depth `>= 10`** keys the `split →
-overview` transition; bootstrap keys the initial `single`. **VIEW-2 has no
-render state** — it is a UI-only buffer that mirrors the in-flight `single
-→ split` morph already in motion.
+Drivers (current flow, post-rename):
+* Bootstrap keys the initial `single`.
+* The VIEW_1 → VIEW_2 advance (`enterEntryView`) keys the `single → overview` morph (hidden behind a render-mask fade-out / fade-in).
+* The VIEW_2 click (`selectImage`) emits only `focus(id)` — project stays in overview.
+* Each VIEW_3 quadrant click (`zoomCanvas`) emits `set-canvas-zoom({canvasIndex, imageId})` — per-canvas cameraZ + position tween onto the selected image, no state-name change (see *PER-CANVAS ZOOM*).
+* The VIEW_3 → VIEW_4 advance (`enterRelationalView`) flips the state name to `'split'` instantly (`duration: 0`) — visually a no-op because the four overrides already match split's cameraZ.
+* Explicit user confirmation in VIEW_4 (while at branch depth ≥ 10) keys the `split → overview` transition.
 
-| Interaction event                                                       | Wire emission                          | Resulting render state |
-| ----------------------------------------------------------------------- | -------------------------------------- | ---------------------- |
-| socket-register bootstrap or reconnect (no clicks yet, `imageClick = 0`) | `path-clear` + `set-state('single')` + `set-mask(0, 0)` + `set-canvas-bg(store.canvasBackground)` | `single` (full reset; mask transparent) |
-| first VIEW-0 click (canvas pick)                                        | `set-mask(1, 0)` + `set-state('split', 500)` + `focus(storedImageId)` | `single → split` (500ms morph, hidden behind opaque mask; mask hold continues for `VIEW_2_AUTO_ADVANCE_MS = 10500`) |
-| VIEW-3 entry via timer (auto)                                           | `set-mask(0, 400)` + `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change; mask reveals over 400ms) |
-| VIEW-3 entry via skip                                                   | `set-mask(0, 0)` + `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change; instant cut to whatever frame project is on) |
-| VIEW-3 related-image click (`activateCentral`, pre-overview, pre-cap)   | `focus(newId)` + `path-segment(prevId, newId)`, prefixed by `path-truncate(historyIndex)` if mid-branch | `split` (no state change) |
-| VIEW-3 related-image click (`activateCentral`, at cap or post-overview) | post-overview: `focus(newId)` only — at cap: **nothing** on the wire | `split` (no state change; read-only) |
-| history nav (`stepBack` / `stepForward` / `jumpToHistory`)              | `focus(historicalId)`                  | `split` (no state change) |
-| user **explicitly confirms** overview while at branch depth `>= 10`     | `set-state('overview')`                | `split → overview`     |
-| transient hover feedback (`store.setHighlight(id)` from any view)       | `set-highlight({ id: string \| null })` | no render-state change — perceptual overlay only (see *SET-HIGHLIGHT*) |
+| Interaction event                                                          | Wire emission                          | Resulting render state |
+| -------------------------------------------------------------------------- | -------------------------------------- | ---------------------- |
+| socket-register bootstrap or reconnect (no clicks yet, `imageClick = 0`)    | `path-clear` + `set-state('single')` + `set-mask(0, 0)` + `set-canvas-bg(store.canvasBackground)` | `single` (full reset; mask transparent) |
+| VIEW_0 → VIEW_1 (`viewState.advance()` from `View0Onboarding` click)        | **nothing**                             | `single` (unchanged)   |
+| VIEW_1 → VIEW_2 auto-end-of-panels or skip (`enterEntryView`)               | `set-mask(1, 400)` → `set-state('overview', 500)` (after 400 ms) → `set-mask(0, 400)` (after 900 ms) | `single → overview` (morph hidden behind the opaque mask; total 1.3 s) |
+| VIEW_2 → VIEW_3 (`selectImage`, iframe sprite click)                        | `focus(id)` only                       | `overview` (no state change; `focus` is highlight-only per *FOCUS-IN-OVERVIEW*) |
+| VIEW_3 quadrant cross click (`zoomCanvas`)                                  | `set-canvas-zoom({ canvasIndex, imageId: activeId })` | `overview` (no state-name change; per-canvas cameraZ + position tween — see *PER-CANVAS ZOOM*) |
+| VIEW_3 → VIEW_4 advance-control click (`enterRelationalView('skip')`)       | `set-state('split', 0)` + `focus(activeId)` | `overview → split` (instant flip, no visible change — the four per-canvas overrides already render at split's cameraZ; flip releases the overrides) |
+| VIEW_4 related-image click (`activateCentral`, pre-overview, pre-cap)       | `focus(newId)` + `path-segment(prevId, newId)`, prefixed by `path-truncate(historyIndex)` if mid-branch | `split` (no state change) |
+| VIEW_4 related-image click (`activateCentral`, at cap or post-overview)     | post-overview: `focus(newId)` only — at cap: **nothing** on the wire | `split` or `overview` (no state change; read-only) |
+| history nav (`stepBack` / `stepForward` / `jumpToHistory`)                  | `focus(historicalId)`                  | unchanged — but `focus` pans the camera only when state is not `overview` (see *FOCUS-IN-OVERVIEW*) |
+| user **explicitly confirms** overview while at branch depth `>= 10`         | `set-state('overview')`                | `split → overview`     |
+| transient hover feedback (`store.setHighlight(id)` from any view)           | `set-highlight({ id: string \| null })` | no render-state change — perceptual overlay only (see *SET-HIGHLIGHT*) |
 
 **`overview` is not a threshold-triggered state.** Reaching branch depth
 `>= 10` (i.e. `historyIndex + 1 >= 10`) only marks overview as **eligible**;
@@ -510,12 +711,118 @@ source of truth for behavior history.
 
 ---
 
-## VIEW-0 — CANVAS ENTRY PHASE (interface_nuxt)
+## VIEW_0 — ONBOARDING (interface_nuxt)
 
-VIEW-0 is the entry interaction phase. The user picks the first image by
+VIEW_0 is the title screen, mounted by
+[`View0Onboarding.vue`](app/components/views/View0Onboarding.vue). Pure
+gradient backdrop (`.bg-gradient` global utility from `app.vue`), no
+project emissions, no interaction state mutations. The user sees a
+centered "PROXIMA" caption and a short hint line; clicking anywhere on
+the section calls `viewState.advance()` directly to move to VIEW_1.
+
+ONBOARDING is the phase alias for VIEW_0 (`PHASE_BY_VIEW.VIEW_0`).
+`interaction.ts` has no guards on `is('ONBOARDING')` today — there are no
+side-effectful interactions in this phase. Future telemetry hooks (e.g.
+"session_started" emission on first click) would live behind a new
+function in `interaction.ts` called from `View0Onboarding`, not on the
+direct `viewState.advance()` path.
+
+The standalone project stays in its boot `single` state throughout (see
+*Boot reset sequence*). Nothing on the wire during VIEW_0.
+
+---
+
+## VIEW_1 — EXPLANATION (interface_nuxt)
+
+VIEW_1 is the introductory text phase, mounted by
+[`View1Explanation.vue`](app/components/views/View1Explanation.vue).
+Gradient backdrop, the structural cross (split into ::before + ::after
+pseudo-elements for animation; see *View cross rendering* below), and a
+sequence of text panels rotating at a fixed cadence:
+
+```ts
+const PANELS = [
+  'Proxima is a tool for exploration of a visual corpus through modes of proximity.',
+  'It allows you to engage with images for alternative perspectives.',
+]
+const PANEL_MS = 5000
+```
+
+A `setInterval` advances the panel index every `PANEL_MS`; when the last
+panel finishes, the timer calls `store.enterEntryView()` to advance to
+VIEW_2. A `>` skip chevron in the lower portion of the viewport also
+calls `store.enterEntryView()` for manual skip.
+
+### Cross-draw animation
+
+The cross is drawn from the centre outward over the *full panel runtime*
+(`PANELS.length × PANEL_MS` — 10 s by default). Each line tweens its
+`transform: scaleX/scaleY` from 0 to 1, `linear` easing, so the cross
+finishes at exactly the moment the last panel ends. Duration is bound to
+CSS via a custom property on the section root:
+
+```vue
+<section :style="{ '--cross-draw-duration': `${crossDurationMs}ms` }">
+```
+
+```css
+.view-1::before {
+  /* horizontal line */
+  animation: cross-draw-h var(--cross-draw-duration, 10000ms) linear forwards;
+  transform-origin: center;
+}
+@keyframes cross-draw-h { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+```
+
+`transform-origin: center` is load-bearing — the line expands symmetrically
+from the centre rather than from an edge. Same shape for `::after` with
+`scaleY`. Skipping the view mid-draw is fine; the cross unmounts with the
+view, no explicit cleanup needed.
+
+### `enterEntryView()` — hidden-morph to overview
+
+The advance from VIEW_1 to VIEW_2 is the moment the standalone project
+transitions from `single` (boot state) to `overview`. The transition is
+hidden behind the render mask for a clean visual:
+
+```ts
+function enterEntryView() {
+  if (!viewState.is('EXPLANATION')) return
+  const from = viewState.current
+  viewState.advance()
+  emit({ type: 'view_advance', from, to: viewState.current, ... })
+
+  const FADE_MS = 400
+  const MORPH_MS = 500
+  projectSocket.setMask(1, FADE_MS)
+  setTimeout(() => projectSocket.setState('overview', MORPH_MS), FADE_MS)
+  setTimeout(() => projectSocket.setMask(0, FADE_MS), FADE_MS + MORPH_MS)
+}
+```
+
+* `t = 0`: emit `set-mask(1, 400)` — project mask starts fading to opaque.
+* `t = 400 ms`: emit `set-state('overview', 500)` — morph happens behind
+  the now-opaque mask.
+* `t = 900 ms`: emit `set-mask(0, 400)` — fade reveals the settled
+  overview.
+
+Total: ~1.3 s symmetric fade-out → morph → fade-in on the project screen.
+Unlike VIEW_2's mask hold (which absorbs the morph asymmetrically — opaque
+at the click moment, reveal at VIEW_3 entry), this one is symmetric
+because there is no in-view hold timer to absorb anything; the mask alone
+bookends the morph.
+
+EXPLANATION is the phase alias for VIEW_1. No guards on
+`is('EXPLANATION')` outside `enterEntryView` itself.
+
+---
+
+## VIEW_2 — CANVAS ENTRY PHASE (interface_nuxt)
+
+VIEW_2 is the entry interaction phase. The user picks the first image by
 clicking a sprite in an **iframe-embedded instance of `project`** running
-locally inside `interface_nuxt`'s page (the `View0Disperse` component
-mounts the iframe at `${projectUrl}?embed=1`). VIEW-0 is **not** a render
+locally inside `interface_nuxt`'s page (the `View2Disperse` component
+mounts the iframe at `${projectUrl}?embed=1`). VIEW_2 is **not** a render
 state — see *VIEW ≠ STATE* — and has no spatial meaning of its own. The
 standalone project window (the relay-connected one) sits in `single`
 throughout VIEW-0 and is completely unaffected by what happens in the
@@ -707,65 +1014,125 @@ mask's `duration` differs.
 
 ---
 
-## VIEW-2 — UI transition phase (interface_nuxt)
+## VIEW_3 — TRANSITION (interface_nuxt)
 
-VIEW-2 is a UI-only transition phase that brackets project's (short)
-`single → split` morph plus a deliberate hold. It is not a render state —
-see *VIEW ≠ STATE* — and the wire emits **nothing** during VIEW-2; the
-relevant `set-state('split', SPLIT_MORPH_MS)` already fired at the VIEW-0
-click moment, and the morph itself completes within the first 500ms of
-VIEW-2.
+VIEW_3 is the **quadrant zoom-in step** between the disperse selection
+(VIEW_2) and the relational grid (VIEW_4). Project is in `overview`
+throughout VIEW_3; the standalone visually morphs from overview to a
+split-equivalent rendering one canvas at a time, driven by user clicks on
+four `+` crosses (one centered in each quadrant). When all four are
+zoomed, a caption + corner labels + advance control fade in, and the user
+clicks the advance to enter VIEW_4.
 
-Two independent constants own this:
+VIEW_3 is **not** a project render state — see *VIEW ≠ STATE*. The
+canvas-by-canvas visual change is achieved by per-canvas cameraZ
+overrides at the project layer (see *PER-CANVAS ZOOM*). The wire emits
+`set-canvas-zoom` once per cross click; no `set-state` during VIEW_3
+(project stays in overview by name).
 
-* `SPLIT_MORPH_MS = 500` — the duration sent on the wire to project.
-  Project's canvas morph runs for this duration, behind the opaque mask.
-* `VIEW_2_AUTO_ADVANCE_MS = 10500` — the VIEW-2 UI buffer / mask hold
-  duration. Drives the auto-advance timer only; never on the wire.
+### Predecessor (pre-rename)
 
-The two are deliberately decoupled (see *VIEW-0 — Split transition
-duration and VIEW-2 buffer duration*). The morph completes long before the
-auto-advance fires, so by the time the mask reveals (auto or skip),
-project is in a fully-settled `split` frame.
+This phase replaces what used to be VIEW-2 (a passive 10.5-second mask
+hold that bracketed an automatic `single → split` morph). The mask-hold
+model was retired together with the auto-advance timer (`view2Timer`,
+`view2RemainingMs`, `VIEW_2_AUTO_ADVANCE_MS`, `MASK_REVEAL_MS`,
+`startView2Timer` / `stopView2Timer`) — all of that infrastructure has
+been removed from `interaction.ts`. The current VIEW_3 has no in-phase
+timer; advance is entirely user-driven.
 
-### Exit conditions
+### Layout
 
-VIEW-2 can end via two distinct UI triggers, which produce **different**
-mask emissions but identical `focus` emissions:
+[`View3Transition.vue`](app/components/views/View3Transition.vue) renders
+on the gradient backdrop with the structural cross (same split-pseudo
+pattern as VIEW_1, no draw animation — static). Foreground elements:
 
-* Automatic completion when the `SPLIT_TRANSITION_MS` timer elapses — emits
-  `set-mask(0, 400)` (perceptual reveal) followed by
-  `focus(storedImageId)`.
-* Optional user skip action in `interface_nuxt` — emits `set-mask(0, 0)`
-  (instant cut) followed by `focus(storedImageId)`.
+* **Four quadrant crosses** at the quadrant centres
+  (25/25, 75/25, 25/75, 75/75 of the viewport). Each is a `+` glyph
+  button styled with the same warm tan colour as the structural cross.
+  Click handler: `store.zoomCanvas(i)`. The cross hides (fade + pointer-
+  events: none) once its canvas has been zoomed.
+* **Per-quadrant text** at the same position the cross occupied. Hidden
+  initially; fades in (600 ms, 200 ms after the cross fades out) when
+  the canvas is zoomed. Each text describes the mode of proximity for
+  that quadrant — Mirror / Trace / Shift / Replay (see the QUADRANT_TEXTS
+  array in the component source).
+* **Central image** at viewport centre, 22vmin × 22vmin (same geometry
+  as VIEW_4's `.center-anchor`, so the swap is pixel-stable).
+* **Modes caption** at the bottom (`bottom: 3 rem`). Hidden until the
+  4-second post-zoom delay; fades in with a small slide.
+* **Corner labels** at the four outer viewport corners (`top: 0; left: 0`
+  etc.) showing `MIRROR` / `TRACE` / `SHIFT` / `REPLAY`. Same pixel
+  positions as VIEW_4's `RelationComponent` `.quarter-tag`, so they sit
+  put across the VIEW_3 → VIEW_4 swap. Subtle warm halo via layered
+  `text-shadow` to lift them off the gradient. Hidden initially; fade in
+  on the same trigger as the caption.
+* **Advance control** — a `+` glyph at the top centre of the viewport,
+  visually identical to VIEW_4's `.interpret-control` but a separate
+  `.advance-control` button. Click → `store.enterRelationalView('skip')`.
+  Hidden initially; fades in 500 ms after the caption (CSS
+  `transition-delay`) so the reveal cascades caption → corner labels →
+  advance.
 
-The `focus` emission is identical on both paths and idempotent:
+### Timeline (`canvasZoomed[]` and `allCanvasesZoomed` are reactive store state)
 
 ```
-focus(storedImageId)            // idempotent re-assertion — no set-state,
-                                // focus was already emitted at the click
+t = 0          user clicks 1st cross   →  setCanvasZoom(0, activeId)
+                                       →  canvasZoomed[0] = true
+                                       →  cross 0 fades out, text 0 fades in,
+                                          canvas 0 tweens overview → split
+... user clicks 2nd, 3rd, 4th crosses (any order, no time pressure)
+t = N          user clicks 4th cross   →  canvasZoomed = [t,t,t,t]
+                                       →  allCanvasesZoomed = true
+                                       →  watch in View3Transition fires
+t = N + 4000   showCaption = true      →  caption + corner labels fade in
+t = N + 4500   advance-control fades in (CSS transition-delay)
+t = future     user clicks +           →  store.enterRelationalView('skip')
+                                       →  setState('split', 0) + focus(id)
+                                       →  viewState.advance() to VIEW_4
 ```
 
-Only the *moment* of VIEW-3 entry and the mask's `duration` differ between
-the two triggers. The camera target was bound at click time, so project is
-already converging on `storedImageId` regardless of when (or whether)
-VIEW-3 re-asserts it; the re-assertion is a defensive confirmation, not a
-first-time binding. See *VIEW-2 — RENDER MASK* for the full mask contract.
+The `4000 ms` caption delay and the `500 ms` advance-control delay are
+tunables at the top of the `<script setup>` block in
+`View3Transition.vue`. No auto-advance from VIEW_3 to VIEW_4 — the
+advance fires only on the user's click of the `+` control.
 
-### Constraints
+### `store.zoomCanvas(i)` (interface_nuxt → project)
 
-* Skip does not alter the `set-state('split', …)` duration already on the
-  wire — project's morph continues to its natural completion (typically
-  already complete since `SPLIT_MORPH_MS = 500`).
-* Skip does not affect `imageClick`.
-* Skip does not introduce any additional render state.
-* Skip does change the mask emission's `duration` (`0` instead of `400`),
-  which is a perceptual difference but not a render-state difference.
-* `interface_nuxt` owns both `SPLIT_MORPH_MS` (the morph duration sent on
-  the wire) and `VIEW_2_AUTO_ADVANCE_MS` (the local buffer / hold timer).
-  The two are independent by design.
-* VIEW-2 is purely a visual / UX transition layer.
-* Transition logic (timer + skip handler) belongs to `interface_nuxt` only.
+```ts
+function zoomCanvas(canvasIndex: number) {
+  if (!viewState.is('TRANSITION')) return
+  if (canvasIndex < 0 || canvasIndex > 3) return
+  if (canvasZoomed.value[canvasIndex]) return    // idempotent
+  const id = activeCentralImageId.value
+  if (!id) return
+  canvasZoomed.value = canvasZoomed.value.map((v, i) => i === canvasIndex ? true : v)
+  projectSocket.setCanvasZoom(canvasIndex, id)
+}
+```
+
+Pure side-effect handler. No state-machine reinterpretation, no router
+calls — just the wire emission + local flag flip for the UI gating.
+
+### `store.enterRelationalView(reason)`
+
+The reason param (`'auto'` | `'skip'`) is stored in `view2ExitReason` and
+consumed by VIEW_4's reveal-overlay animation. Today only the `'skip'`
+path is reachable (the advance-control click); the `'auto'` path is
+reserved for any future timed advance.
+
+The function emits:
+
+* `set-state('split', 0)` — instant state-name flip. Project's per-canvas
+  overrides already match `split`'s cameraZ (0.2), so flipping the name
+  with duration 0 produces no visible change while releasing the
+  overrides (cleared on every `goTo`) and unlocking the pan-on-focus
+  behaviour for VIEW_4's history nav and relational clicks.
+* `focus(activeCentralImageId)` — idempotent re-assertion of the camera
+  target, in case the future per-canvas zoom paths drifted from each
+  other.
+
+It also resets `canvasZoomed = [false, false, false, false]` so that
+re-entering VIEW_3 (no path today, but defensive) starts clean.
 
 ---
 
@@ -786,14 +1153,33 @@ The same image therefore generates different proximities depending on the active
 
 ---
 
-## VIEW-3 — COMPONENT LAYOUT
+## VIEW_4 — COMPONENT LAYOUT
 
 The 4 relation components are arranged in a fixed 2×2 grid:
 
-[ component-1 ] [ component-2 ]
-[ component-3 ] [ component-4 ]
+[ Mirror (tl) ] [ Trace (tr)  ]
+[ Shift  (bl) ] [ Replay (br) ]
 
-This layout remains stable during VIEW-3.
+Each component is identified by a position name (`tl` / `tr` / `bl` / `br`,
+matching project's `STATES.split.rects` ordering) and rendered with a
+human-readable label via the `<RelationComponent>` prop `label`:
+
+* **Mirror** (top-left, `component_1`) — visual structures, shapes,
+  textures. Highlights recurring visual form.
+* **Trace** (top-right, `component_2`) — lexical / historical sources
+  linked to the image. Retraces a subject field.
+* **Shift** (bottom-left, `component_3`) — semantic embeddings related
+  to the image. Shifts the reading laterally through meaning.
+* **Replay** (bottom-right, `component_4`) — previous user selections
+  including this image. The collaborative trace of past navigations;
+  contributions accumulate into an evolving map.
+
+The names are rendered in each component's outer corner via the
+`.quarter-tag` span (see `RelationComponent.vue`), pixel-positioned
+identically to the VIEW_3 corner labels so the labels sit put across the
+VIEW_3 → VIEW_4 swap.
+
+This layout remains stable during VIEW_4.
 
 Each component has:
 
@@ -1604,6 +1990,317 @@ relay-connected **standalone** project window.
 
 ---
 
+## PER-CANVAS ZOOM — VIEW_3 quadrant directive
+
+`set-canvas-zoom` is the wire directive that drives VIEW_3's
+canvas-by-canvas transition from `overview` to a split-equivalent
+rendering. Each cross-click in VIEW_3 fires one of these and the
+project canvas it addresses tweens its cameraZ (and its camera position)
+onto the selected image, independently of the other three canvases.
+
+This is a **sixth explicit project-side exception** to "do not modify
+project". It is scoped tightly: a per-canvas cameraZ + position override
+layer in `stateManager`, one new handler in `commands`, one new param on
+`focusOn` in `app.js`, registration in `commandsManager`. No state-machine
+reinterpretation, no spatial-rendering inference, no relational logic.
+
+### Wire vocabulary
+
+```
+set-canvas-zoom({ canvasIndex: 0|1|2|3, imageId: string })
+```
+
+* **`canvasIndex`** — which of the four canvases to act on. Order matches
+  project's `STATES.split.rects`: 0 = top-left, 1 = top-right,
+  2 = bottom-left, 3 = bottom-right.
+* **`imageId`** — the target image. The canvas tweens its camera onto
+  this point in its dataset and applies the perceptual halo.
+
+### Emission rules
+
+Emitted exclusively by `store.zoomCanvas(canvasIndex)` (see *VIEW_3 —
+TRANSITION*). One emission per quadrant cross click; idempotent if the
+canvas is already zoomed (`canvasZoomed[i]` short-circuits before the
+emit). Never emitted from any other view phase or any other interaction.
+
+### Project-side rendering contract
+
+Three components participate.
+
+**`stateManager` — per-canvas cameraZ override (`canvasOverrides[]`)**
+
+Each entry in `canvasOverrides` is either `null` (canvas follows the
+state-level `current.cameraZ` as usual) or a tween record:
+
+```js
+{ fromZ, toZ, t, duration }   // duration in seconds; t is progress 0→1
+```
+
+The tick loop reads:
+
+```js
+apps.forEach((a, i) => {
+  let z = current.cameraZ
+  const override = canvasOverrides[i]
+  if (override) {
+    override.t = Math.min(1, override.t + dt / override.duration)
+    const e = easeInOutCubic(override.t)
+    z = override.fromZ + (override.toZ - override.fromZ) * e
+  }
+  a.object.setCameraZ(z)
+})
+```
+
+`setCanvasOverride(canvasIndex, targetZ, duration = 0.6)` starts an
+override; `goTo()` clears every override at the start of any state
+transition. The override clear-on-`goTo` ensures `setState('split', 0)`
+(emitted by `enterRelationalView` for the VIEW_3 → VIEW_4 advance)
+releases the per-canvas pinning — the state-level `current.cameraZ` then
+takes over for all four canvases. The clear is visually a no-op because
+the override target (`SPLIT_CAMERA_Z = 0.2`) already equals split's
+state-level cameraZ.
+
+**`commands.setCanvasZoom({ canvasIndex, imageId })`**
+
+Three actions per call, in order:
+
+1. `stateManager.setCanvasOverride(i, SPLIT_CAMERA_Z, 1.5)` — start the
+   cameraZ tween.
+2. `app.setHighlightPreset('default')` on that canvas — switch from
+   overview's `'big'` preset to split's `'default'`, so the rendered
+   sprite size + glow at the new (close) cameraZ match a real split.
+3. `app.focusOn(imageId, { pan: true, panDuration: 1.5 })` — drives the
+   camera position tween (time-based; see below) onto the image, with
+   `pan: true` explicitly bypassing the overview pan-suppression rule
+   (see *FOCUS-IN-OVERVIEW*).
+
+**`app.focusOn(pointId, { pan, panDuration })` — time-based position tween**
+
+`focusOn` accepts two options. When `panDuration > 0`, the existing
+frame-based LERP for camera position is replaced by a `positionTween`
+that interpolates `camera.position.{x,y}` from current to target over
+`panDuration` seconds with `easeInOutCubic`. This is what lets the
+per-canvas zoom's lateral pan converge in lockstep with the cameraZ
+tween — without it, the LERP's exponential tail leaves the camera
+drifting for seconds after the zoom completes. Default `panDuration = 0`
+preserves the original LERP path for every existing caller; only
+`setCanvasZoom` opts in.
+
+### Durations
+
+| Constant         | Value | Where                              | Why                                    |
+| ---------------- | ----- | ---------------------------------- | -------------------------------------- |
+| `SPLIT_CAMERA_Z` | 0.2   | `commands.js setCanvasZoom`        | Matches `STATES.split.cameraZ`.        |
+| `ZOOM_DURATION`  | 1.5 s | `commands.js setCanvasZoom`        | Matches `goTo`'s default transition. Slow enough that the per-canvas zoom reads as deliberate, not a snap. |
+
+### Invariants
+
+* `set-canvas-zoom` never changes `currentName` — project's state stays
+  `overview` during the entire VIEW_3 sequence. The "looks like split"
+  perception is purely the four overrides converging on split's cameraZ.
+* Overrides clear on every `goTo`. There is no "permanent canvas pin"
+  mode — once `set-state` fires (e.g. via `enterRelationalView` for the
+  VIEW_3 → VIEW_4 advance), control returns to the state machine.
+* `focusOn`'s default behaviour (LERP, no positionTween) is preserved
+  for all existing callers. Only `set-canvas-zoom` passes `panDuration`.
+* Highlight preset is per-canvas: `setCanvasZoom` only switches the
+  preset on its target canvas. The other three keep their `'big'`
+  preset until `goTo('split')` resets them en masse.
+
+---
+
+## FOCUS-IN-OVERVIEW — read-only spatial rule
+
+When the standalone project is in `overview`, `focus(id)` arriving on the
+wire drives the perceptual highlight but **does not move the camera**.
+This is the codified, generalised form of the post-confirmOverview rule
+documented under *overview — terminal, read-only state*: overview is
+read-only on the spatial side, regardless of whether `overviewConfirmed`
+is true or false.
+
+### Project-side implementation
+
+Two layers, both inside the existing files.
+
+**`commands.focusOnId(pointId)`** — the wire handler:
+
+```js
+function focusOnId(pointId) {
+  if (!pointId) return
+  const pan = stateManager.state !== 'overview'
+  apps.forEach(a => {
+    if (a.isReady) a.object.focusOn(pointId, { pan })
+  })
+}
+```
+
+The `pan = stateManager.state !== 'overview'` check is the entire rule.
+When in any non-overview state (`single`, `split`), pan flows through
+normally.
+
+**`app.focusOn(pointId, { pan, panDuration })`** — the canvas method:
+
+```js
+function focusOn(pointId, { pan = true, panDuration = 0 } = {}) {
+  ...
+  if (pan) {
+    // existing pan + LERP/tween path
+  } else {
+    // log only — `[focusOn] highlight-only (pan suppressed)`
+  }
+  points.highlight(pointId)   // always runs, regardless of pan
+}
+```
+
+`points.highlight(pointId)` always runs, so the user still gets visual
+confirmation that the click registered (the halo on the standalone
+sprite). Only the camera target / panProgress / panStartDist mutations
+are skipped.
+
+### Why `setCanvasZoom` bypasses this rule
+
+`set-canvas-zoom` calls `app.focusOn(id, { pan: true, ... })` directly,
+**not** through `focusOnId`. That is intentional: the user is explicitly
+asking that one canvas to zoom onto the selection — the "read-only"
+default is the right behaviour for unsolicited focus arrivals, but
+`set-canvas-zoom` is solicited. The wire emission is separate, the
+handler is separate, the pan suppression is bypassed by construction.
+
+### Interaction with VIEW_4 history nav
+
+`activateCentral`, `stepBackInHistory`, `stepForwardInHistory`,
+`jumpToHistory` all emit `focus(id)` for VIEW_4 navigation. After
+`enterRelationalView` flipped the state name to `'split'`, the check
+`stateManager.state !== 'overview'` is true, so pan flows through and
+the camera follows the user as before. After `confirmOverview` flips to
+`'overview'`, pan suppression engages — the wire emissions still arrive
+(for log consistency, per *overview — terminal, read-only state*), but
+they only drive the halo, never the camera.
+
+### Invariants
+
+* The rule is enforced **structurally** in `focusOnId`, not by
+  per-handler conditionals. Adding a new focus emitter automatically
+  inherits the rule.
+* `points.highlight(pointId)` is preserved on every path — overview is
+  read-only spatially, not perceptually.
+* The rule does not affect `single`'s focus-clear behaviour
+  (`goTo('single')` still resets `targetX/targetY` to `(0, 0)`). That
+  is a state-transition side effect, not a focus-handler effect.
+
+---
+
+## DISPERSE SMOOTHNESS — per-sprite burst↔drift in pointsManager
+
+`pointsManager.tickDisperse` was restructured to eliminate a global
+synchronisation gate that produced a visible "every sprite halts at
+its anchor, waits for the slowest one to finish, then every sprite
+resumes drifting together" freeze frame at the end of the burst phase.
+
+This is a **seventh project-side exception**, scoped to `tickDisperse`
+only. No spatial-distribution changes, no socket changes, no embed
+changes, no hover-freeze changes; `enterDisperse` / `exitDisperse` are
+untouched.
+
+### Previous shape (removed)
+
+A two-phase state machine:
+
+```js
+if (disperse.phase === 'burst') {
+  // animate all sprites toward spawn position with easeOutCubic
+  // when EVERY sprite has progress >= 1 (allDone):
+  //   set every anchor at once
+  //   flip phase to 'drift'
+  //   reset driftElapsed
+}
+if (disperse.phase === 'drift') {
+  // sin-sum oscillation around anchors, single shared driftElapsed
+}
+```
+
+Two problems:
+
+1. **Global sync.** A sprite that finished its burst quickly (low
+   `delay`, short `duration`) sat motionless at its anchor for up to
+   ~0.36 s waiting for the slowest sprite. Then every sprite started
+   drifting in unison.
+2. **Velocity discontinuity.** `easeOutCubic` decelerates to v=0 at
+   the burst end. Drift starts with non-zero velocity (the sine
+   derivative). The combined effect read as "all stop → all jolt
+   into motion".
+
+### Current shape
+
+A single per-sprite dispatch with lazy anchors and a short per-sprite
+fade-in:
+
+```js
+disperse.burstElapsed += dt
+const FADE_IN_SEC = 0.6
+
+for (let i = 0; i < count; i++) {
+  const p = disperse.per[i]
+  const sinceStart = disperse.burstElapsed - p.delay
+  const burstProgress = clamp(sinceStart / p.duration, 0, 1)
+
+  if (burstProgress < 1) {
+    // burst — unchanged easeOutCubic to spawn
+    const e = easeOutCubic(burstProgress)
+    positions[i].x = p.spawnX * e
+    positions[i].y = p.spawnY * e
+  } else {
+    // drift — anchor set lazily on this sprite's first drift frame
+    let a = disperse.anchor.get(ids[i])
+    if (!a) {
+      a = { x: p.spawnX, y: p.spawnY }
+      disperse.anchor.set(ids[i], a)
+    }
+    const sinceBurstEnd = sinceStart - p.duration
+    const t = sinceBurstEnd / disperse.cycleSpeed
+    const fadeIn = Math.min(1, sinceBurstEnd / FADE_IN_SEC)
+    const wd = disperse.wanderDistance * fadeIn
+    // sin-sum dx/dy around anchor, * wd
+    // hover-freeze back-solve preserved
+  }
+  writeInstance(i)
+}
+```
+
+Key properties:
+
+* **No global gate.** Each sprite transitions to drift the moment its
+  own burst completes. The field stays alive throughout — no synchronised
+  freeze frame.
+* **Per-sprite drift time.** `sinceBurstEnd` is calculated per sprite, so
+  each sprite's sine oscillation starts at its individual t=0.
+* **Per-sprite amplitude fade-in.** `wd = wanderDistance * fadeIn`
+  ramps drift amplitude from 0 to 1 over 0.6 s, so velocity at the burst
+  → drift handoff stays continuous on a per-sprite basis. The
+  asynchronous staggering across the field hides any residual per-sprite
+  velocity transient.
+* **Lazy anchor.** `disperse.anchor` is populated incrementally as
+  each sprite finishes its burst, rather than in one global sweep when
+  the phase flipped. Identical final values, just timed individually.
+
+### What is preserved
+
+* Burst feel — identical. Same `easeOutCubic`, `spawnX/Y`, `delay`,
+  `duration`.
+* Drift steady-state — identical. Once a sprite is past its 0.6 s
+  fade-in, `wd = disperse.wanderDistance` exactly. All sine frequencies,
+  phases, base-subtraction values untouched.
+* Hover freeze — unchanged. The back-solved-anchor identity
+  `position = anchor + (dx, dy)` still holds.
+* Spatial distribution — `rMax`, the `Math.sqrt(Math.random())` radius,
+  the random angle: all unchanged.
+* `enterDisperse` / `exitDisperse` — not touched. `disperse.phase` is
+  still set to `'burst'` on entry; it's just never read inside the tick
+  anymore. Same for `driftElapsed`. The orphan state is left in place
+  so the public surface stays stable.
+
+---
+
 ## VIEW-3 — VISUAL CONTINUITY WITH PROJECT
 
 `interface_nuxt`'s surface is composed to read as **one continuous field
@@ -1685,7 +2382,7 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with five explicit exceptions**:
+Do not modify project, **with eight explicit exceptions**:
 
 1. The user-driven path-rendering directive surface inside `project` —
    `path-segment`, `path-truncate`, and the `pathTrace` primitive they
@@ -1695,24 +2392,24 @@ Do not modify project, **with five explicit exceptions**:
    `interface_nuxt`. See *VIEW-3 — PATH RENDERING*.
 2. The render-mask directive surface inside `project` — `set-mask`, the
    `<div id="render-mask">` DOM element, and its CSS — is a perceptual
-   veil over project's canvas during the VIEW-2 buffer phase. It is a
-   pure DOM/CSS overlay with no render-loop, state-machine, or
-   interaction-logic participation. See *VIEW-2 — RENDER MASK*.
+   veil over project's canvas during phase transitions. It is a pure
+   DOM/CSS overlay with no render-loop, state-machine, or interaction-
+   logic participation. See *VIEW-2 — RENDER MASK*.
 3. The canvas-background directive surface inside `project` —
    `set-canvas-bg`, the `body[data-canvas-bg="..."]` selector rules in
    `style.css`, and the `<body>` `data-canvas-bg` attribute — is a
    perceptual presentation toggle for the canvases' backdrop. It is a
    pure DOM/CSS overlay with no render-loop, state-machine, or
    interaction-logic participation. See *CANVAS BACKGROUND*.
-4. The VIEW-0 canvas-embed surface inside `project` — the `?embed=1` URL
-   flag in `main.js`, the alternate boot path it activates (boots
-   directly into `disperse`, skips the socket bridge, applies the `big`
-   highlight preset, sets the gradient backdrop inline), and the
-   `enablePicking({ onHover, onClick })` API in `app.js` that posts
-   `view0:image-hover` / `view0:image-click` messages back to
+4. The VIEW_2 (formerly VIEW-0) canvas-embed surface inside `project` —
+   the `?embed=1` URL flag in `main.js`, the alternate boot path it
+   activates (boots directly into `disperse`, skips the socket bridge,
+   applies the `big` highlight preset, sets the gradient backdrop
+   inline), and the `enablePicking({ onHover, onClick })` API in `app.js`
+   that posts `view0:image-hover` / `view0:image-click` messages back to
    `window.parent` via `postMessage`. This instance is **detached from
    the relay** — it neither sends nor receives any wire event. See
-   *VIEW-0 — CANVAS ENTRY PHASE*.
+   *VIEW_2 — CANVAS ENTRY PHASE*.
 5. The transient highlight directive surface inside `project` —
    `set-highlight`, the `actions.setHighlight` handler in `commands.js`,
    and the per-instance eased highlight + state-keyed preset machinery in
@@ -1720,12 +2417,33 @@ Do not modify project, **with five explicit exceptions**:
    tick, the glow follow). It is a pure perceptual emphasis on a single
    instance with no render-loop, state-machine, or interaction-logic
    participation. See *SET-HIGHLIGHT*.
+6. The **per-canvas zoom directive surface** — `set-canvas-zoom`, the
+   `actions.setCanvasZoom` handler in `commands.js`, the
+   `canvasOverrides[]` array + `setCanvasOverride` method in
+   `stateManager.js`, the per-canvas cameraZ interpolation in the
+   `stateManager.tick` loop, and the `panDuration` option on
+   `app.focusOn` (with the `positionTween` slot in the animate loop).
+   Drives VIEW_3's canvas-by-canvas overview → split visual transition.
+   No state-machine reinterpretation, no spatial-rendering inference. See
+   *PER-CANVAS ZOOM*.
+7. The **focus-in-overview pan-suppression rule** in
+   `commands.focusOnId` — when `stateManager.state === 'overview'`, pass
+   `{ pan: false }` to `app.focusOn` so the camera target is not moved
+   but the perceptual halo still runs. Codifies the "overview is
+   read-only spatially" rule (previously implicit, post-confirmOverview
+   only) for any overview state. See *FOCUS-IN-OVERVIEW*.
+8. The **per-sprite burst↔drift dispatch** in `pointsManager.tickDisperse`
+   — single-loop replacement of the previous two-phase `burst` / `drift`
+   state machine with its global synchronisation gate. Each sprite
+   transitions individually, with a per-sprite 0.6 s amplitude fade-in
+   for velocity continuity. Scoped to `tickDisperse` only; burst feel
+   and drift steady-state are unchanged. See *DISPERSE SMOOTHNESS*.
 
-All five exceptions are scoped tightly: pure rendering / configuration
+All eight exceptions are scoped tightly: pure rendering / configuration
 surfaces driven by explicit `interface_nuxt` directives (or, in the
-VIEW-0 case, by an out-of-band `postMessage` channel for the canvas-pick
-input). No project-side interpretation, derivation, or interaction logic
-is permitted inside any of them.
+VIEW_2 embed case, by an out-of-band `postMessage` channel for the
+canvas-pick input). No project-side interpretation, derivation, or
+interaction logic is permitted inside any of them.
 
 At this stage:
 

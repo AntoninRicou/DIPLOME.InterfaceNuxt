@@ -10,16 +10,11 @@ const viewState = useViewStateStore()
     @click="viewState.advance()"
   >
     <p class="caption">PROXIMA</p>
-    <p class="hint">click anywhere to continue</p>
+    <p class="hint">No image belong to one place</p>
   </section>
 </template>
 
 <style scoped>
-@keyframes view0-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 .view-0 {
   position: fixed;
   inset: 0;
@@ -31,7 +26,6 @@ const viewState = useViewStateStore()
   color: #e8e8e8;
   cursor: pointer;
   z-index: 100;
-  animation: view0-fade-in 200ms ease-out forwards;
 }
 
 .caption {
