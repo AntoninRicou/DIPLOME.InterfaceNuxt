@@ -124,9 +124,19 @@ export function useProjectSocket() {
     return true
   }
 
+  function setHighlight(id: string | null): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-highlight', id)
+      return false
+    }
+    socket.emit('message', { type: 'set-highlight', payload: { id } })
+    return true
+  }
+
   function isConnected(): boolean {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, isConnected }
 }

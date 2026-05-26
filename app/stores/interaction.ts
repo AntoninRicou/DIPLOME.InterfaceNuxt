@@ -4,7 +4,7 @@ import type { ImageId, ViewState } from '~/types/interaction'
 import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 import { useProjectSocket } from '~/composables/useProjectSocket'
 
-const VIEW_ORDER: ViewState[] = ['VIEW_1', 'VIEW_2', 'VIEW_3']
+const VIEW_ORDER: ViewState[] = ['VIEW_0', 'VIEW_2', 'VIEW_3']
 const SPLIT_MORPH_MS = 500
 const VIEW_2_AUTO_ADVANCE_MS = 10500
 const MASK_REVEAL_MS = 400
@@ -14,7 +14,7 @@ export const useInteractionStore = defineStore('interaction', () => {
   const { emit } = useInteractionEmitter()
   const projectSocket = useProjectSocket()
 
-  const currentView = ref<ViewState>('VIEW_1')
+  const currentView = ref<ViewState>('VIEW_0')
   const navigationHistory = ref<ImageId[]>([])
   const historyIndex = ref(-1)
   const activeCentralImageId = ref<ImageId | null>(null)
@@ -56,7 +56,7 @@ export const useInteractionStore = defineStore('interaction', () => {
   let view2Timer: ReturnType<typeof setInterval> | null = null
   let view2EnteredAt = 0
 
-  const isInView1 = computed(() => currentView.value === 'VIEW_1')
+  const isInView0 = computed(() => currentView.value === 'VIEW_0')
   const isInView2 = computed(() => currentView.value === 'VIEW_2')
   const isInView3 = computed(() => currentView.value === 'VIEW_3')
   const historyHasPrevious = computed(() => historyIndex.value > 0)
@@ -94,11 +94,11 @@ export const useInteractionStore = defineStore('interaction', () => {
   }
 
   function selectImage(id: ImageId) {
-    if (currentView.value !== 'VIEW_1') return
+    if (currentView.value !== 'VIEW_0') return
     activeCentralImageId.value = id
     imageClick.value += 1
     const from = currentView.value
-    advanceView()
+    currentView.value = 'VIEW_2'
     startView2Timer()
     emit({
       type: 'central_activate',
@@ -262,6 +262,14 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCanvasBg(mode)
   }
 
+  // Transient perception primitive. Highlights an id on the project canvas
+  // (or clears with null). Pure ephemeral feedback channel — does NOT touch
+  // navigationHistory, activeCentralImageId, imageClick, view state, or any
+  // persisted store value. Any view's hover handler can call this.
+  function setHighlight(id: ImageId | null) {
+    projectSocket.setHighlight(id)
+  }
+
   return {
     currentView,
     navigationHistory,
@@ -275,7 +283,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     view2AutoAdvanceMs,
     view2RemainingMs,
     view2ExitReason,
-    isInView1,
+    isInView0,
     isInView2,
     isInView3,
     historyHasPrevious,
@@ -291,5 +299,6 @@ export const useInteractionStore = defineStore('interaction', () => {
     toggleView3Interpretation,
     canvasBackground,
     setCanvasBackground,
+    setHighlight,
   }
 })

@@ -1,4 +1,4 @@
-export type ViewState = 'VIEW_1' | 'VIEW_2' | 'VIEW_3'
+export type ViewState = 'VIEW_0' | 'VIEW_2' | 'VIEW_3'
 
 export type ImageId = string
 

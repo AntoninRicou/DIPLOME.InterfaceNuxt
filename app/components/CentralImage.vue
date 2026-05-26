@@ -101,7 +101,12 @@ function layerStyle(i: number) {
 </script>
 
 <template>
-  <div class="central-image" aria-hidden="true">
+  <TransitionGroup
+    name="layer-fade"
+    tag="div"
+    class="central-image"
+    aria-hidden="true"
+  >
     <div
       v-for="(id, i) in ids"
       :key="`${i}:${id}`"
@@ -110,7 +115,7 @@ function layerStyle(i: number) {
     >
       <AtlasThumb :id="id" :alt="id" fit="contain" />
     </div>
-  </div>
+  </TransitionGroup>
 </template>
 
 <style scoped>
@@ -138,4 +143,17 @@ function layerStyle(i: number) {
   max-width: none;
   max-height: none;
 }
+/* TransitionGroup hooks. New layers appear instantly (no fade-in — the
+   caller may pin them, and a fade-in would feel laggy on hover). Layers
+   leaving the v-for fade out instead of cutting. The existing transition
+   on transform/width/height keeps stagger reshuffles smooth — opacity is
+   an additive concern on top. */
+.layer-fade-leave-active {
+  transition: opacity 1400ms ease-out;
+}
+.layer-fade-leave-to {
+  opacity: 0;
+}
+/* Leaving layers retain the .layer class (position: absolute) so they
+   fade in place rather than reflowing. */
 </style>

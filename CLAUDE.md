@@ -123,11 +123,17 @@ They are not traditional routes or pages.
 
 The progression is:
 
-VIEW-1 → VIEW-2 → VIEW-3
+VIEW-0 → VIEW-2 → VIEW-3
+
+VIEW-0 is the canvas-disperse entry phase (an iframe-embedded instance of
+`project` running locally inside `interface_nuxt`). It replaces the earlier
+DOM-based VIEW-1, which has been removed entirely — there is no
+intermediate DOM-list selector and no fallback path. Clicking an image on
+the canvas drives `selectImage` and jumps directly to VIEW-2.
 
 Once the system enters VIEW-3, it must never return to:
 
-* VIEW-1
+* VIEW-0
 * VIEW-2
 
 However, navigation inside VIEW-3 remains reversible.
@@ -162,16 +168,19 @@ project         →  pure renderer of (state, focus(id), time)
 `VIEW` and `STATE` are not synonyms. They belong to different layers and use
 different vocabularies, and there is **no 1:1 correspondence** between them.
 
-* **VIEW** (`VIEW_1` / `VIEW_2` / `VIEW_3`) is an **interaction phase**, owned
+* **VIEW** (`VIEW_0` / `VIEW_2` / `VIEW_3`) is an **interaction phase**, owned
   by `interface_nuxt`. It describes what the user is doing in the UI:
-  selecting, buffering, exploring relations.
-* **STATE** (`single` / `split` / `overview`) is a **render state**, owned by
-  `project`. It describes what is drawn on the spatial canvas: a single
-  full-frame map, the 2×2 relational grid, or the zoomed-out grid.
+  selecting (on the embedded canvas), buffering, exploring relations.
+* **STATE** (`single` / `split` / `overview` / `disperse`) is a **render
+  state**, owned by `project`. It describes what is drawn on the spatial
+  canvas: a single full-frame map, the 2×2 relational grid, the zoomed-out
+  grid, or the dispersing-particle field. Only the iframe instance ever
+  enters `disperse`; the standalone project window cycles through
+  `single` / `split` / `overview` only.
 
 VIEW-2 in particular has **no corresponding render state** — it is the UI
 mirror of an in-flight `single → split` morph that was kicked off at the
-VIEW-1 click. `interface_nuxt` orchestrates interaction phases; `project`
+VIEW-0 click. `interface_nuxt` orchestrates interaction phases; `project`
 spatializes render states. They speak past each other deliberately, with the
 socket as a one-way translation: interaction events → render-state
 directives.
@@ -183,7 +192,7 @@ vocabulary.
 
 ### State table
 
-Drivers: the first VIEW-1 click keys the `single → split` morph; explicit
+Drivers: the first VIEW-0 click keys the `single → split` morph; explicit
 user confirmation **while at branch depth `>= 10`** keys the `split →
 overview` transition; bootstrap keys the initial `single`. **VIEW-2 has no
 render state** — it is a UI-only buffer that mirrors the in-flight `single
@@ -191,14 +200,15 @@ render state** — it is a UI-only buffer that mirrors the in-flight `single
 
 | Interaction event                                                       | Wire emission                          | Resulting render state |
 | ----------------------------------------------------------------------- | -------------------------------------- | ---------------------- |
-| socket-register bootstrap or reconnect (no clicks yet, `imageClick = 0`) | `path-clear` + `set-state('single')` + `set-mask(0, 0)` | `single` (full reset; mask transparent) |
-| first VIEW-1 click                                                      | `set-mask(1, 0)` + `set-state('split', 500)` + `focus(storedImageId)` | `single → split` (500ms morph, hidden behind opaque mask; mask hold continues for `VIEW_2_AUTO_ADVANCE_MS = 10500`) |
+| socket-register bootstrap or reconnect (no clicks yet, `imageClick = 0`) | `path-clear` + `set-state('single')` + `set-mask(0, 0)` + `set-canvas-bg(store.canvasBackground)` | `single` (full reset; mask transparent) |
+| first VIEW-0 click (canvas pick)                                        | `set-mask(1, 0)` + `set-state('split', 500)` + `focus(storedImageId)` | `single → split` (500ms morph, hidden behind opaque mask; mask hold continues for `VIEW_2_AUTO_ADVANCE_MS = 10500`) |
 | VIEW-3 entry via timer (auto)                                           | `set-mask(0, 400)` + `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change; mask reveals over 400ms) |
 | VIEW-3 entry via skip                                                   | `set-mask(0, 0)` + `focus(storedImageId)` (idempotent re-assertion) | `split` (no state change; instant cut to whatever frame project is on) |
 | VIEW-3 related-image click (`activateCentral`, pre-overview, pre-cap)   | `focus(newId)` + `path-segment(prevId, newId)`, prefixed by `path-truncate(historyIndex)` if mid-branch | `split` (no state change) |
 | VIEW-3 related-image click (`activateCentral`, at cap or post-overview) | post-overview: `focus(newId)` only — at cap: **nothing** on the wire | `split` (no state change; read-only) |
 | history nav (`stepBack` / `stepForward` / `jumpToHistory`)              | `focus(historicalId)`                  | `split` (no state change) |
 | user **explicitly confirms** overview while at branch depth `>= 10`     | `set-state('overview')`                | `split → overview`     |
+| transient hover feedback (`store.setHighlight(id)` from any view)       | `set-highlight({ id: string \| null })` | no render-state change — perceptual overlay only (see *SET-HIGHLIGHT*) |
 
 **`overview` is not a threshold-triggered state.** Reaching branch depth
 `>= 10` (i.e. `historyIndex + 1 >= 10`) only marks overview as **eligible**;
@@ -207,10 +217,16 @@ transition to `overview` happens only when the user performs an explicit
 confirmation action (e.g. clicking a confirmation button in VIEW-3) — see
 *overview eligibility & confirmation* below.
 
-> **Project-internal note.** Project also defines a `disperse` render state
-> in its `STATES` table; `interface_nuxt` deliberately never emits it. It is
-> a project-internal animation mode reserved for project's own future use
-> and has no interaction-side trigger.
+> **`disperse` render state.** Project's fourth render state, used by the
+> VIEW-0 canvas-embed instance only. The standalone project window (the
+> relay-connected one) **never** receives `set-state('disperse')`; that
+> render state is reached exclusively by the iframe instance, which boots
+> directly into `disperse` via the `?embed=1` URL flag and **does not
+> connect to the socket relay at all** (see *VIEW-0 — CANVAS ENTRY PHASE*
+> and *CURRENT DEVELOPMENT SCOPE* exception #4). The wire vocabulary
+> therefore still carries only `single` / `split` / `overview` as
+> `set-state` targets; `disperse` is configured at iframe boot, not pushed
+> over the wire.
 
 ### `imageClick` — session-level selection counter
 
@@ -228,13 +244,13 @@ depth** (`historyIndex + 1`), bounded to `[1..10]` (see *NAVIGATION MEMORY*).
 
 `imageClick` counts only new image selection events:
 
-* VIEW-1 selection (the first image): **+1**
+* VIEW-0 selection (the first image, picked on the embedded canvas): **+1**
 * VIEW-3 `central_activate` (related-image click): **+1**, but only while
   `overviewConfirmed === false` and the activation actually extends the branch
 * History navigation (`stepBack`, `stepForward`, `jumpToHistory`): **no change**
 * VIEW transitions themselves: **no change**
 
-VIEW-3 entry **does not** increment `imageClick` — it reuses the image stored from VIEW-1.
+VIEW-3 entry **does not** increment `imageClick` — it reuses the image stored from VIEW-0.
 
 Consequences:
 
@@ -252,7 +268,7 @@ Consequences:
 
 **VIEW-2** is a UI-only buffer phase. During VIEW-2 the socket emits
 **nothing** — project is already morphing into `split` because that emission
-fired at the VIEW-1 click moment. VIEW-2 is the UI mirror of that in-flight
+fired at the VIEW-0 click moment. VIEW-2 is the UI mirror of that in-flight
 morph; it does not have a render state of its own.
 
 **History navigation** (`stepBack`, `stepForward`, `jumpToHistory`) emits
@@ -263,7 +279,7 @@ move project's camera to track the user's UI navigation through past
 selections.
 
 **VIEW-3 entry emits no `set-state`.** The `single → split` morph is already
-underway (or already complete) from the VIEW-1 click, and project's camera
+underway (or already complete) from the VIEW-0 click, and project's camera
 has been tracking `storedImageId` since that click moment. VIEW-3 entry
 re-emits `focus(storedImageId)` as an idempotent re-assertion of the same
 target the click already established — project's `focusOn` is idempotent,
@@ -426,7 +442,7 @@ the rest of the session. The wire and the interaction logic are both frozen:
 Summary of `imageClick` rules (final):
 
 * Increments **only on explicit user image selection events** that actually
-  extend the active branch, *before* overview is confirmed (VIEW-1 first
+  extend the active branch, *before* overview is confirmed (VIEW-0 first
   click; VIEW-3 `central_activate` while not at the branch cap).
 * Never affected by VIEW transitions, history navigation, `confirmOverview()`,
   or any post-overview interaction.
@@ -494,42 +510,148 @@ source of truth for behavior history.
 
 ---
 
-## VIEW-1 — pre-selection interaction phase (interface_nuxt)
+## VIEW-0 — CANVAS ENTRY PHASE (interface_nuxt)
 
-VIEW-1 is the pre-selection interaction phase. It is a UI-only surface where
-the user picks the first image. VIEW-1 is **not** a render state — see
-*VIEW ≠ STATE* — and has no spatial meaning of its own. While the user is in
-VIEW-1, project sits in `single`.
+VIEW-0 is the entry interaction phase. The user picks the first image by
+clicking a sprite in an **iframe-embedded instance of `project`** running
+locally inside `interface_nuxt`'s page (the `View0Disperse` component
+mounts the iframe at `${projectUrl}?embed=1`). VIEW-0 is **not** a render
+state — see *VIEW ≠ STATE* — and has no spatial meaning of its own. The
+standalone project window (the relay-connected one) sits in `single`
+throughout VIEW-0 and is completely unaffected by what happens in the
+iframe.
 
-### Behavior
+This replaces the earlier DOM-based VIEW-1. VIEW-1 has been removed
+entirely: there is no DOM list of selectable thumbnails, no fallback path,
+no entry-routing branch. The canvas is the only entry surface.
 
-At system bootstrap, `interface_nuxt` registers with the relay and emits
-`set-state('single')`, placing project in `single`.
+### Iframe contract: `?embed=1`
 
-When the first image is selected in VIEW-1:
+The iframe URL carries an `?embed=1` flag. Inside `project`'s `main.js`,
+that flag activates **embed mode**, which:
 
-* the selection is stored in the interaction state
+* initialises `stateManager` directly into `disperse` (skipping the
+  state-table guard that normally blocks `single → disperse`),
+* **does not call `setupSocketBridge`** — the iframe instance is
+  intentionally **disconnected from the socket relay**, so it never
+  receives `set-state`, `focus`, `set-mask`, `set-canvas-bg`,
+  `set-highlight`, or any other interface_nuxt emission,
+* once canvas-1 is ready, calls `enterDisperse()` and `enablePicking({
+  onHover, onClick })`,
+* applies the `'big'` highlight preset (the iframe never goes through
+  `goTo`, which is where presets are normally chosen per state),
+* sets `body[data-canvas-bg = 'gradient']` inline so the disperse field
+  sits on the same day backdrop as the rest of project.
+
+Embed mode is the **fourth scoped project-side exception** (see *CURRENT
+DEVELOPMENT SCOPE* exception #4). Its surface is small and tightly
+scoped: a URL flag, an alternate boot path that swaps `initial` and
+skips the socket bridge, and a picker (`enablePicking`) that posts back
+out via `postMessage`. There is no state-machine interpretation, no
+relational logic, and nothing on the wire from this instance.
+
+### Hover + click protocol: `postMessage`
+
+The iframe's `enablePicking` callback hands two events to
+`window.parent.postMessage(...)`:
+
+* `{ type: 'view0:image-hover', imageId: string | null }` — emitted on
+  every change of hovered sprite (or `null` on hover-out). The parent
+  uses this both to drive its DOM-centered preview overlay and to
+  forward the same id to the standalone project via
+  `store.setHighlight(id)` (see *SET-HIGHLIGHT*).
+* `{ type: 'view0:image-click', imageId: string }` — emitted on click.
+  The parent passes `imageId` straight into `store.selectImage(...)`,
+  which is the same store action the old DOM VIEW-1 used; from there
+  the existing socket emission sequence runs untouched.
+
+The parent (`View0Disperse.vue`) validates `event.origin` against
+`config.public.projectUrl`'s origin before accepting any message;
+mismatches are warned and dropped.
+
+`postMessage` is the **only** out-of-iframe channel; the iframe still
+does **not** talk to the relay.
+
+### Click semantics on the canvas
+
+`enablePicking` uses **screen-space proximity** hit testing instead of
+pixel-exact raycasting: it picks the nearest sprite within
+`hoverRadiusPx` (default 36 px) of the cursor. Two consequences relevant
+to the contract:
+
+* hover stays usable on fast-moving disperse sprites — the radius is
+  generous enough that small wandering targets remain grabbable,
+* the click event reuses the **most recent hover index** (`lastHoverIndex`
+  inside `enablePicking`) rather than re-picking on the click. This
+  guarantees the id sent in `view0:image-click` is the same id that
+  drove the DOM preview and the standalone project's halo — they cannot
+  diverge.
+
+Additionally, while a sprite is hovered its position is **frozen** in the
+disperse drift loop (anchor is back-solved continuously so drift resumes
+seamlessly on hover-out). Combined with the click-reuses-last-hover
+rule, this eliminates the "the image moved out from under the cursor at
+click time" race.
+
+### Selection flow
+
+When `view0:image-click` reaches the parent and `store.selectImage(id)`
+fires (guard: `currentView === 'VIEW_0'`):
+
+* the selection is stored in `activeCentralImageId`
 * `imageClick` is incremented (0 → 1)
-* the system transitions immediately and permanently to VIEW-2
+* `currentView` jumps directly to `VIEW_2` (no intermediate VIEW-1)
+* the existing VIEW-2 timer (`startView2Timer`) starts
 * `project` receives `set-mask(1, 0)` — snapping the project-side render
   mask to fully opaque so the morph kickoff frame is hidden (see
-  *VIEW-2 — RENDER MASK*). This MUST be emitted **before** `set-state`
-  in the same bundle; `socket.io-client` preserves emission order
+  *VIEW-2 — RENDER MASK*). MUST be emitted **before** `set-state` in
+  the same bundle; `socket.io-client` preserves emission order
 * `project` receives `set-state('split', 500)` — kicking off a fast 500ms
-  `single → split` morph **at the click moment**, behind the opaque mask.
-  The morph completes well before the mask reveals on either exit path
-  (auto at `VIEW_2_AUTO_ADVANCE_MS = 10500`, or skip at any moment > 500ms),
-  so VIEW-3 entry always reveals a fully-settled `split` frame
+  `single → split` morph **at the click moment**, behind the opaque
+  mask. The morph completes long before the mask reveals on either exit
+  path (auto at `VIEW_2_AUTO_ADVANCE_MS = 10500`, or skip), so VIEW-3
+  entry always reveals a fully-settled `split` frame
 * `project` also receives `focus(storedImageId)` in the same emission
-  bundle — the camera target is bound at click time so the morph and the
-  camera convergence are co-causal with the user's selection
+  bundle — the camera target is bound at click time so the morph and
+  the camera convergence are co-causal with the user's selection
 
-VIEW-3 entry emits **no** `set-state` of its own — the morph that was kicked
-off here is already in flight (or already complete) by then. VIEW-3 entry
-**re-emits** `focus(storedImageId)` as an idempotent re-assertion of the
-target established at click time; project's `focusOn` is idempotent by
-construction, so this is a no-op confirmation rather than a first-time
-binding.
+The wire identity here is the same as it was in the DOM VIEW-1 era;
+only the source of the click changed. The iframe receives none of these
+emissions (it's not on the relay) and is unmounted on the
+VIEW-0 → VIEW-2 transition anyway.
+
+### Hover preview (DOM-centered overlay)
+
+While the user is hovering sprites, `View0Disperse` keeps a small
+**hover stack** of recent `imageId`s and renders them at viewport
+centre via the same `CentralImage` component VIEW-2 uses. Geometry
+matches VIEW-2's `.central-slot` exactly (`top: 50%`, `left: 50%`,
+`width: 22vmin`, `height: 22vmin`), so the click → VIEW-2 handoff lands
+the just-clicked image at pixel-stable position and size.
+
+Stack mechanics (interface-only, never on the wire):
+
+* the **pinned** entry (the sprite currently under the cursor) never
+  expires while hovered;
+* on hover change, the previous pin is demoted to **expiring** with a
+  lifetime of `STICKY_HOLD_MS = 1000`, then peeled out via a 1400 ms
+  opacity-only fade (no fade-in — entries appear instantly);
+* re-hovering an expiring sprite re-pins it with a fresh lifetime, no
+  duplicates;
+* `CentralImage`'s `TransitionGroup` handles the leave transition;
+  ongoing transform/width/height transitions for stack reshuffles are
+  independent.
+
+### Standalone project — unaffected by VIEW-0
+
+The standalone project window receives the canonical boot sequence
+(`path-clear` + `set-state('single')` + `set-mask(0, 0)` +
+`set-canvas-bg`) on register and stays in `single` until the VIEW-0
+click fires the `set-state('split', 500)` sequence. The hover halo on
+the standalone is driven separately via `set-highlight` (see
+*SET-HIGHLIGHT*) — it is **not** triggered by `view0:image-hover`
+directly, but by the parent forwarding the same id through
+`store.setHighlight(...)`.
 
 ### Split transition duration and VIEW-2 buffer duration — decoupled
 
@@ -562,7 +684,7 @@ purely a UI-side trigger:
 
 Transition timeline:
 
-1. VIEW-1 click → emits `set-mask(1, 0)`, then `set-state('split', 500)`,
+1. VIEW-0 click → emits `set-mask(1, 0)`, then `set-state('split', 500)`,
    then `focus(storedImageId)` — bundled, **immediately**, in that order.
    The mask snaps to opaque first so the morph kickoff frame is hidden.
 2. Project completes the `single → split` morph in 500ms, behind the
@@ -583,15 +705,6 @@ Transition timeline:
 Both exit paths produce the **same** wire identity for `focus`; only the
 mask's `duration` differs.
 
-### Note on the word "disperse"
-
-In `interface_nuxt`, "disperse" is sometimes used informally to describe the
-visual arrangement of selectable images in VIEW-1. It is **not** the
-emission target — VIEW-1 corresponds to project's `single` render state.
-Project also defines a `disperse` render state internally, but
-`interface_nuxt` deliberately never emits it; it is project-internal and
-reserved for project's own future use.
-
 ---
 
 ## VIEW-2 — UI transition phase (interface_nuxt)
@@ -599,7 +712,7 @@ reserved for project's own future use.
 VIEW-2 is a UI-only transition phase that brackets project's (short)
 `single → split` morph plus a deliberate hold. It is not a render state —
 see *VIEW ≠ STATE* — and the wire emits **nothing** during VIEW-2; the
-relevant `set-state('split', SPLIT_MORPH_MS)` already fired at the VIEW-1
+relevant `set-state('split', SPLIT_MORPH_MS)` already fired at the VIEW-0
 click moment, and the morph itself completes within the first 500ms of
 VIEW-2.
 
@@ -610,7 +723,7 @@ Two independent constants own this:
 * `VIEW_2_AUTO_ADVANCE_MS = 10500` — the VIEW-2 UI buffer / mask hold
   duration. Drives the auto-advance timer only; never on the wire.
 
-The two are deliberately decoupled (see *VIEW-1 — Split transition
+The two are deliberately decoupled (see *VIEW-0 — Split transition
 duration and VIEW-2 buffer duration*). The morph completes long before the
 auto-advance fires, so by the time the mask reveals (auto or skip),
 project is in a fully-settled `split` frame.
@@ -877,7 +990,7 @@ The ordering is intentional and load-bearing:
 
 ### Actions that do NOT emit path directives
 
-* `selectImage` (VIEW-1 first click) — no path yet exists; there is no
+* `selectImage` (VIEW-0 first click) — no path yet exists; there is no
   `prev` to draw from. The first visible segment appears on the **second**
   activation overall, i.e. the first VIEW-3 related-image click.
 * `enterRelationalView` (VIEW-2 → VIEW-3 entry) — only re-asserts
@@ -989,8 +1102,8 @@ centralStackActiveIndex = navigationHistory.length > 0 ? historyIndex : 0
 
 The VIEW-2 fallback exists because `navigationHistory` only receives its
 first push at VIEW-3 entry (see *NAVIGATION MEMORY* and the
-`enterRelationalView` flow in *VIEW-1*), but the central image needs to
-render during VIEW-2 right after the VIEW-1 selection. The fallback
+`enterRelationalView` flow in *VIEW-0*), but the central image needs to
+render during VIEW-2 right after the VIEW-0 selection. The fallback
 yields the single-element deck `[activeCentralImageId]` until the first
 real navigation entry exists.
 
@@ -1048,7 +1161,7 @@ reads as a clean "card flip to front."
 
 | Interaction event                                     | Effect on `centralStack`              | Effect on `activeIndex`        |
 | ----------------------------------------------------- | -------------------------------------- | ------------------------------- |
-| VIEW-1 first click (`selectImage`)                    | `[id]` (VIEW-2 fallback)               | `0`                             |
+| VIEW-0 first click (`selectImage`)                    | `[id]` (VIEW-2 fallback)               | `0`                             |
 | VIEW-3 entry (`enterRelationalView`)                  | `[id]` (now via `navigationHistory`)   | `0`                             |
 | VIEW-3 related click (`activateCentral`, pre-cap, pre-overview) | append (and truncate forward if mid-branch) | new `historyIndex`         |
 | `stepBack` / `stepForward` / `jumpToHistory`          | unchanged (deck preserved)             | new `historyIndex` (active rises to top z) |
@@ -1194,7 +1307,7 @@ concerns. `interface_nuxt` is color-blind and easing-blind by design.
 | Moment                                                    | Emission              | Effect                                                |
 | --------------------------------------------------------- | --------------------- | ----------------------------------------------------- |
 | socket-register (boot or reconnect)                       | `set-mask(0, 0)`      | Defensive: ensure mask is transparent on cold boot.   |
-| First VIEW-1 click, **before** `set-state('split', 500)` | `set-mask(1, 0)`      | Snap mask to opaque, hide morph kickoff frame.        |
+| First VIEW-0 click, **before** `set-state('split', 500)` | `set-mask(1, 0)`      | Snap mask to opaque, hide morph kickoff frame.        |
 | VIEW-3 entry via timer (auto path)                        | `set-mask(0, 400)`    | Fade reveal of settled split state over 400ms.        |
 | VIEW-3 entry via skip (user action)                       | `set-mask(0, 0)`      | Instant cut; user explicitly chose to bypass reveal.  |
 
@@ -1202,7 +1315,7 @@ The reveal duration `400` is owned by `interface_nuxt` as the constant
 `MASK_REVEAL_MS`. It runs on the wire as `set-mask(0, 400)`; the constant
 itself is not on the wire.
 
-The ordering at the VIEW-1 click moment is **load-bearing**:
+The ordering at the VIEW-0 click moment is **load-bearing**:
 
 * `set-mask(1, 0)` MUST be emitted **before** `set-state('split', 500)`.
 * `socket.io-client` preserves emission order on a single connection, so
@@ -1337,7 +1450,7 @@ background regardless of its prior state.
 
 ### Actions that do NOT emit `set-canvas-bg`
 
-* Any non-VIEW-3 action (VIEW-1 selection, VIEW-2 skip, etc.).
+* Any non-VIEW-3 action (VIEW-0 selection, VIEW-2 skip, etc.).
 * Any VIEW-3 progression action (`activateCentral`, `confirmOverview`,
   history navigation, etc.) — the background is orthogonal to render
   state and never changes implicitly.
@@ -1380,6 +1493,117 @@ On wire receipt of `set-canvas-bg({ mode })`:
 
 ---
 
+## SET-HIGHLIGHT — TRANSIENT PERCEPTION PRIMITIVE
+
+`set-highlight` is a **third interaction primitive**, sitting alongside
+`selectImage → set-state / focus / mask` (navigation) and the persistent
+visual surfaces (path, mask, canvas background). It exposes a
+**transient, ephemeral spatial-feedback channel**: "draw a hover halo on
+the project canvas at this image id, or clear it." Nothing more.
+
+### Why this primitive exists
+
+The user-facing intent is that hovering an image in *any* view of
+`interface_nuxt` should also light up the same image on project's
+canvas — so when the user hovers a sprite on the VIEW-0 disperse field,
+they can see "where this image lives" on the standalone project's
+`single` map. The same channel is available to any future view (a
+VIEW-3 relation-cell hover, the central-stack deck, etc.); the per-view
+decision is just *whether* to call the emitter, not anything about the
+primitive.
+
+### Wire vocabulary
+
+One directive, flowing from `interface_nuxt` to `project`:
+
+* `set-highlight({ id: string | null })` — highlight the sprite for `id`
+  on every ready canvas (or clear all highlights with `null`).
+
+`id` is the only value on the wire. The visual treatment (sprite
+scaling, glow size, easing, per-state preset) is **owned entirely by
+project's `pointsManager`** and is not a wire concern.
+
+### Store action
+
+`store.setHighlight(id: ImageId | null)` is the single call site for
+views. It forwards to `projectSocket.setHighlight(id)`. It **must not**
+mutate any persisted store value:
+
+* it does **not** touch `navigationHistory`, `historyIndex`,
+  `activeCentralImageId`, `imageClick`, `overviewConfirmed`,
+  `centralStack`, or `currentView`,
+* it does **not** affect view progression,
+* it is **not** persisted to the `/api/interaction` log,
+* it is **not** rate-limited at the store layer — pointer events are
+  already coalesced by the browser, and the project handler is
+  idempotent for repeat same-id calls.
+
+This independence is non-negotiable: highlight is a **global ephemeral
+perception channel**, not part of navigation state.
+
+### Emission rules
+
+`store.setHighlight` is callable from any view's hover handler.
+Currently wired:
+
+* VIEW-0 `view0:image-hover` postMessage handler — forwards the iframe's
+  hovered id to the standalone project.
+
+Reserved for future use (views are free to add):
+
+* VIEW-3 relation-cell hover, central-stack hover, history-thumbnail
+  hover, anywhere else hover semantics make sense.
+
+There is no implicit emission — every `set-highlight` call originates
+from a view choosing to forward a hover.
+
+### Project-side rendering contract
+
+`project/src/commandsManager.js` registers `'set-highlight'` →
+`actions.setHighlight(payload)`. `actions.setHighlight` iterates every
+ready app and calls `app.object.highlight(id)`, which delegates to
+`pointsManager.highlight(id)`. That function:
+
+* sets per-instance `highlightTargetT[i]` (1 for the new primary, 0 for
+  the previous primary if any), adds the affected indices to an
+  `activeHighlights` Set,
+* runs an exponential-smoothing tick each frame to ease scale + glow
+  toward their targets with `easeInOutCubic`,
+* keeps the glow anchored at `lastPrimaryIndex` during fade-out so the
+  halo eases out in place rather than cutting.
+
+The visual magnitude is **state-dependent**: `stateManager.goTo`
+chooses a preset per render state (`big` for `single` / `overview` /
+`disperse`, `default` for `split`) and broadcasts the preset to every
+canvas. The wire does **not** carry preset info — it's a
+project-internal rendering decision tied to camera proximity (far
+cameras need amplification, close cameras don't).
+
+### Iframe instance and `set-highlight`
+
+The iframe (`?embed=1`) instance is not connected to the relay, so it
+**does not receive** `set-highlight`. Its own hover halo is driven
+locally by `enablePicking`'s `setHover()` → `points.highlight(id)`,
+not over the wire. The wire-driven halo is only visible on the
+relay-connected **standalone** project window.
+
+### Invariants
+
+* `set-highlight` never touches `project`'s state machine, render loop,
+  point system positions, path renderer, focus state, or camera. It is
+  **purely a visual emphasis on a single instance**.
+* The highlight is **client-only visual state**. Not persisted, not on
+  the server, not in `localStorage`, not on the wire beyond the
+  per-event directive.
+* Same shape as `set-mask` and `set-canvas-bg`: a scoped perceptual
+  primitive driven by an explicit `interface_nuxt` directive, with
+  zero project-side interpretation.
+* Independent of `set-state` and `focus`: a `set-highlight(id)` can be
+  emitted in any render state at any time, and conversely view
+  progression events never emit `set-highlight` implicitly.
+
+---
+
 ## VIEW-3 — VISUAL CONTINUITY WITH PROJECT
 
 `interface_nuxt`'s surface is composed to read as **one continuous field
@@ -1403,7 +1627,7 @@ All three views opt in by applying the class on their root element:
 
 | View    | Class binding                                  | Behavior                                              |
 | ------- | ---------------------------------------------- | ----------------------------------------------------- |
-| VIEW-1  | hardcoded `bg-gradient`                        | always day (selection screen, before any toggle).     |
+| VIEW-0  | inline `body[data-canvas-bg="gradient"]` (iframe boot) | always day (the disperse entry surface; never toggled). |
 | VIEW-2  | hardcoded `bg-gradient`                        | always day (one-shot transition buffer, no toggle).   |
 | VIEW-3  | dynamic `bg-${store.canvasBackground}`         | toggleable via VIEW-3's `night`/`gradient` buttons.   |
 
@@ -1461,7 +1685,7 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with three explicit exceptions**:
+Do not modify project, **with five explicit exceptions**:
 
 1. The user-driven path-rendering directive surface inside `project` —
    `path-segment`, `path-truncate`, and the `pathTrace` primitive they
@@ -1480,10 +1704,28 @@ Do not modify project, **with three explicit exceptions**:
    perceptual presentation toggle for the canvases' backdrop. It is a
    pure DOM/CSS overlay with no render-loop, state-machine, or
    interaction-logic participation. See *CANVAS BACKGROUND*.
+4. The VIEW-0 canvas-embed surface inside `project` — the `?embed=1` URL
+   flag in `main.js`, the alternate boot path it activates (boots
+   directly into `disperse`, skips the socket bridge, applies the `big`
+   highlight preset, sets the gradient backdrop inline), and the
+   `enablePicking({ onHover, onClick })` API in `app.js` that posts
+   `view0:image-hover` / `view0:image-click` messages back to
+   `window.parent` via `postMessage`. This instance is **detached from
+   the relay** — it neither sends nor receives any wire event. See
+   *VIEW-0 — CANVAS ENTRY PHASE*.
+5. The transient highlight directive surface inside `project` —
+   `set-highlight`, the `actions.setHighlight` handler in `commands.js`,
+   and the per-instance eased highlight + state-keyed preset machinery in
+   `pointsManager.js` (`highlight`, `setHighlightPreset`, the active-set
+   tick, the glow follow). It is a pure perceptual emphasis on a single
+   instance with no render-loop, state-machine, or interaction-logic
+   participation. See *SET-HIGHLIGHT*.
 
-All three exceptions are scoped tightly: pure rendering surfaces driven
-by explicit `interface_nuxt` directives. No project-side interpretation,
-derivation, or interaction logic is permitted inside any of them.
+All five exceptions are scoped tightly: pure rendering / configuration
+surfaces driven by explicit `interface_nuxt` directives (or, in the
+VIEW-0 case, by an out-of-band `postMessage` channel for the canvas-pick
+input). No project-side interpretation, derivation, or interaction logic
+is permitted inside any of them.
 
 At this stage:
 

@@ -9,6 +9,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       socketUrl: process.env.NUXT_PUBLIC_SOCKET_URL || 'http://localhost:3001',
+      projectUrl: process.env.NUXT_PUBLIC_PROJECT_URL || 'http://localhost:5173',
     },
   },
 })
