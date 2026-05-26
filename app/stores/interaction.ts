@@ -1,10 +1,10 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import type { ImageId, ViewState } from '~/types/interaction'
+import type { ImageId } from '~/types/interaction'
 import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 import { useProjectSocket } from '~/composables/useProjectSocket'
+import { useViewStateStore } from '~/stores/viewState'
 
-const VIEW_ORDER: ViewState[] = ['VIEW_0', 'VIEW_2', 'VIEW_3']
 const SPLIT_MORPH_MS = 500
 const VIEW_2_AUTO_ADVANCE_MS = 10500
 const MASK_REVEAL_MS = 400
@@ -13,8 +13,8 @@ const OVERVIEW_THRESHOLD = 10
 export const useInteractionStore = defineStore('interaction', () => {
   const { emit } = useInteractionEmitter()
   const projectSocket = useProjectSocket()
+  const viewState = useViewStateStore()
 
-  const currentView = ref<ViewState>('VIEW_0')
   const navigationHistory = ref<ImageId[]>([])
   const historyIndex = ref(-1)
   const activeCentralImageId = ref<ImageId | null>(null)
@@ -56,9 +56,6 @@ export const useInteractionStore = defineStore('interaction', () => {
   let view2Timer: ReturnType<typeof setInterval> | null = null
   let view2EnteredAt = 0
 
-  const isInView0 = computed(() => currentView.value === 'VIEW_0')
-  const isInView2 = computed(() => currentView.value === 'VIEW_2')
-  const isInView3 = computed(() => currentView.value === 'VIEW_3')
   const historyHasPrevious = computed(() => historyIndex.value > 0)
   const historyHasForward = computed(
     () => historyIndex.value >= 0 && historyIndex.value < navigationHistory.value.length - 1,
@@ -87,18 +84,12 @@ export const useInteractionStore = defineStore('interaction', () => {
     }, 50)
   }
 
-  function advanceView() {
-    const i = VIEW_ORDER.indexOf(currentView.value)
-    if (i < 0 || i >= VIEW_ORDER.length - 1) return
-    currentView.value = VIEW_ORDER[i + 1]!
-  }
-
   function selectImage(id: ImageId) {
-    if (currentView.value !== 'VIEW_0') return
+    if (!viewState.is('ENTRY')) return
     activeCentralImageId.value = id
     imageClick.value += 1
-    const from = currentView.value
-    currentView.value = 'VIEW_2'
+    const from = viewState.current
+    viewState.advance()
     startView2Timer()
     emit({
       type: 'central_activate',
@@ -110,7 +101,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     emit({
       type: 'view_advance',
       from,
-      to: currentView.value,
+      to: viewState.current,
       clientTimestamp: Date.now(),
     })
     projectSocket.setMask(1, 0)
@@ -119,19 +110,19 @@ export const useInteractionStore = defineStore('interaction', () => {
   }
 
   function enterRelationalView(reason: 'auto' | 'skip' = 'auto') {
-    if (currentView.value !== 'VIEW_2') return
+    if (!viewState.is('TRANSITION')) return
     view2ExitReason.value = reason
     stopView2Timer()
     if (activeCentralImageId.value && navigationHistory.value.length === 0) {
       navigationHistory.value.push(activeCentralImageId.value)
       historyIndex.value = 0
     }
-    const from = currentView.value
-    advanceView()
+    const from = viewState.current
+    viewState.advance()
     emit({
       type: 'view_advance',
       from,
-      to: currentView.value,
+      to: viewState.current,
       clientTimestamp: Date.now(),
     })
     projectSocket.setMask(0, reason === 'auto' ? MASK_REVEAL_MS : 0)
@@ -139,7 +130,7 @@ export const useInteractionStore = defineStore('interaction', () => {
   }
 
   function activateCentral(id: ImageId) {
-    if (currentView.value !== 'VIEW_3') return
+    if (!viewState.is('RELATIONAL')) return
     if (activeCentralImageId.value === id) return
 
     // ── HARD GUARD — terminal OVERVIEW state. No store mutation below. ──
@@ -205,7 +196,7 @@ export const useInteractionStore = defineStore('interaction', () => {
   }
 
   function stepBackInHistory() {
-    if (currentView.value !== 'VIEW_3') return
+    if (!viewState.is('RELATIONAL')) return
     if (historyIndex.value <= 0) return
     const fromIndex = historyIndex.value
     historyIndex.value -= 1
@@ -221,7 +212,7 @@ export const useInteractionStore = defineStore('interaction', () => {
   }
 
   function stepForwardInHistory() {
-    if (currentView.value !== 'VIEW_3') return
+    if (!viewState.is('RELATIONAL')) return
     if (historyIndex.value >= navigationHistory.value.length - 1) return
     const fromIndex = historyIndex.value
     historyIndex.value += 1
@@ -237,7 +228,7 @@ export const useInteractionStore = defineStore('interaction', () => {
   }
 
   function jumpToHistory(targetIndex: number) {
-    if (currentView.value !== 'VIEW_3') return
+    if (!viewState.is('RELATIONAL')) return
     if (targetIndex < 0 || targetIndex >= navigationHistory.value.length) return
     if (targetIndex === historyIndex.value) return
     const fromIndex = historyIndex.value
@@ -271,7 +262,6 @@ export const useInteractionStore = defineStore('interaction', () => {
   }
 
   return {
-    currentView,
     navigationHistory,
     historyIndex,
     activeCentralImageId,
@@ -283,9 +273,6 @@ export const useInteractionStore = defineStore('interaction', () => {
     view2AutoAdvanceMs,
     view2RemainingMs,
     view2ExitReason,
-    isInView0,
-    isInView2,
-    isInView3,
     historyHasPrevious,
     historyHasForward,
     selectImage,

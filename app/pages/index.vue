@@ -1,17 +1,15 @@
 <script setup lang="ts">
-import { useInteractionStore } from '~/stores/interaction'
-import View0Disperse from '~/components/views/View0Disperse.vue'
-import View2Transition from '~/components/views/View2Transition.vue'
-import View3Relational from '~/components/views/View3Relational.vue'
+import { useViewStateStore } from '~/stores/viewState'
 
-const store = useInteractionStore()
+const viewState = useViewStateStore()
 </script>
 
 <template>
   <main>
-    <View0Disperse v-if="store.isInView0" />
-    <View2Transition v-else-if="store.isInView2" />
-    <View3Relational v-else-if="store.isInView3" />
+    <component
+      :is="viewState.activeComponent"
+      :key="viewState.current"
+    />
   </main>
 </template>
 
