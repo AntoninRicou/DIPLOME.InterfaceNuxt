@@ -2,46 +2,34 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import CentralImage from '~/components/CentralImage.vue'
+import { view3Interpretations, type View3ComponentId } from '~/view3/view3Interpretations'
 
 const store = useInteractionStore()
 
 // Canvas index ↔ quadrant mapping matches project's stateManager STATES.split.rects:
 //   0 = top-left, 1 = top-right, 2 = bottom-left, 3 = bottom-right
-// Each quadrant's `text` describes the mode of proximity that quadrant
-// represents; appears in place of the cross once the user clicks it.
-const QUADRANTS = [
-  {
-    index: 0,
-    x: '25%',
-    y: '25%',
-    text: 'The surrounding image are reflecting recurring visual structures such as shapes, and textures to the image picked.',
-  },
-  {
-    index: 1,
-    x: '75%',
-    y: '25%',
-    text: 'The surrounding image are retracing a lexical subject field based on historical sources linked to the image picked.',
-  },
-  {
-    index: 2,
-    x: '25%',
-    y: '75%',
-    text: 'The surrounding image are sharing a semantic embeddings related to the image picked.',
-  },
-  {
-    index: 3,
-    x: '75%',
-    y: '75%',
-    text: 'The surrounding image are previous user selections including the image picked. Yours will also contributes to the evolving map.',
-  },
+// Each quadrant's title + body content is sourced from `view3Interpretations`
+// (keyed by `componentId`), so VIEW_3 and VIEW_4 share a single content
+// source — no duplication.
+interface Quadrant {
+  index: number
+  x: string
+  y: string
+  componentId: View3ComponentId
+}
+const QUADRANTS: Quadrant[] = [
+  { index: 0, x: '25%', y: '25%', componentId: 'component_1' },
+  { index: 1, x: '75%', y: '25%', componentId: 'component_2' },
+  { index: 2, x: '25%', y: '75%', componentId: 'component_3' },
+  { index: 3, x: '75%', y: '75%', componentId: 'component_4' },
 ]
 
 // After the 4th cross is clicked (`allCanvasesZoomed` flips true), the
 // modes caption and the four corner labels (Mirror/Trace/Shift/Replay,
-// matching VIEW-4's RelationComponent quarter-tags) fade in 4s later.
-// No auto-advance to VIEW_4 — the transition out of VIEW_3 will come
-// from a future explicit trigger.
-const CAPTION_DELAY_MS = 4000
+// matching VIEW-4's RelationComponent quarter-tags) fade in 1s later.
+// No auto-advance to VIEW_4 — the transition out of VIEW_3 is driven
+// by the pulsing advance `+` button.
+const CAPTION_DELAY_MS = 1000
 
 // Corner labels appear at the four viewport corners at the same screen
 // positions VIEW-4's RelationComponent quarter-tags occupy, so the swap
@@ -64,6 +52,10 @@ watch(() => store.allCanvasesZoomed, (zoomed) => {
   if (!zoomed) return
   captionTimer = setTimeout(() => {
     showCaption.value = true
+    // Reveal the same four labels on the standalone project's canvases
+    // at the same moment the interface's corner-tags fade in, so both
+    // screens show MIRROR / TRACE / SHIFT / REPLAY in sync.
+    store.revealCornerLabels()
   }, CAPTION_DELAY_MS)
 })
 
@@ -75,7 +67,7 @@ onBeforeUnmount(clearTimers)
     <span
       v-for="c in CORNERS"
       :key="c.position"
-      class="corner-tag"
+      class="corner-label"
       :class="{ visible: showCaption }"
       :data-position="c.position"
     >
@@ -84,7 +76,7 @@ onBeforeUnmount(clearTimers)
 
     <template v-for="q in QUADRANTS" :key="q.index">
       <button
-        class="quadrant-cross"
+        class="cross-button cross-quadrant"
         :class="{ faded: store.canvasZoomed[q.index] }"
         :style="{ left: q.x, top: q.y }"
         :aria-label="`zoom canvas ${q.index + 1}`"
@@ -92,26 +84,28 @@ onBeforeUnmount(clearTimers)
       >
         +
       </button>
-      <p
-        class="quadrant-text"
+      <div
+        class="quadrant-text proximity-panel"
         :class="{ visible: store.canvasZoomed[q.index] }"
         :style="{ left: q.x, top: q.y }"
       >
-        {{ q.text }}
-      </p>
+        <p class="proximity-panel-title">{{ view3Interpretations[q.componentId].title }}</p>
+        <p class="proximity-panel-body">{{ view3Interpretations[q.componentId].body }}</p>
+      </div>
     </template>
 
     <div class="central-slot">
       <CentralImage :ids="store.centralStack" :active-index="store.centralStackActiveIndex" />
     </div>
 
-    <p class="caption" :class="{ visible: showCaption }">
-      Four modes of proximity, each shaping relations differently:<br>
-      Mirror (visual), Trace (source), Shift (semantic), Replay (collaborative).
-    </p>
+    <div class="caption-wrap" :class="{ visible: showCaption }">
+      <p class="caption">
+        Four modes of proximity, each shaping relations differently with the center image.
+      </p>
+    </div>
 
     <button
-      class="advance-control"
+      class="cross-button cross-advance"
       :class="{ visible: showCaption }"
       aria-label="continue to relational view"
       @click="store.enterRelationalView('skip')"
@@ -129,7 +123,7 @@ onBeforeUnmount(clearTimers)
 .view-2 {
   position: fixed;
   inset: 0;
-  color: #e8e8e8;
+  color: #595b54;
   z-index: 100;
 }
 
@@ -160,81 +154,66 @@ onBeforeUnmount(clearTimers)
   margin-left: -0.5px;
 }
 
-/* Corner tags — Mirror / Trace / Shift / Replay at the four viewport
-   corners. Pixel-positioned identically to VIEW-4's RelationComponent
-   `.quarter-tag` (top:0/left:0 etc., same monospace caps, same color)
-   so the labels stay put across the VIEW_3 → VIEW_4 swap. Fade in
-   together with the bottom caption, controlled by `showCaption`. */
-.corner-tag {
-  position: absolute;
-  font-family: monospace;
-  font-size: 0.62rem;
-  letter-spacing: 0.18em;
-  color: #4a4a52;
-  padding: 0.75rem 0.95rem;
-  pointer-events: none;
-  text-transform: uppercase;
+/* Corner labels — appearance + position come from the global
+   `.corner-label` in app.vue (shared with VIEW_4). VIEW_3 just gates
+   visibility on `showCaption`, fading them in alongside the caption. */
+.corner-label {
   z-index: 11;
   opacity: 0;
   transition: opacity 600ms ease-out;
-  /* Soft warm halo behind each label — layered text-shadows produce a
-     subtle bloom that lifts the dark-gray text off the gradient backdrop
-     without competing with the central image or the quadrant texts. */
-  text-shadow:
-    0 0 6px rgba(255, 242, 210, 0.85),
-    0 0 14px rgba(255, 240, 200, 0.55),
-    0 0 28px rgba(255, 238, 190, 0.28);
 }
-.corner-tag.visible { opacity: 1; }
-.corner-tag[data-position="tl"] { top: 0; left: 0; }
-.corner-tag[data-position="tr"] { top: 0; right: 0; }
-.corner-tag[data-position="bl"] { bottom: 0; left: 0; }
-.corner-tag[data-position="br"] { bottom: 0; right: 0; }
+.corner-label.visible { opacity: 1; }
 
-/* Quadrant crosses — small interactive "+" markers, one per quadrant.
-   Click → store.zoomCanvas(i) → project zooms that one canvas onto the
-   selected image. Hidden once the corresponding canvas is zoomed. */
-.quadrant-cross {
+/* Unified cross button — shared by the four quadrant zoom triggers and
+   the top-centre advance control. Same `+` glyph and visual treatment
+   as VIEW_4's `.interpret-control` (dark monospace on the gradient).
+   Pulsing glow draws attention so each cross reads as a click target.
+   Positional variants (.cross-quadrant / .cross-advance) below. */
+.cross-button {
   position: absolute;
-  transform: translate(-50%, -50%);
   background: transparent;
   border: none;
-  color: rgba(166, 154, 128, 0.85);
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-family: inherit;
-  font-size: 2rem;
+  font-size: 1.4rem;
   line-height: 1;
-  padding: 0.5rem;
+  letter-spacing: 0;
+  color: #595b54;
   cursor: pointer;
-  opacity: 0.6;
-  pointer-events: auto;
-  transition: opacity 300ms ease, transform 150ms ease;
+  transition: opacity 600ms ease-out, color 150ms ease-out;
+  animation: cross-glow 1.8s ease-in-out infinite;
   z-index: 15;
 }
-.quadrant-cross:hover {
-  opacity: 1;
-  transform: translate(-50%, -50%) scale(1.15);
+.cross-button:hover {
+  color: #2a2e36;
 }
-/* Faded out once the corresponding canvas is zoomed; pointer-events: none
-   so the invisible button doesn't catch clicks. */
-.quadrant-cross.faded {
+
+/* Quadrant variant — positioned by inline style (q.x / q.y) and centred
+   on that point. Visible from VIEW_3 mount; faded out once the canvas
+   it represents has been zoomed. */
+.cross-quadrant {
+  transform: translate(-50%, -50%);
+  opacity: 1;
+  pointer-events: auto;
+}
+.cross-quadrant.faded {
   opacity: 0;
   pointer-events: none;
 }
 
 /* Mode-of-proximity description, shown at the quadrant centre in place
-   of the cross once that canvas is zoomed. Fades in after the cross
-   fades out (slight delay) so the swap reads as a clean replacement. */
+   of the cross once that canvas is zoomed. Typography comes from the
+   global `.proximity-panel` class in app.vue (shared with VIEW_4's
+   interpretation panels); locally we only own positioning + the
+   fade-in opacity gate. */
 .quadrant-text {
   position: absolute;
   transform: translate(-50%, -50%);
-  margin: 0;
-  padding: 0 1rem;
-  max-width: 18em;
-  text-align: center;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  color: #2a2e36;
-  pointer-events: none;
   opacity: 0;
   transition: opacity 600ms ease-out 200ms;
   z-index: 14;
@@ -255,66 +234,73 @@ onBeforeUnmount(clearTimers)
   z-index: 10;
 }
 
-.caption {
+/* Caption wrapper — a full-width strip with `text-align: center`. The
+   inner `<p>` is `display: inline-block`, so the block-level wrapper
+   centres it like centred text. This is the most robust centring
+   technique (works regardless of flex / transform / positioning
+   interactions) and intentionally distinct from the per-quadrant texts'
+   layout. */
+.caption-wrap {
   position: absolute;
-  bottom: 3rem;
-  left: 50%;
+  bottom: calc(50% + 11vmin + 1.25rem);
+  left: 0;
+  right: 0;
+  text-align: center;
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 600ms ease-out, transform 600ms ease-out;
+}
+.caption-wrap.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.caption {
+  display: inline-block;
   margin: 0;
+  padding: 0 1rem;
   max-width: 36rem;
   text-align: center;
   font-size: 0.95rem;
   line-height: 1.6;
-  color: #2a2e36;
-  z-index: 10;
-  /* Hidden initially. Slides + fades in when `.visible` lands (set 1s
-     after the fourth quadrant is zoomed). 2s later the view auto-
-     advances to VIEW_4 — see script setup. */
-  opacity: 0;
-  transform: translate(-50%, 8px);
-  transition: opacity 600ms ease-out, transform 600ms ease-out;
-}
-.caption.visible {
-  opacity: 1;
-  transform: translate(-50%, 0);
+  color: #595b54;
 }
 
-/* Advance control — same `+` glyph and visual styling as VIEW-4's
-   `.interpret-control` (top centre of the viewport, monospace +,
-   #1a1d24 on the gradient), but a separate button so clicking it
-   advances VIEW_3 → VIEW_4 instead of toggling interpretation mode in
-   the relational view. Pixel-positioned identically to VIEW-4's
-   interpret-control so the glyph stays put across the swap.
-   Hidden + pointer-events: none until `.visible`, then fades in just
-   after the caption (500ms transition-delay) to cascade the reveal. */
-.advance-control {
-  position: absolute;
+/* Advance variant — top-centre of the viewport, pixel-positioned
+   identically to VIEW_4's `.interpret-control` so the glyph stays put
+   across the swap. Hidden + non-clickable until `.visible` (the modes
+   caption fade-in trigger), then opacity fades in with a 500ms delay
+   so the reveal cascades after the caption. */
+.cross-advance {
   top: 1.25rem;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 12;
-  background: transparent;
-  border: none;
-  width: 1.8rem;
-  height: 1.8rem;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: inherit;
-  font-size: 1.4rem;
-  line-height: 1;
-  letter-spacing: 0;
-  color: #1a1d24;
-  cursor: pointer;
   opacity: 0;
   pointer-events: none;
   transition: opacity 600ms ease-out 500ms, color 150ms ease-out;
 }
-.advance-control.visible {
+.cross-advance.visible {
   opacity: 1;
   pointer-events: auto;
 }
-.advance-control:hover {
-  color: #000;
+
+/* Shared glow pulse — applied to every `.cross-button` (quadrant + advance).
+   1.8s ease-in-out cycle; off at 0%/100%, full bloom at 50%. Five layered
+   shadows with near-white inner core fanning out to ~150px reach the
+   "click me" cue threshold even on bright backdrops. */
+@keyframes cross-glow {
+  0%, 100% {
+    text-shadow: 0 0 0 rgba(255, 240, 200, 0);
+  }
+  50% {
+    text-shadow:
+      0 0 8px rgba(255, 245, 215, 1),
+      0 0 20px rgba(252, 230, 180, 1),
+      0 0 42px rgba(245, 215, 155, 1),
+      0 0 80px rgba(238, 200, 135, 0.95),
+      0 0 140px rgba(230, 188, 120, 0.85),
+      0 0 220px rgba(220, 175, 105, 0.65);
+  }
 }
 </style>

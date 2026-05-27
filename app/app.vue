@@ -43,6 +43,70 @@ body,
   background-size: 100vw 100vh;
   background-position: 0 0;
 }
+/* ── Corner labels ──
+   Shared "MIRROR / TRACE / SHIFT / REPLAY" tags placed in the four
+   outer corners. Used by VIEW_3 (the post-disperse transition) and
+   VIEW_4 (the relational grid, via `RelationComponent.quarter-tag`'s
+   replacement). Pixel-positioned identically in both views so the
+   labels stay put across the VIEW_3 → VIEW_4 swap. Defined globally
+   (unscoped) so the styling lives in one place; opacity / visibility
+   gating is component-specific (VIEW_3 fades them in alongside the
+   caption; VIEW_4 shows them from mount). */
+.corner-label {
+  position: absolute;
+  font-family: monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  color: #595b54;
+  padding: 0.75rem 0.95rem;
+  pointer-events: none;
+  text-transform: uppercase;
+  text-shadow:
+    0 0 8px rgba(255, 252, 230, 1),
+    0 0 20px rgba(255, 248, 220, 0.9),
+    0 0 42px rgba(255, 244, 210, 0.6),
+    0 0 75px rgba(255, 240, 200, 0.3);
+}
+.corner-label[data-position="tl"] { top: 0; left: 0; }
+.corner-label[data-position="tr"] { top: 0; right: 0; }
+.corner-label[data-position="bl"] { bottom: 0; left: 0; }
+.corner-label[data-position="br"] { bottom: 0; right: 0; }
+
+/* ── Proximity panel ──
+   Shared typography for the per-quadrant text block (VIEW_3's
+   `.quadrant-text` once a cross is clicked, and VIEW_4's
+   `.interpretation-panel` when interpretation mode is active). Same
+   look in both places so the swap reads as continuous.
+   Title + body live inside, both inheriting the dark unified type
+   colour. Positioning + visibility gating stay component-specific
+   (the wrapper just supplies typography). */
+.proximity-panel {
+  max-width: 18em;
+  padding: 0 1rem;
+  text-align: center;
+  color: #595b54;
+  pointer-events: none;
+  box-sizing: border-box;
+  /* Explicitly serif so both VIEW_3 and VIEW_4 render identically.
+     VIEW_4's root sets `font-family: monospace`, which the panel would
+     otherwise inherit; declaring it here breaks that inheritance and
+     locks both views to the same serif type — same look across the
+     VIEW_3 → VIEW_4 swap when interpretation mode toggles. */
+  font-family: serif;
+}
+.proximity-panel-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+}
+.proximity-panel-body {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .bg-gradient {
   background:
     radial-gradient(ellipse 22% 20% at 25% 25%, rgba(238, 224, 196, 0.7) 0%, rgba(238, 224, 196, 0) 100%),

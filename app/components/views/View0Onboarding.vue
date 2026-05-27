@@ -23,7 +23,7 @@ const viewState = useViewStateStore()
   align-items: center;
   justify-content: center;
   gap: 1.5rem;
-  color: #e8e8e8;
+  color: #595b54;
   cursor: pointer;
   z-index: 100;
 }

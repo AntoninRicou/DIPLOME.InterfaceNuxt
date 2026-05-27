@@ -144,9 +144,19 @@ export function useProjectSocket() {
     return true
   }
 
+  function setCornerLabels(visible: boolean): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-corner-labels', visible)
+      return false
+    }
+    socket.emit('message', { type: 'set-corner-labels', payload: { visible } })
+    return true
+  }
+
   function isConnected(): boolean {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, setCanvasZoom, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, setCanvasZoom, setCornerLabels, isConnected }
 }

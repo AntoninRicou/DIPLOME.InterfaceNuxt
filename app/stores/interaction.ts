@@ -42,6 +42,12 @@ export const useInteractionStore = defineStore('interaction', () => {
   const imageClick = ref(0)
   const overviewConfirmed = ref(false)
 
+  // After `confirmOverview`, the user can request a second hidden-morph
+  // that drops the standalone project from `overview` back to `single`
+  // so the contributed path can be read on the full map. One-shot —
+  // flips true on the trigger and stays true (no inverse transition).
+  const singlePathViewActive = ref(false)
+
   const view3InterpretationMode = ref(false)
 
   const canvasBackground = ref<'black' | 'gradient'>('gradient')
@@ -89,16 +95,18 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: viewState.current,
       clientTimestamp: Date.now(),
     })
-    // Hidden-morph on the project screen: fade mask to opaque, swap
-    // single → overview behind the cover, fade mask back to reveal the
-    // settled overview. EXPLANATION has no in-view hold timer (unlike
-    // VIEW-2's 10.5s buffer) so the mask itself bookends the morph
-    // symmetrically here.
-    const FADE_MS = 400
-    const MORPH_MS = 500
-    projectSocket.setMask(1, FADE_MS)
-    setTimeout(() => projectSocket.setState('overview', MORPH_MS), FADE_MS)
-    setTimeout(() => projectSocket.setMask(0, FADE_MS), FADE_MS + MORPH_MS)
+    // Hidden-morph on the project screen: gradient mask fades in to
+    // cover the canvases, single → overview morph runs entirely behind
+    // the opaque mask, a HOLD buffer absorbs socket/tick slop so the
+    // morph fully settles before the reveal, then the mask fades out.
+    // Without the HOLD, the morph tail leaks into the reveal frame.
+    const FADE_IN_MS = 250
+    const MORPH_MS = 350
+    const HOLD_MS = 300
+    const FADE_OUT_MS = 500
+    projectSocket.setMask(1, FADE_IN_MS)
+    setTimeout(() => projectSocket.setState('overview', MORPH_MS), FADE_IN_MS)
+    setTimeout(() => projectSocket.setMask(0, FADE_OUT_MS), FADE_IN_MS + MORPH_MS + HOLD_MS)
   }
 
   function selectImage(id: ImageId) {
@@ -224,6 +232,25 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setState('overview')
   }
 
+  // Hidden-morph from `overview` back to `single` on the standalone
+  // project, so the contributed path can be read on the full map.
+  // Same gradient-mask choreography as `enterEntryView`: mask fades in,
+  // morph runs behind the cover, HOLD absorbs socket/tick slop, mask
+  // fades out to reveal the settled state. One-shot — gated by
+  // `singlePathViewActive`. Requires `overviewConfirmed`.
+  function enterSinglePathView() {
+    if (!overviewConfirmed.value) return
+    if (singlePathViewActive.value) return
+    singlePathViewActive.value = true
+    const FADE_IN_MS = 250
+    const MORPH_MS = 350
+    const HOLD_MS = 300
+    const FADE_OUT_MS = 500
+    projectSocket.setMask(1, FADE_IN_MS)
+    setTimeout(() => projectSocket.setState('single', MORPH_MS), FADE_IN_MS)
+    setTimeout(() => projectSocket.setMask(0, FADE_OUT_MS), FADE_IN_MS + MORPH_MS + HOLD_MS)
+  }
+
   function stepBackInHistory() {
     if (!viewState.is('RELATIONAL')) return
     if (historyIndex.value <= 0) return
@@ -282,6 +309,16 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCanvasBg(mode)
   }
 
+  // Reveal the four component corner labels on the standalone project's
+  // canvases. Called from VIEW_3 the moment its own corner labels fade in
+  // (1s after the fourth quadrant cross is clicked), so both screens
+  // reveal MIRROR / TRACE / SHIFT / REPLAY simultaneously. Once revealed
+  // the labels stay visible across subsequent state transitions until
+  // the next boot.
+  function revealCornerLabels() {
+    projectSocket.setCornerLabels(true)
+  }
+
   // Transient perception primitive. Highlights an id on the project canvas
   // (or clears with null). Pure ephemeral feedback channel — does NOT touch
   // navigationHistory, activeCentralImageId, imageClick, view state, or any
@@ -310,6 +347,8 @@ export const useInteractionStore = defineStore('interaction', () => {
     enterRelationalView,
     activateCentral,
     confirmOverview,
+    singlePathViewActive,
+    enterSinglePathView,
     stepBackInHistory,
     stepForwardInHistory,
     jumpToHistory,
@@ -317,6 +356,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     toggleView3Interpretation,
     canvasBackground,
     setCanvasBackground,
+    revealCornerLabels,
     setHighlight,
   }
 })

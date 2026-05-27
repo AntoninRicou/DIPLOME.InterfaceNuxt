@@ -79,7 +79,7 @@ function onMouseEnter(e: MouseEvent) {
     :data-reveal="revealDirection"
     @mouseenter="onMouseEnter"
   >
-    <span class="quarter-tag">{{ label }}</span>
+    <span class="corner-label" :data-position="position ?? 'tl'">{{ label }}</span>
 
     <div v-if="!centralImageId" class="status">no central image</div>
     <div v-else-if="pending" class="status">querying…</div>
@@ -88,7 +88,10 @@ function onMouseEnter(e: MouseEvent) {
     <div
       v-else
       class="constellation"
-      :class="{ suppressed: interpretationActive }"
+      :class="{
+        suppressed: interpretationActive,
+        hidden: store.overviewConfirmed,
+      }"
     >
       <button
         v-for="(id, i) in cells"
@@ -103,11 +106,11 @@ function onMouseEnter(e: MouseEvent) {
 
     <aside
       v-if="interpretationActive && interpretation"
-      class="interpretation-panel"
+      class="interpretation-panel proximity-panel"
       :data-align="panelAlign"
     >
-      <p class="panel-title">{{ interpretation.title }}</p>
-      <p class="panel-body">{{ interpretation.body }}</p>
+      <p class="proximity-panel-title">{{ interpretation.title }}</p>
+      <p class="proximity-panel-body">{{ interpretation.body }}</p>
     </aside>
   </article>
 </template>
@@ -131,21 +134,13 @@ function onMouseEnter(e: MouseEvent) {
   pointer-events: none;
 }
 
-.quarter-tag {
-  position: absolute;
-  font-family: monospace;
-  font-size: 0.62rem;
-  letter-spacing: 0.18em;
-  color: #4a4a52;
-  padding: 0.75rem 0.95rem;
-  pointer-events: none;
-  text-transform: uppercase;
+/* Corner label appearance + position come from the global
+   `.corner-label` class in app.vue (shared with VIEW_3's corner tags
+   so the labels read as continuous through the VIEW_3 → VIEW_4 swap).
+   Locally we only need to bump the z-index above the cells. */
+.corner-label {
   z-index: 2;
 }
-.rel[data-position="tl"] .quarter-tag { top: 0; left: 0; }
-.rel[data-position="tr"] .quarter-tag { top: 0; right: 0; }
-.rel[data-position="bl"] .quarter-tag { bottom: 0; left: 0; }
-.rel[data-position="br"] .quarter-tag { bottom: 0; right: 0; }
 
 .status {
   position: absolute;
@@ -154,7 +149,7 @@ function onMouseEnter(e: MouseEvent) {
   transform: translate(-50%, -50%);
   font-family: monospace;
   font-size: 0.65rem;
-  color: #444;
+  color: #595b54;
   letter-spacing: 0.1em;
   pointer-events: none;
 }
@@ -173,6 +168,17 @@ function onMouseEnter(e: MouseEvent) {
   pointer-events: none;
   opacity: 0.4;
   filter: blur(1px);
+}
+
+/* ── overview-confirmed: cells fade out entirely ──
+   Once the user clicks `Contribute to proxima` (overviewConfirmed = true),
+   the relational layer is no longer interactive — the contributed branch
+   is fixed. Hiding the constellation as a whole (parent-opacity = 0)
+   suppresses every cell including the hover-reveal rule, since child
+   opacity composes multiplicatively with the parent. */
+.constellation.hidden {
+  pointer-events: none;
+  opacity: 0;
 }
 
 .cell {
@@ -284,32 +290,16 @@ function onMouseEnter(e: MouseEvent) {
 
 /* ── interpretation overlay ──
    Centered inside the quadrant. No chrome — text floats directly over the
-   suppressed field as a sharp semantic layer. Reuses the quadrant's own
-   coordinate system (the .rel positioning context). */
+   suppressed field as a sharp semantic layer. Typography comes from the
+   global `.proximity-panel` class in app.vue (shared with VIEW_3's
+   quadrant-text so the look is identical across the swap). Locally we
+   only own positioning and the optional alignment overrides. */
 .interpretation-panel {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 4;
-  max-width: 18rem;
-  font-family: monospace;
-  pointer-events: none;
-  text-align: center;
-}
-.panel-title {
-  margin: 0 0 0.5rem;
-  font-size: 0.62rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: #888;
-}
-.panel-body {
-  margin: 0;
-  font-size: 0.78rem;
-  line-height: 1.5;
-  font-family: sans-serif;
-  color: #e8e8e8;
 }
 
 /* optional alignment override from the data layer; default is centered */

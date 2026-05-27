@@ -67,7 +67,7 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   padding-bottom: 12vh;
   gap: 1.25rem;
-  color: #e8e8e8;
+  color: #595b54;
   z-index: 100;
 }
 
@@ -131,7 +131,7 @@ onBeforeUnmount(() => {
 .skip {
   background: transparent;
   border: none;
-  color: #e8e8e8;
+  color: #595b54;
   padding: 0.25rem 0.75rem;
   font-size: 1.5rem;
   line-height: 1;

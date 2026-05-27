@@ -2382,7 +2382,7 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with eight explicit exceptions**:
+Do not modify project, **with nine explicit exceptions**:
 
 1. The user-driven path-rendering directive surface inside `project` —
    `path-segment`, `path-truncate`, and the `pathTrace` primitive they
@@ -2438,8 +2438,27 @@ Do not modify project, **with eight explicit exceptions**:
    transitions individually, with a per-sprite 0.6 s amplitude fade-in
    for velocity continuity. Scoped to `tickDisperse` only; burst feel
    and drift steady-state are unchanged. See *DISPERSE SMOOTHNESS*.
+9. The **component corner labels** rendered on the project canvases —
+   four `<span class="corner-label" data-position="...">` elements
+   added to each `<div id="container-*">` in `project/index.html`
+   (Mirror / Trace / Shift / Replay, one per canvas, matching
+   interface_nuxt's `.corner-label`), a `.corner-label` block in
+   `project/src/style.css` whose typography + warm glow exactly mirror
+   the global `.corner-label` in `interface_nuxt/app/app.vue`, and the
+   `set-corner-labels({ visible })` wire directive that gates their
+   opacity. Handler `actions.setCornerLabels` in `commands.js` toggles
+   `body[data-corner-labels]`; CSS reveals the labels via
+   `body[data-corner-labels="visible"] .corner-label { opacity: 1 }`.
+   Visibility is **NOT** keyed to `body[data-state]` — interface_nuxt
+   holds the reveal until VIEW_3's caption timer fires
+   (`store.revealCornerLabels()` → `set-corner-labels(true)`) so both
+   screens show MIRROR / TRACE / SHIFT / REPLAY in sync. Once revealed
+   the labels stay visible across subsequent state transitions until
+   the next boot. Pure DOM + CSS + a thin handler — no render-loop,
+   state-machine, or interaction-logic participation. See *VIEW_4 —
+   COMPONENT LAYOUT*.
 
-All eight exceptions are scoped tightly: pure rendering / configuration
+All nine exceptions are scoped tightly: pure rendering / configuration
 surfaces driven by explicit `interface_nuxt` directives (or, in the
 VIEW_2 embed case, by an out-of-band `postMessage` channel for the
 canvas-pick input). No project-side interpretation, derivation, or

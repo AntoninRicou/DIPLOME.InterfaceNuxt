@@ -17,24 +17,36 @@ function dotStateAt(i: number): 'current' | 'past' | 'future' | 'empty' {
 function onDotClick(i: number) {
   if (i < store.navigationHistory.length) store.jumpToHistory(i)
 }
+
+// Finale options shown after `See your path` is clicked. Behaviour
+// stubs only — refine when the post-experience routing is defined.
+function onTryAgain() {
+  window.location.reload()
+}
+function onLeave() {
+  // TBD: hook to whatever "end of experience" routing we want.
+}
 </script>
 
 <template>
-  <section class="view view-3" :class="`bg-${store.canvasBackground}`">
+  <section
+    class="view view-3"
+    :class="[`bg-${store.canvasBackground}`, { minimal: store.overviewConfirmed }]"
+  >
     <div
       v-if="store.view2ExitReason === 'auto'"
       class="reveal-overlay"
       aria-hidden="true"
     />
 
-    <div class="grid">
+    <div v-if="!store.overviewConfirmed" class="grid">
       <RelationComponent component-id="component_1" label="Mirror" position="tl" />
       <RelationComponent component-id="component_2" label="Trace" position="tr" />
       <RelationComponent component-id="component_3" label="Shift" position="bl" />
       <RelationComponent component-id="component_4" label="Replay" position="br" />
     </div>
 
-    <div class="top-controls">
+    <div v-if="!store.overviewConfirmed" class="top-controls">
       <button
         class="bg-toggle"
         :class="{ active: store.canvasBackground === 'black' }"
@@ -76,16 +88,45 @@ function onDotClick(i: number) {
       />
     </div>
 
+    <p
+      v-if="!store.overviewConfirmed"
+      class="interpret-message"
+      :class="{ visible: store.view3InterpretationMode }"
+      aria-live="polite"
+    >
+      No image belong to one place
+    </p>
+
     <div v-if="store.overviewEligible" class="overview-control">
-      <button class="confirm" @click="store.confirmOverview()">
-        confirm overview ({{ store.historyIndex + 1 }}/{{ MAX_BRANCH_DEPTH }})
+      <button class="contribute" @click="store.confirmOverview()">
+        Contribute to proxima
       </button>
     </div>
-    <div v-else-if="store.overviewConfirmed" class="overview-control confirmed">
-      overview active
+    <div
+      v-else-if="store.overviewConfirmed && !store.singlePathViewActive"
+      class="overview-control"
+    >
+      <button class="contribute" @click="store.enterSinglePathView()">
+        See your path
+      </button>
+    </div>
+    <div
+      v-else-if="store.singlePathViewActive"
+      class="overview-control finale"
+    >
+      <button class="contribute" @click="onTryAgain">
+        try a new proxima
+      </button>
+      <button class="contribute" @click="onLeave">
+        leave the experience
+      </button>
     </div>
 
-    <nav class="history-strip" aria-label="navigation history">
+    <nav
+      v-if="!store.overviewConfirmed"
+      class="history-strip"
+      aria-label="navigation history"
+    >
       <button
         class="strip-nav"
         :disabled="!store.historyHasPrevious"
@@ -125,7 +166,7 @@ function onDotClick(i: number) {
      app.vue, applied via :class="bg-${store.canvasBackground}". Setting
      `background` here would win against the global class due to scoped
      style specificity. */
-  color: #e8e8e8;
+  color: #595b54;
   overflow: hidden;
   font-family: monospace;
 }
@@ -151,6 +192,12 @@ function onDotClick(i: number) {
       rgba(166, 154, 128, 0.85) calc(50% - 0.5px),
       rgba(166, 154, 128, 0.85) calc(50% + 0.5px),
       transparent calc(50% + 0.5px));
+}
+/* `.minimal` mode (post-Contribute) — only the central image deck, the
+   gradient backdrop, and the `See your path` button remain. The grid
+   cross is part of "everything else" and gets suppressed too. */
+.view-3.minimal::before {
+  display: none;
 }
 /* Canvas-background modes live globally in app.vue (`.bg-black` /
    `.bg-gradient`) — shared across all views. .view-3 just applies the
@@ -199,12 +246,47 @@ function onDotClick(i: number) {
   filter: blur(1px);
 }
 
+.interpret-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  padding: 0 1.5rem;
+  max-width: 36rem;
+  text-align: center;
+  /* Match `.proximity-panel-title` (app.vue): serif overrides VIEW_4's
+     monospace inheritance, same weight + tracking + size + color. */
+  font-family: serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  color: #595b54;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 11;
+  transition: opacity 240ms ease-out;
+}
+.interpret-message.visible {
+  opacity: 1;
+}
+
 .overview-control {
   position: absolute;
   bottom: 4.5rem;
   left: 50%;
   transform: translateX(-50%);
   z-index: 12;
+}
+/* `finale` — two stacked options shown after `See your path` is clicked.
+   Vertical stack keeps each call-to-action on its own line so the warm
+   pulse glow of each button doesn't overlap the next. */
+.overview-control.finale {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 /* 3-column grid spanning the full viewport width: side buttons live in
@@ -229,7 +311,7 @@ function onDotClick(i: number) {
 .bg-toggle {
   padding: 0.45rem 0.95rem;
   background: rgba(13, 13, 16, 0.7);
-  color: #888;
+  color: #595b54;
   border: 1px solid #2a2a2e;
   font-family: monospace;
   font-size: 0.7rem;
@@ -297,36 +379,70 @@ function onDotClick(i: number) {
   font-size: 1.4rem;
   line-height: 1;
   letter-spacing: 0;
-  color: #1a1d24;
+  color: #595b54;
 }
 .interpret-control:hover {
-  color: #000;
+  color: #2a2e36;
 }
 .interpret-control.active {
-  color: #000;
+  color: #2a2e36;
 }
-.confirm {
-  padding: 0.5rem 0.95rem;
-  background: rgba(155, 110, 207, 0.12);
-  color: #cda6f0;
-  border: 1px solid #9b6ecf;
-  font-family: monospace;
-  font-size: 0.7rem;
-  letter-spacing: 0.1em;
+/* "Contribute to proxima" — surfaces once the active branch reaches the
+   overview cap. Uses the title typography (`.proximity-panel-title` in
+   app.vue: serif / 0.95rem / 600 / 0.02em) and the same warm pulsing
+   bloom palette as VIEW_3's `.cross-button`.
+
+   Perf note: the bloom is rendered as a single radial-gradient on a
+   ::before pseudo-element animating opacity only (GPU-compositable),
+   instead of an animated `text-shadow`. text-shadow with multi-layer
+   large-radius blurs is paint-per-character per-frame — fine for the
+   single `+` glyph in VIEW_3, but ~21× the cost on this 21-char string,
+   and was visibly slowing the interface. */
+.contribute {
+  position: relative;
+  background: transparent;
+  border: none;
+  padding: 0.4rem 0.6rem;
+  margin: 0;
+  font-family: serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  color: #595b54;
   cursor: pointer;
-  transition: background 150ms ease-out;
+  transition: color 150ms ease-out;
 }
-.confirm:hover {
-  background: rgba(155, 110, 207, 0.28);
+.contribute:hover {
+  color: #2a2e36;
 }
-.confirmed {
-  font-size: 0.62rem;
-  color: #888;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  padding: 0.4rem 0.8rem;
-  border: 1px solid #5a5a66;
-  background: rgba(13, 13, 16, 0.7);
+.contribute::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 280px;
+  height: 140px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    ellipse at center,
+    rgba(255, 245, 215, 0.95) 0%,
+    rgba(252, 230, 180, 0.85) 12%,
+    rgba(245, 215, 155, 0.65) 28%,
+    rgba(238, 200, 135, 0.4) 50%,
+    rgba(230, 188, 120, 0.18) 72%,
+    rgba(220, 175, 105, 0) 100%
+  );
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0;
+  animation: contribute-glow 1.8s ease-in-out infinite;
+  will-change: opacity;
+}
+
+@keyframes contribute-glow {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.45; }
 }
 
 .history-strip {
@@ -345,7 +461,7 @@ function onDotClick(i: number) {
 .strip-nav {
   background: transparent;
   border: none;
-  color: #888;
+  color: #595b54;
   font-family: monospace;
   font-size: 0.75rem;
   cursor: pointer;
@@ -356,7 +472,7 @@ function onDotClick(i: number) {
   cursor: not-allowed;
 }
 .strip-nav:not(:disabled):hover {
-  color: #ddd;
+  color: #2a2e36;
 }
 .strip-dots {
   list-style: none;
