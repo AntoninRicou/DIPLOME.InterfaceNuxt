@@ -85,6 +85,7 @@ function onLeave() {
         :ids="store.centralStack"
         :active-index="store.centralStackActiveIndex"
         :expanded="store.overviewConfirmed"
+        source="original"
       />
     </div>
 
@@ -127,13 +128,7 @@ function onLeave() {
       class="history-strip"
       aria-label="navigation history"
     >
-      <button
-        class="strip-nav"
-        :disabled="!store.historyHasPrevious"
-        aria-label="step back"
-        @click="store.stepBackInHistory()"
-      >◄</button>
-      <ol class="strip-dots">
+      <ol class="strip-steps">
         <li
           v-for="i in MAX_BRANCH_DEPTH"
           :key="i"
@@ -144,15 +139,9 @@ function onLeave() {
           @keydown.enter="onDotClick(i - 1)"
           @keydown.space.prevent="onDotClick(i - 1)"
         >
-          <span class="dot" />
+          <span class="step" />
         </li>
       </ol>
-      <button
-        class="strip-nav"
-        :disabled="!store.historyHasForward"
-        aria-label="step forward"
-        @click="store.stepForwardInHistory()"
-      >►</button>
     </nav>
   </section>
 </template>
@@ -178,7 +167,7 @@ function onLeave() {
 .view-3::before {
   content: "";
   position: absolute;
-  inset: 1.5%;
+  inset: 5%;
   pointer-events: none;
   z-index: 5;
   background:
@@ -295,7 +284,11 @@ function onLeave() {
    regardless of how wide `night` / `gradient` text are. */
 .top-controls {
   position: absolute;
-  top: 1.25rem;
+  /* Aligned to the top corner labels (Mirror / Trace): those sit at
+     top:0 + 0.75rem padding, so their text centre is ~1.12rem down.
+     The buttons are 1.8rem tall, so top = 1.12 - 0.9 ≈ 0.22rem puts
+     the button centres on the same line as the component titles. */
+  top: 0.22rem;
   left: 0;
   right: 0;
   z-index: 12;
@@ -335,9 +328,12 @@ function onLeave() {
   justify-content: center;
 }
 .bg-toggle .dot {
-  width: 0.9rem;
-  height: 0.9rem;
-  border-radius: 50%;
+  /* Square (not circle), sized to match the timeline history squares.
+     Only the aspect changes — the toggle behaviour, click target
+     (1.8rem button), fills, active ring and hover are unchanged. */
+  width: 5px;
+  height: 5px;
+  border-radius: 0;
   display: block;
   transition: transform 150ms ease-out, box-shadow 150ms ease-out;
 }
@@ -445,74 +441,104 @@ function onLeave() {
   50% { opacity: 0.45; }
 }
 
+/* Navigation history — a row of discrete square steps. No prev/next
+   controls, no connecting line: navigation happens by clicking a square
+   directly (same handler as the old dots). The wrapper is neutral (no
+   pill, no border) so the squares read as a bare sequence over the
+   gradient. Behaviour is unchanged — this is a visual-only restyle. */
+/* `bottom: 0.75rem` matches the bottom corner labels' (`Shift` / `Replay`)
+   padding so the square row sits on the same band — reads as one line
+   with the component names. */
 .history-strip {
   position: absolute;
-  bottom: 1.25rem;
+  bottom: 0.75rem;
   left: 50%;
   transform: translateX(-50%);
   z-index: 11;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.8rem;
-  background: rgba(13, 13, 16, 0.72);
-  border: 1px solid #2a2a2e;
 }
-.strip-nav {
-  background: transparent;
-  border: none;
-  color: #595b54;
-  font-family: monospace;
-  font-size: 0.75rem;
-  cursor: pointer;
-  padding: 0.15rem 0.35rem;
-}
-.strip-nav:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-.strip-nav:not(:disabled):hover {
-  color: #2a2e36;
-}
-.strip-dots {
+.strip-steps {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
-  gap: 0.4rem;
+  gap: 0.15rem;
   align-items: center;
 }
-.strip-dots li {
-  padding: 0.25rem;
+.strip-steps li {
+  padding: 0.1rem;
   outline: none;
   cursor: pointer;
 }
-.strip-dots li.empty {
+.strip-steps li.empty {
   cursor: default;
 }
-.strip-dots li .dot {
+/* Square step. No border-radius — discrete squares. Every square glows
+   at all times.
+     past    (behind current)  → beige 100%
+     current (the actual image) → beige + pulsing glow
+     future  (ahead, already selected after stepping back) → beige 50%
+     empty   (not reached yet)  → component-name colour + warm title halo
+   Classes recompute from historyIndex, so stepping forward/back
+   reassigns past/future automatically. */
+.strip-steps li .step {
   display: block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #4a4a52;
-  transition: background 150ms ease-out, transform 150ms ease-out, border-color 150ms ease-out;
-  box-sizing: border-box;
-}
-.strip-dots li.past .dot { background: #8a8a92; }
-.strip-dots li.current .dot {
-  background: #e8e8e8;
-  transform: scale(1.45);
-}
-.strip-dots li.future .dot { background: #3a3a42; }
-.strip-dots li.empty .dot {
-  background: transparent;
-  border: 1px solid #2a2a2e;
   width: 5px;
   height: 5px;
+  background: #595b54;
+  transition: background 150ms ease-out, box-shadow 150ms ease-out, opacity 150ms ease-out;
+  box-sizing: border-box;
 }
-.strip-dots li:not(.empty):hover .dot,
-.strip-dots li:not(.empty):focus .dot {
-  background: #c0c0c8;
+/* behind current — full beige */
+.strip-steps li.past .step {
+  background: #f9ecd0;
+  box-shadow:
+    0 0 5px rgba(249, 236, 208, 0.9),
+    0 0 12px rgba(249, 236, 208, 0.55),
+    0 0 22px rgba(249, 236, 208, 0.3);
+}
+/* ahead of current but already selected — same beige, dimmed to 50% */
+.strip-steps li.future .step {
+  background: #f9ecd0;
+  opacity: 0.5;
+  box-shadow:
+    0 0 5px rgba(249, 236, 208, 0.9),
+    0 0 12px rgba(249, 236, 208, 0.55),
+    0 0 22px rgba(249, 236, 208, 0.3);
+}
+/* the actual image: same beige, same size, pulsing glow */
+.strip-steps li.current .step {
+  background: #f9ecd0;
+  animation: step-pulse 1.8s ease-in-out infinite;
+}
+/* waiting — not reached yet */
+.strip-steps li.empty .step {
+  background: #595b54;
+  box-shadow:
+    0 0 6px rgba(255, 252, 230, 0.9),
+    0 0 16px rgba(255, 248, 220, 0.55),
+    0 0 32px rgba(255, 244, 210, 0.3);
+}
+.strip-steps li:not(.empty):hover .step,
+.strip-steps li:not(.empty):focus .step {
+  background: #fff3da;
+}
+
+/* pulsing glow for the current image — a single small square, so the
+   box-shadow animation is cheap (no per-char paint blow-up). */
+@keyframes step-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 5px rgba(249, 236, 208, 0.85),
+      0 0 12px rgba(249, 236, 208, 0.5),
+      0 0 22px rgba(249, 236, 208, 0.28);
+  }
+  50% {
+    box-shadow:
+      0 0 9px rgba(249, 236, 208, 1),
+      0 0 22px rgba(249, 236, 208, 0.8),
+      0 0 40px rgba(249, 236, 208, 0.5);
+  }
 }
 </style>

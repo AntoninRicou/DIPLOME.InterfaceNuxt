@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import CentralImage from '~/components/CentralImage.vue'
-import { view3Interpretations, type View3ComponentId } from '~/view3/view3Interpretations'
+import ProximityPanel from '~/components/ProximityPanel.vue'
+import { type View3ComponentId } from '~/view3/view3Interpretations'
 
 const store = useInteractionStore()
 
@@ -41,12 +42,36 @@ const CORNERS = [
   { position: 'br', name: 'Replay' },
 ] as const
 
+// Intro sentences shown at VIEW_3 entry — same 5s rate, lower-centre
+// placement and per-panel fade-in as VIEW_1's explanation panels. Two
+// sentences: the context first, then the call to action. Advances once
+// and holds on the instruction (VIEW_3 is user-driven, no auto-advance);
+// hidden once all four crosses are zoomed.
+const INTRO_PANELS = [
+  'You selected one image from 4,993 fragments',
+  'Click on the crosses to reveal new related images through different modes of proximity',
+]
+const INTRO_PANEL_MS = 5000
+const introIndex = ref(0)
+let introTimer: ReturnType<typeof setInterval> | null = null
+
 const showCaption = ref(false)
 let captionTimer: ReturnType<typeof setTimeout> | null = null
 
 function clearTimers() {
   if (captionTimer) { clearTimeout(captionTimer); captionTimer = null }
+  if (introTimer) { clearInterval(introTimer); introTimer = null }
 }
+
+onMounted(() => {
+  introTimer = setInterval(() => {
+    if (introIndex.value >= INTRO_PANELS.length - 1) {
+      if (introTimer) { clearInterval(introTimer); introTimer = null }
+      return
+    }
+    introIndex.value += 1
+  }, INTRO_PANEL_MS)
+})
 
 watch(() => store.allCanvasesZoomed, (zoomed) => {
   if (!zoomed) return
@@ -84,19 +109,25 @@ onBeforeUnmount(clearTimers)
       >
         +
       </button>
-      <div
-        class="quadrant-text proximity-panel"
+      <ProximityPanel
+        class="quadrant-text"
         :class="{ visible: store.canvasZoomed[q.index] }"
         :style="{ left: q.x, top: q.y }"
-      >
-        <p class="proximity-panel-title">{{ view3Interpretations[q.componentId].title }}</p>
-        <p class="proximity-panel-body">{{ view3Interpretations[q.componentId].body }}</p>
-      </div>
+        :component-id="q.componentId"
+      />
     </template>
 
     <div class="central-slot">
-      <CentralImage :ids="store.centralStack" :active-index="store.centralStackActiveIndex" />
+      <CentralImage :ids="store.centralStack" :active-index="store.centralStackActiveIndex" source="original" />
     </div>
+
+    <p
+      v-if="!store.allCanvasesZoomed"
+      :key="introIndex"
+      class="intro-caption"
+    >
+      {{ INTRO_PANELS[introIndex] }}
+    </p>
 
     <div class="caption-wrap" :class="{ visible: showCaption }">
       <p class="caption">
@@ -140,15 +171,15 @@ onBeforeUnmount(clearTimers)
   z-index: 5;
 }
 .view-2::before {
-  left: 1.5%;
-  right: 1.5%;
+  left: 5%;
+  right: 5%;
   top: 50%;
   height: 1px;
   margin-top: -0.5px;
 }
 .view-2::after {
-  top: 1.5%;
-  bottom: 1.5%;
+  top: 5%;
+  bottom: 5%;
   left: 50%;
   width: 1px;
   margin-left: -0.5px;
@@ -179,7 +210,11 @@ onBeforeUnmount(clearTimers)
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-family: inherit;
+  /* monospace to match VIEW_4's `.interpret-control` glyph exactly —
+     View3's root sets no font, so `inherit` rendered the `+` in a
+     different face and the glyph sat at a slightly different height
+     than View4's, breaking the title-line alignment across the swap. */
+  font-family: monospace;
   font-size: 1.4rem;
   line-height: 1;
   letter-spacing: 0;
@@ -234,6 +269,35 @@ onBeforeUnmount(clearTimers)
   z-index: 10;
 }
 
+/* Intro sentences — same typography, lower-centre placement and 5s
+   per-panel fade-in as VIEW_1's `.caption`. `.view-2` is fixed/inset
+   (not a flex column like VIEW_1), so it's positioned absolutely at
+   `bottom: 12vh` and centred via translateX; the fade-in keyframe keeps
+   the -50% X-offset so centring isn't lost mid-animation. */
+.intro-caption {
+  position: absolute;
+  bottom: 4vh;
+  left: 50%;
+  transform: translateX(-50%);
+  /* One line per sentence: no wrap, width grows to the text (centred by
+     the left:50% + translateX). */
+  max-width: none;
+  white-space: nowrap;
+  margin: 0;
+  padding: 0 1.5rem;
+  font-size: 1.25rem;
+  line-height: 1.5;
+  text-align: center;
+  color: #595b54;
+  z-index: 12;
+  pointer-events: none;
+  animation: intro-fade-in 400ms ease-out forwards;
+}
+@keyframes intro-fade-in {
+  from { opacity: 0; transform: translate(-50%, 4px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
 /* Caption wrapper — a full-width strip with `text-align: center`. The
    inner `<p>` is `display: inline-block`, so the block-level wrapper
    centres it like centred text. This is the most robust centring
@@ -268,12 +332,13 @@ onBeforeUnmount(clearTimers)
 }
 
 /* Advance variant — top-centre of the viewport, pixel-positioned
-   identically to VIEW_4's `.interpret-control` so the glyph stays put
-   across the swap. Hidden + non-clickable until `.visible` (the modes
-   caption fade-in trigger), then opacity fades in with a 500ms delay
-   so the reveal cascades after the caption. */
+   identically to VIEW_4's `.interpret-control` (top: 0.22rem, aligned
+   with the component titles) so the glyph stays put across the swap.
+   Hidden + non-clickable until `.visible` (the modes caption fade-in
+   trigger), then opacity fades in with a 500ms delay so the reveal
+   cascades after the caption. */
 .cross-advance {
-  top: 1.25rem;
+  top: 0.22rem;
   left: 50%;
   transform: translateX(-50%);
   opacity: 0;

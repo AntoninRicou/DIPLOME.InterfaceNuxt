@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import { view3Interpretations } from '~/view3/view3Interpretations'
+import ProximityPanel from '~/components/ProximityPanel.vue'
 
 const props = defineProps<{
   componentId: string
@@ -36,6 +37,22 @@ const cells = computed(() => (data.value?.related ?? []).slice(0, 4))
 
 function onRelatedClick(id: string) {
   store.activateCentral(id)
+}
+
+// Hovering a relation cell lights up the same image on the standalone
+// project canvas — the same `set-highlight` feedback VIEW_2 emits when a
+// disperse sprite is hovered (see SET-HIGHLIGHT in CLAUDE.md). Cells are
+// only interactive on `.rel:hover` (pointer-events gated), so these never
+// fire in interpretation/overview mode. `set-highlight` drives project's
+// transient *hover* track, which is independent of the persistent *focus*
+// track the centre image holds (set by `focus(id)`) — so the centre keeps
+// glowing while the hovered cell glows too, and hover-out just clears the
+// hover halo, leaving the centre's glow intact.
+function onCellHover(id: string) {
+  store.setHighlight(id)
+}
+function onCellLeave() {
+  store.setHighlight(null)
 }
 
 // ── Cascade reveal direction ──
@@ -99,19 +116,19 @@ function onMouseEnter(e: MouseEvent) {
         :class="['cell', `cell-${i + 1}`]"
         :title="id"
         @click="onRelatedClick(id)"
+        @mouseenter="onCellHover(id)"
+        @mouseleave="onCellLeave"
       >
-        <AtlasThumb :id="id" fit="width" />
+        <AtlasThumb :id="id" fit="width" source="original" />
       </button>
     </div>
 
-    <aside
+    <ProximityPanel
       v-if="interpretationActive && interpretation"
-      class="interpretation-panel proximity-panel"
+      class="interpretation-panel"
       :data-align="panelAlign"
-    >
-      <p class="proximity-panel-title">{{ interpretation.title }}</p>
-      <p class="proximity-panel-body">{{ interpretation.body }}</p>
-    </aside>
+      :component-id="componentId"
+    />
   </article>
 </template>
 

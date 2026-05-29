@@ -34,24 +34,24 @@ export const view3Interpretations: Record<View3ComponentId, View3Interpretation>
     title: 'Visual mirroring',
     body:
       'The surrounding image are reflecting recurring visual structures ' +
-      'such as shapes, and textures to the image picked.',
+      'such as shapes, and textures to the selected image.',
   },
   component_2: {
     title: 'Historical tracing',
     body:
       'The surrounding image are retracing a lexical subject field based ' +
-      'on historical sources linked to the image picked.',
+      'on historical sources linked to the selected image.',
   },
   component_3: {
     title: 'Semantic shifting',
     body:
       'The surrounding image are sharing a semantic embeddings related ' +
-      'to the image picked.',
+      'to the selected image.',
   },
   component_4: {
     title: 'Collective replaying',
     body:
       'The surrounding image are previous user selections including the ' +
-      'image picked. Yours will also contributes to the evolving map.',
+      'selected image. Yours will also contributes to the evolving map.',
   },
 }

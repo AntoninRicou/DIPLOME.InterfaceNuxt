@@ -5,20 +5,30 @@ const props = withDefaults(defineProps<{
   id: string
   alt?: string
   fit?: 'contain' | 'width'
-}>(), { fit: 'contain' })
+  source?: 'atlas' | 'original'
+}>(), { fit: 'contain', source: 'atlas' })
 
 const { getThumbStyle, getAspect } = useAtlas()
 
 const style = computed(() => {
   const aspect = getAspect(props.id)
-  const base = getThumbStyle(props.id)
-
-  return {
-    ...base,
+  const sizing = {
     aspectRatio: String(aspect),
     width: props.fit === 'width' ? '100%' : 'auto',
     height: props.fit === 'contain' ? '100%' : 'auto',
   }
+
+  if (props.source === 'original') {
+    return {
+      ...sizing,
+      backgroundImage: `url(/images/${props.id}.jpg)`,
+      backgroundRepeat: 'no-repeat',
+      backgroundSize: 'contain',
+      backgroundPosition: 'center center',
+    }
+  }
+
+  return { ...getThumbStyle(props.id), ...sizing }
 })
 </script>
 

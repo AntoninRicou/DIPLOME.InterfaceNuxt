@@ -6,7 +6,8 @@ const props = withDefaults(defineProps<{
   ids: ImageId[]
   activeIndex?: number
   expanded?: boolean
-}>(), { activeIndex: -1, expanded: false })
+  source?: 'atlas' | 'original'
+}>(), { activeIndex: -1, expanded: false, source: 'atlas' })
 
 const { getNaturalSize } = useAtlas()
 
@@ -113,7 +114,7 @@ function layerStyle(i: number) {
       class="layer"
       :style="layerStyle(i)"
     >
-      <AtlasThumb :id="id" :alt="id" fit="contain" />
+      <AtlasThumb :id="id" :alt="id" fit="contain" :source="source" />
     </div>
   </TransitionGroup>
 </template>

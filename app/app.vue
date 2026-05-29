@@ -81,7 +81,16 @@ body,
    colour. Positioning + visibility gating stay component-specific
    (the wrapper just supplies typography). */
 .proximity-panel {
-  max-width: 18em;
+  /* Definite width (not max-width) so the box renders at the same size in
+     every consumer regardless of its anchor position. With max-width the box
+     was shrink-to-fit, and because each panel is anchored with `left`/`top`
+     and no `right`, the available width — and therefore the line wrapping —
+     differed by quadrant (right-side / quadrant-clipped panels got squeezed
+     onto more lines). A fixed width + the existing translate(-50%, -50%)
+     centring makes VIEW_3's quadrant-text and VIEW_4's interpretation-panel
+     pixel-identical and keeps the body on two lines. Single knob: nudge this
+     value if a longer body spills to three lines. */
+  width: 30em;
   padding: 0 1rem;
   text-align: center;
   color: #595b54;

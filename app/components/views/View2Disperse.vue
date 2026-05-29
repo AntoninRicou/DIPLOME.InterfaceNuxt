@@ -128,7 +128,7 @@ onBeforeUnmount(() => {
          geometry as View2Transition so the click → VIEW-2 handoff is
          pixel-stable on the topmost (latest) image. -->
     <div v-if="hoverIds.length > 0" class="central-slot">
-      <CentralImage :ids="hoverIds" :active-index="hoverActiveIndex" />
+      <CentralImage :ids="hoverIds" :active-index="hoverActiveIndex" source="original" />
     </div>
   </section>
 </template>
@@ -159,15 +159,15 @@ onBeforeUnmount(() => {
   z-index: 5;
 }
 .view-0::before {
-  left: 1.5%;
-  right: 1.5%;
+  left: 5%;
+  right: 5%;
   top: 50%;
   height: 1px;
   margin-top: -0.5px;
 }
 .view-0::after {
-  top: 1.5%;
-  bottom: 1.5%;
+  top: 5%;
+  bottom: 5%;
   left: 50%;
   width: 1px;
   margin-left: -0.5px;

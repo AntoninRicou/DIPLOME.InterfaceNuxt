@@ -47,15 +47,17 @@ onBeforeUnmount(() => {
     class="view-1 bg-gradient"
     :style="{ '--cross-draw-duration': `${crossDurationMs}ms` }"
   >
-    <p :key="index" class="caption">{{ PANELS[index] }}</p>
     <button class="skip" @click="skip" aria-label="skip">&gt;</button>
+    <p :key="index" class="caption">{{ PANELS[index] }}</p>
   </section>
 </template>
 
 <style scoped>
 @keyframes panel-fade-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  /* keep the -50% X-centre offset through the fade so the absolutely
+     positioned caption doesn't jump off-centre mid-animation. */
+  from { opacity: 0; transform: translate(-50%, 4px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }
 
 .view-1 {
@@ -88,16 +90,16 @@ onBeforeUnmount(() => {
   transform-origin: center;
 }
 .view-1::before {
-  left: 1.5%;
-  right: 1.5%;
+  left: 5%;
+  right: 5%;
   top: 50%;
   height: 1px;
   margin-top: -0.5px;
   animation: cross-draw-h var(--cross-draw-duration, 10000ms) linear forwards;
 }
 .view-1::after {
-  top: 1.5%;
-  bottom: 1.5%;
+  top: 5%;
+  bottom: 5%;
   left: 50%;
   width: 1px;
   margin-left: -0.5px;
@@ -112,14 +114,22 @@ onBeforeUnmount(() => {
   to   { transform: scaleY(1); }
 }
 
+/* Caption + skip are absolutely positioned (out of the flex flow) so each
+   has its own bottom offset: the sentence sits at 4vh, the skip `>` button
+   2vh below it. Both centred via left:50% + translateX(-50%). */
 .caption,
 .skip {
-  position: relative;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 10;
 }
 
 .caption {
-  max-width: 36rem;
+  bottom: 4vh;
+  /* One line per sentence: no wrap, width grows to the text. */
+  max-width: none;
+  white-space: nowrap;
   margin: 0;
   padding: 0 1.5rem;
   font-size: 1.25rem;
@@ -129,6 +139,7 @@ onBeforeUnmount(() => {
 }
 
 .skip {
+  bottom: 2vh;
   background: transparent;
   border: none;
   color: #595b54;
