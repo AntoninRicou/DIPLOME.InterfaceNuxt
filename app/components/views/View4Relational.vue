@@ -1,11 +1,31 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
 import CentralImage from '~/components/CentralImage.vue'
 
 const store = useInteractionStore()
+const { naturalDimsVmin } = useCentralImageDims()
 
 const MAX_BRANCH_DEPTH = 10
+
+// Track the visible silhouette of the active central image so .center-
+// anchor (the hover-zoom sensor) matches it pixel-for-pixel. With the
+// previous fixed 22vmin square, landscape/portrait images extended past
+// the hit area (cursor on image → no hover) and small images left blank
+// in-box space (cursor in box → hover with nothing under it). Disabled
+// in expanded mode (overview-confirmed) — the deck spreads into a circle
+// then and there's no single "active layer at the centre" to match.
+const centerAnchorStyle = computed(() => {
+  if (store.overviewConfirmed) return {}
+  const id = store.activeCentralImageId
+  if (!id) return {}
+  const dims = naturalDimsVmin(id)
+  return {
+    width: `${dims.width}vmin`,
+    height: `${dims.height}vmin`,
+  }
+})
 
 function dotStateAt(i: number): 'current' | 'past' | 'future' | 'empty' {
   if (i >= store.navigationHistory.length) return 'empty'
@@ -79,7 +99,9 @@ function onLeave() {
     <div
       class="center-anchor"
       :class="{ suppressed: store.view3InterpretationMode }"
+      :style="centerAnchorStyle"
       aria-hidden="true"
+      @mouseenter="store.setQuadrantHover(null)"
     >
       <CentralImage
         :ids="store.centralStack"
@@ -221,11 +243,38 @@ function onLeave() {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 10;
-  pointer-events: none;
+  /* Above `.rel:hover` (z: 50). Once the cursor was inside a quadrant,
+     .rel:hover stayed true as the cursor moved toward the centre and the
+     lifted .rel occluded the central image — quadrant hover kept firing
+     even while the cursor was visually on the central image. With the
+     centre on top, the moment the cursor enters its box .rel:hover drops
+     false (cursor no longer designates .rel) and the centre's mouseenter
+     fires, so setQuadrantHover(null) lands at the right beat. Cells don't
+     overlap the centre geometrically (they sit at the outer corners of
+     each quadrant), so this doesn't hide any cell hover feedback. */
+  z-index: 60;
+  /* Acts as the hover sensor that returns all four canvases to the
+     default zoom-on-image (VIEW_4 hover-zoom rule). Was `none` so
+     hovers fell through to the quadrant below the central image; the
+     hit box overlaps the inner corner of each quadrant but the
+     relation cells sit at 10% from the outer corners, so swallowing
+     pointer events here doesn't block any cell. */
+  pointer-events: auto;
+  /* Fallback size — overridden inline (`:style="centerAnchorStyle"`)
+     with the active image's natural dimensions in vmin so the hover
+     hit area tracks the visible image silhouette. Width/height are
+     NOT transitioned — on activeCentralImageId change, the new active
+     layer is a fresh-mounted DOM element (new TransitionGroup key) so
+     it paints at its target dims instantly; the hit area must snap
+     in lockstep, not animate. A transition here would leave the hit
+     area lagging behind the visible image for ~700ms after each
+     click — exactly the "cursor on image but no hover" symptom the
+     dynamic sizing is supposed to remove. */
   width: 22vmin;
   height: 22vmin;
-  transition: opacity 240ms ease-out, filter 240ms ease-out;
+  transition:
+    opacity 240ms ease-out,
+    filter 240ms ease-out;
 }
 /* unified field suppression during interpretation mode — same rule as
    .constellation.suppressed in RelationComponent so the central reference
@@ -233,6 +282,28 @@ function onLeave() {
 .center-anchor.suppressed {
   opacity: 0.4;
   filter: blur(1px);
+  /* In interpretation mode the centred `.interpret-message` (z: 11)
+     must sit above the suppressed central deck — drop the centre's
+     z below it. Hover-zoom isn't a concern here: the rel quadrants
+     are .is-inert (pointer-events: none) in interpretation mode, so
+     no quadrant hover can fire either way. */
+  z-index: 10;
+}
+/* Hover halo — warm beige glow matching the system palette
+   (history-strip `.current` step, contribute button bloom). Targets
+   ONLY the topmost layer (`.layer.is-active`) so the drop-shadow
+   wraps just the active image's alpha contour, not the union of every
+   stacked silhouette in the deck. No filter transition on the layer
+   (its `transition` rule covers only transform/width/height), so the
+   glow snaps in and out instantly — same feel as the quadrant cell
+   hover. Suppressed in interpretation mode (`.center-anchor.suppressed`
+   sits behind the `:not(.suppressed)` guard) — the central reference
+   is intentionally receding then. */
+.center-anchor:not(.suppressed):hover :deep(.layer.is-active) {
+  filter:
+    drop-shadow(0 0 8px rgba(249, 236, 208, 0.75))
+    drop-shadow(0 0 18px rgba(249, 236, 208, 0.45))
+    drop-shadow(0 0 32px rgba(249, 236, 208, 0.22));
 }
 
 .interpret-message {

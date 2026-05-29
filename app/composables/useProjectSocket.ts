@@ -134,13 +134,37 @@ export function useProjectSocket() {
     return true
   }
 
-  function setCanvasZoom(canvasIndex: number, imageId: string): boolean {
+  function setGhostPath(fromId: string | null, toId: string | null): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-ghost-path', fromId, toId)
+      return false
+    }
+    socket.emit('message', { type: 'set-ghost-path', payload: { fromId, toId } })
+    return true
+  }
+
+  function setCanvasZoom(canvasIndex: number, imageId: string, durationSec?: number): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
       console.warn('[socket] not connected; dropping set-canvas-zoom', canvasIndex, imageId)
       return false
     }
-    socket.emit('message', { type: 'set-canvas-zoom', payload: { canvasIndex, imageId } })
+    const payload: { canvasIndex: number; imageId: string; durationSec?: number } = { canvasIndex, imageId }
+    if (typeof durationSec === 'number') payload.durationSec = durationSec
+    socket.emit('message', { type: 'set-canvas-zoom', payload })
+    return true
+  }
+
+  function setCanvasOverview(canvasIndex: number, durationSec?: number): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-canvas-overview', canvasIndex)
+      return false
+    }
+    const payload: { canvasIndex: number; durationSec?: number } = { canvasIndex }
+    if (typeof durationSec === 'number') payload.durationSec = durationSec
+    socket.emit('message', { type: 'set-canvas-overview', payload })
     return true
   }
 
@@ -178,5 +202,5 @@ export function useProjectSocket() {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, setCanvasZoom, setCornerLabels, setCanvasText, setCenterCaption, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCanvasText, setCenterCaption, isConnected }
 }

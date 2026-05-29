@@ -9,61 +9,19 @@ const props = withDefaults(defineProps<{
   source?: 'atlas' | 'original'
 }>(), { activeIndex: -1, expanded: false, source: 'atlas' })
 
-const { getNaturalSize } = useAtlas()
+const { naturalDimsVmin } = useCentralImageDims()
 
 const RADIUS_VMIN = 22
 const SCALE_OTHER = 0.35
 const SCALE_ACTIVE = 0.5
 
-// vmin per source pixel. Picks the visual range each image renders in —
-// small atlas images stay small, large ones grow. Tune by feel.
-const VMIN_PER_PIXEL = 0.055
-// Fallback dimensions when atlas metadata isn't loaded yet (first frame).
-const FALLBACK_VMIN = 26
-// Per-image size variation. Source atlas has ~two-thirds of images pinned to
-// max-edge = 500px (Flickr normalization), so natural pixel dims collapse to
-// the same width or height across many images. A deterministic hash-derived
-// scale multiplier per image breaks this collision: identical aspect images
-// still render at noticeably different footprints. The same id always maps
-// to the same scale, so the variation is stable, not random per render.
-const SIZE_VARIATION_MIN = 0.85
-const SIZE_VARIATION_MAX = 1.25
-
-// Aspect-balance penalty. Square-ish images render full size; extreme
-// aspects render smaller overall so they don't visually dominate. Aspect
-// ratio is preserved (no distortion) — only the overall scale is reduced.
-// 0 = no penalty (extreme aspects still huge); higher = more aggressive.
-const ASPECT_PENALTY_STRENGTH = 0.15
-const ASPECT_PENALTY_FLOOR = 0.55
-
-function hashScale(id: string): number {
-  // FNV-1a 32-bit hash → uniform in [SIZE_VARIATION_MIN, SIZE_VARIATION_MAX].
-  let h = 2166136261
-  for (let i = 0; i < id.length; i++) {
-    h ^= id.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  const u = (h >>> 0) / 0xffffffff
-  return SIZE_VARIATION_MIN + u * (SIZE_VARIATION_MAX - SIZE_VARIATION_MIN)
-}
-
-function aspectBalance(aspectRatio: number): number {
-  // Log-distance from a 1:1 square. 0 for square, ~1 for 2:1, ~2 for 4:1, ~3 for 8:1.
-  const logDist = Math.abs(Math.log2(aspectRatio))
-  return Math.max(ASPECT_PENALTY_FLOOR, 1 - logDist * ASPECT_PENALTY_STRENGTH)
-}
-
-function naturalDimsVmin(id: string) {
-  const size = getNaturalSize(id)
-  const scale = hashScale(id)
-  if (!size) return { width: FALLBACK_VMIN * scale, height: FALLBACK_VMIN * scale }
-  const balance = aspectBalance(size.width / size.height)
-  const k = VMIN_PER_PIXEL * scale * balance
-  return {
-    width: size.width * k,
-    height: size.height * k,
-  }
-}
+// Index of the topmost layer — parents target it via the `is-active`
+// class (e.g. VIEW_4's center-anchor hover glow applies to only the top
+// silhouette, not the union of all stacked layer alphas).
+const activeIdx = computed(() => {
+  const n = props.ids.length
+  return props.activeIndex < 0 ? n - 1 : props.activeIndex
+})
 
 function layerStyle(i: number) {
   const n = props.ids.length
@@ -112,6 +70,7 @@ function layerStyle(i: number) {
       v-for="(id, i) in ids"
       :key="`${i}:${id}`"
       class="layer"
+      :class="{ 'is-active': i === activeIdx }"
       :style="layerStyle(i)"
     >
       <AtlasThumb :id="id" :alt="id" fit="contain" :source="source" />

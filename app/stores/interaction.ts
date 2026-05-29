@@ -67,6 +67,89 @@ export const useInteractionStore = defineStore('interaction', () => {
   const canvasZoomed = ref<boolean[]>([false, false, false, false])
   const allCanvasesZoomed = computed(() => canvasZoomed.value.every(Boolean))
 
+  // VIEW_4 per-quadrant hover. `null` = no quadrant hovered (mouse on the
+  // central image or outside the grid) → all four canvases zoomed on the
+  // active central image (default split look). When a quadrant index is
+  // set, that canvas stays zoomed and the other three unzoom to overview
+  // cameraZ.
+  const view4HoveredQuadrant = ref<number | null>(null)
+
+  // Mirrors the actual project-side per-canvas state. Updated only when the
+  // wire emission has been (or is about to be) sent; the delayed zoom-in
+  // path waits for its timer to fire before flipping the flag, so a
+  // cancelled timer correctly leaves the canvas marked as still-in-overview
+  // and the next hover transition re-emits the zoom-in.
+  const view4CanvasInOverview = ref<boolean[]>([false, false, false, false])
+
+  // Hover-zoom pacing. Both motions match at 1.8s; the unzoom (j) fires
+  // immediately on a quadrant-to-quadrant transition while the re-zoom (k)
+  // is held back by 150ms so the visual flow reads as "the leaving canvas
+  // moves first, then the entering canvas catches up". `null → k` and
+  // `j → null` transitions don't combine motions, so no delay is applied.
+  const HOVER_DURATION_SEC = 1.8
+  const HOVER_LEAD_MS = 150
+  let pendingZoomInTimer: ReturnType<typeof setTimeout> | null = null
+
+  function setQuadrantHover(canvasIndex: number | null) {
+    if (!viewState.is('RELATIONAL')) return
+    if (overviewConfirmed.value) return
+    if (canvasIndex !== null && (canvasIndex < 0 || canvasIndex > 3)) return
+    const prev = view4HoveredQuadrant.value
+    const next = canvasIndex
+    if (prev === next) return
+    view4HoveredQuadrant.value = next
+
+    // Cancel any pending delayed zoom-in. The canvases it targeted are
+    // still in overview project-side (the timer never fired), and
+    // view4CanvasInOverview still reflects that — so the diff below
+    // naturally re-emits the zoom-in if the new hover state demands it.
+    if (pendingZoomInTimer !== null) {
+      clearTimeout(pendingZoomInTimer)
+      pendingZoomInTimer = null
+    }
+
+    if (!activeCentralImageId.value) return
+
+    const shouldBeOverview = (i: number) => next !== null && i !== next
+    const toUnzoom: number[] = []
+    const toZoom: number[] = []
+    for (let i = 0; i < 4; i++) {
+      const desired = shouldBeOverview(i)
+      const current = view4CanvasInOverview.value[i]
+      if (desired && !current) toUnzoom.push(i)
+      else if (!desired && current) toZoom.push(i)
+    }
+
+    for (const i of toUnzoom) {
+      projectSocket.setCanvasOverview(i, HOVER_DURATION_SEC)
+      view4CanvasInOverview.value[i] = true
+    }
+
+    if (toZoom.length === 0) return
+
+    const fireZoomIns = () => {
+      if (!viewState.is('RELATIONAL') || overviewConfirmed.value) return
+      // Re-read at fire-time so a history-nav during the lead window pans
+      // the canvas onto the *latest* image, not the one active when the
+      // hover transition started.
+      const currentId = activeCentralImageId.value
+      if (!currentId) return
+      for (const i of toZoom) {
+        projectSocket.setCanvasZoom(i, currentId, HOVER_DURATION_SEC)
+        view4CanvasInOverview.value[i] = false
+      }
+    }
+
+    if (toUnzoom.length > 0) {
+      pendingZoomInTimer = setTimeout(() => {
+        fireZoomIns()
+        pendingZoomInTimer = null
+      }, HOVER_LEAD_MS)
+    } else {
+      fireZoomIns()
+    }
+  }
+
   function zoomCanvas(canvasIndex: number) {
     if (!viewState.is('TRANSITION')) return
     if (canvasIndex < 0 || canvasIndex > 3) return
@@ -372,6 +455,21 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setHighlight(id)
   }
 
+  // Ghost-path companion to setHighlight. Draws a transient dashed line
+  // on every project canvas from the active central image to `toId`,
+  // showing the proximity link being previewed. Pass null to clear (fade
+  // out). Same ephemerality rules as setHighlight — no persisted state
+  // touched. Skipped if there's no active central image to anchor from.
+  function setGhostPath(toId: ImageId | null) {
+    if (!toId) {
+      projectSocket.setGhostPath(null, null)
+      return
+    }
+    const fromId = activeCentralImageId.value
+    if (!fromId) return
+    projectSocket.setGhostPath(fromId, toId)
+  }
+
   return {
     navigationHistory,
     historyIndex,
@@ -385,6 +483,8 @@ export const useInteractionStore = defineStore('interaction', () => {
     canvasZoomed,
     allCanvasesZoomed,
     zoomCanvas,
+    view4HoveredQuadrant,
+    setQuadrantHover,
     historyHasPrevious,
     historyHasForward,
     enterEntryView,
@@ -403,5 +503,6 @@ export const useInteractionStore = defineStore('interaction', () => {
     setCanvasBackground,
     setCenterCaption,
     setHighlight,
+    setGhostPath,
   }
 })

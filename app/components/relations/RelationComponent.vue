@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
-import { view3Interpretations } from '~/view3/view3Interpretations'
+import { view3Interpretations, type View3ComponentId } from '~/view3/view3Interpretations'
 import ProximityPanel from '~/components/ProximityPanel.vue'
 
 const props = defineProps<{
@@ -11,7 +11,7 @@ const props = defineProps<{
 }>()
 const store = useInteractionStore()
 
-const interpretation = computed(() => view3Interpretations[props.componentId])
+const interpretation = computed(() => view3Interpretations[props.componentId as View3ComponentId])
 const interpretationActive = computed(() => store.view3InterpretationMode)
 // Panels are always centered in their quadrant; alignment in the data layer
 // is an optional override for the text within the panel itself.
@@ -50,9 +50,14 @@ function onRelatedClick(id: string) {
 // hover halo, leaving the centre's glow intact.
 function onCellHover(id: string) {
   store.setHighlight(id)
+  // Ghost path — dashed translucent line from active central image to
+  // this cell's id, drawn on every project canvas. Previews the proximity
+  // link before commit. Cleared on cell-leave (fades out ~150ms).
+  store.setGhostPath(id)
 }
 function onCellLeave() {
   store.setHighlight(null)
+  store.setGhostPath(null)
 }
 
 // ── Cascade reveal direction ──
@@ -65,6 +70,13 @@ function onCellLeave() {
 // gives the cascade a directional reading depending on entry side,
 // analogous to a clockwise/counter-clockwise sweep on a circular layout.
 const revealDirection = ref<'forward' | 'reverse'>('forward')
+
+// Quadrant ↔ project canvas index. Matches `STATES.split.rects` ordering
+// in project/src/stateManager.js and the componentId mapping in
+// view3Interpretations (tl=0 / tr=1 / bl=2 / br=3).
+const QUADRANT_INDEX: Record<'tl' | 'tr' | 'bl' | 'br', number> = {
+  tl: 0, tr: 1, bl: 2, br: 3,
+}
 
 function onMouseEnter(e: MouseEvent) {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -85,6 +97,14 @@ function onMouseEnter(e: MouseEvent) {
   // the outer half of the quadrant.
   const dist = Math.hypot(x - ax, y - ay)
   revealDirection.value = dist < 0.7 ? 'forward' : 'reverse'
+
+  // VIEW_4 hover-zoom: the three other canvases unzoom to overview so
+  // the user sees the full map context, while this quadrant stays
+  // zoomed on the active central image. Hover-leave is handled by the
+  // central image sensor (setQuadrantHover(null)) and by mouseenter on
+  // sibling quadrants (which retargets the diff). No mouseleave on
+  // .rel — would race the sibling-mouseenter on quadrant-to-quadrant.
+  store.setQuadrantHover(QUADRANT_INDEX[props.position ?? 'tl'])
 }
 </script>
 
@@ -140,6 +160,20 @@ function onMouseEnter(e: MouseEvent) {
      View3Relational). Spatial separation comes from the grid seams and
      the cells themselves, not a solid panel fill. */
   overflow: hidden;
+}
+/* Lift the entire quadrant above the central image deck the moment
+   the cursor enters the quadrant area — the cells are about to fade
+   in over the central image's footprint (cell-1 sits at the inner
+   corner; CentralImage layers can extend past the 22vmin anchor
+   based on their natural dimensions) and we want them above the
+   deck from the first visible frame, not after the user moves onto
+   a specific cell. The lift value is intentionally well above the
+   tallest peer (.history-strip/.interpret-message at 11, .top-controls
+   /.overview-control at 12) so the cells surface cleanly regardless
+   of any other element in the view's stacking context. z-index is not
+   transitionable — fires instantly on hover. */
+.rel:hover {
+  z-index: 50;
 }
 
 /* ── interpretation mode — structural inertness ──
