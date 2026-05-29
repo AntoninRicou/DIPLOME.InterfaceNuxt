@@ -154,9 +154,29 @@ export function useProjectSocket() {
     return true
   }
 
+  function setCanvasText(canvasIndex: number, title: string, body: string): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-canvas-text', canvasIndex)
+      return false
+    }
+    socket.emit('message', { type: 'set-canvas-text', payload: { canvasIndex, title, body } })
+    return true
+  }
+
+  function setCenterCaption(text: string): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-center-caption')
+      return false
+    }
+    socket.emit('message', { type: 'set-center-caption', payload: { text } })
+    return true
+  }
+
   function isConnected(): boolean {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, setCanvasZoom, setCornerLabels, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, setCanvasZoom, setCornerLabels, setCanvasText, setCenterCaption, isConnected }
 }

@@ -31,6 +31,7 @@ const QUADRANTS: Quadrant[] = [
 // No auto-advance to VIEW_4 — the transition out of VIEW_3 is driven
 // by the pulsing advance `+` button.
 const CAPTION_DELAY_MS = 1000
+const MODES_CAPTION = 'Four modes of proximity, each shaping relations differently with the center image.'
 
 // Corner labels appear at the four viewport corners at the same screen
 // positions VIEW-4's RelationComponent quarter-tags occupy, so the swap
@@ -77,10 +78,12 @@ watch(() => store.allCanvasesZoomed, (zoomed) => {
   if (!zoomed) return
   captionTimer = setTimeout(() => {
     showCaption.value = true
-    // Reveal the same four labels on the standalone project's canvases
-    // at the same moment the interface's corner-tags fade in, so both
-    // screens show MIRROR / TRACE / SHIFT / REPLAY in sync.
-    store.revealCornerLabels()
+    // Mirror the centred modes-caption on the standalone project at the
+    // same beat — both screens fade the sentence in together. The corner
+    // labels (MIRROR/TRACE/SHIFT/REPLAY) are deferred to the top-cross
+    // click — they reveal at the VIEW_3 → VIEW_4 advance moment, not
+    // here, so the labels appear together with VIEW_4 mounting.
+    store.setCenterCaption(MODES_CAPTION)
   }, CAPTION_DELAY_MS)
 })
 
@@ -93,7 +96,6 @@ onBeforeUnmount(clearTimers)
       v-for="c in CORNERS"
       :key="c.position"
       class="corner-label"
-      :class="{ visible: showCaption }"
       :data-position="c.position"
     >
       {{ c.name }}
@@ -129,11 +131,9 @@ onBeforeUnmount(clearTimers)
       {{ INTRO_PANELS[introIndex] }}
     </p>
 
-    <div class="caption-wrap" :class="{ visible: showCaption }">
-      <p class="caption">
-        Four modes of proximity, each shaping relations differently with the center image.
-      </p>
-    </div>
+    <p class="modes-caption" :class="{ visible: showCaption }">
+      {{ MODES_CAPTION }}
+    </p>
 
     <button
       class="cross-button cross-advance"
@@ -269,14 +269,14 @@ onBeforeUnmount(clearTimers)
   z-index: 10;
 }
 
-/* Intro sentences — same typography, lower-centre placement and 5s
+/* Intro sentences — same typography, upper-centre placement and 5s
    per-panel fade-in as VIEW_1's `.caption`. `.view-2` is fixed/inset
    (not a flex column like VIEW_1), so it's positioned absolutely at
-   `bottom: 12vh` and centred via translateX; the fade-in keyframe keeps
+   `top: 4vh` and centred via translateX; the fade-in keyframe keeps
    the -50% X-offset so centring isn't lost mid-animation. */
 .intro-caption {
   position: absolute;
-  bottom: 4vh;
+  top: 4vh;
   left: 50%;
   transform: translateX(-50%);
   /* One line per sentence: no wrap, width grows to the text (centred by
@@ -298,37 +298,29 @@ onBeforeUnmount(clearTimers)
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
-/* Caption wrapper — a full-width strip with `text-align: center`. The
-   inner `<p>` is `display: inline-block`, so the block-level wrapper
-   centres it like centred text. This is the most robust centring
-   technique (works regardless of flex / transform / positioning
-   interactions) and intentionally distinct from the per-quadrant texts'
-   layout. */
-.caption-wrap {
+/* Modes caption — anchored at the viewport centre (50%/50%) and centred
+   on that point via translate. Overlays the central image; z-index above
+   the central slot so it sits on top of the picture. Fades in via the
+   showCaption flag (1 s after the fourth quadrant cross is clicked). */
+.modes-caption {
   position: absolute;
-  bottom: calc(50% + 11vmin + 1.25rem);
-  left: 0;
-  right: 0;
-  text-align: center;
-  pointer-events: none;
-  z-index: 10;
-  opacity: 0;
-  transform: translateY(-8px);
-  transition: opacity 600ms ease-out, transform 600ms ease-out;
-}
-.caption-wrap.visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-.caption {
-  display: inline-block;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   margin: 0;
   padding: 0 1rem;
-  max-width: 36rem;
+  white-space: nowrap;
   text-align: center;
   font-size: 0.95rem;
   line-height: 1.6;
   color: #595b54;
+  pointer-events: none;
+  z-index: 11;
+  opacity: 0;
+  transition: opacity 600ms ease-out;
+}
+.modes-caption.visible {
+  opacity: 1;
 }
 
 /* Advance variant — top-centre of the viewport, pixel-positioned

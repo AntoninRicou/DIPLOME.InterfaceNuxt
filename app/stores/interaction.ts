@@ -4,6 +4,7 @@ import type { ImageId } from '~/types/interaction'
 import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 import { useProjectSocket } from '~/composables/useProjectSocket'
 import { useViewStateStore } from '~/stores/viewState'
+import { view3Interpretations, type View3ComponentId } from '~/view3/view3Interpretations'
 
 const OVERVIEW_THRESHOLD = 10
 
@@ -74,6 +75,14 @@ export const useInteractionStore = defineStore('interaction', () => {
     if (!id) return
     canvasZoomed.value = canvasZoomed.value.map((v, i) => i === canvasIndex ? true : v)
     projectSocket.setCanvasZoom(canvasIndex, id)
+    // Mirror VIEW_3's per-quadrant text fade-in on the corresponding
+    // project canvas — same content (title + body from
+    // view3Interpretations), same component-id mapping (canvasIndex
+    // 0..3 → component_1..4). One emission per cross click, matching
+    // the per-cross interface reveal gated on canvasZoomed[i].
+    const componentId = `component_${canvasIndex + 1}` as View3ComponentId
+    const { title, body } = view3Interpretations[componentId]
+    projectSocket.setCanvasText(canvasIndex, title, body)
   }
 
   const historyHasPrevious = computed(() => historyIndex.value > 0)
@@ -95,6 +104,18 @@ export const useInteractionStore = defineStore('interaction', () => {
       to: viewState.current,
       clientTimestamp: Date.now(),
     })
+    // Defensive title clears at the first user-driven state transition out
+    // of `single`. The CSS `:not([data-state="single"])` guard hides every
+    // component-title surface while project is in single, but the moment
+    // the morph below flips state to `overview` the gate opens — so any
+    // stale data-attribute / .visible class left over from a previous
+    // session (e.g. a hot-reload that didn't re-register, or a closed-
+    // and-reopened standalone project tab) would fade in under the
+    // revealing mask. Clearing here pre-morph guarantees the user only
+    // sees titles they actually triggered this session.
+    projectSocket.setCornerLabels(false)
+    for (let i = 0; i < 4; i++) projectSocket.setCanvasText(i, '', '')
+    projectSocket.setCenterCaption('')
     // Hidden-morph on the project screen: gradient mask fades in to
     // cover the canvases, single → overview morph runs entirely behind
     // the opaque mask, a HOLD buffer absorbs socket/tick slop so the
@@ -164,6 +185,21 @@ export const useInteractionStore = defineStore('interaction', () => {
     // Reset per-canvas zoom flags so a future return to VIEW_3 starts
     // clean. (No backward navigation today, but cheap and defensive.)
     canvasZoomed.value = [false, false, false, false]
+    // Clear all four canvas texts on entry to VIEW_4. They were populated
+    // one-by-one as the user clicked through the four quadrant crosses in
+    // VIEW_3; VIEW_4 starts with interpretation mode OFF, so the canvases
+    // should match (no text) until the user toggles the interpret control.
+    for (let i = 0; i < 4; i++) projectSocket.setCanvasText(i, '', '')
+    // Also clear the centred modes-caption that faded in 1 s after the
+    // fourth cross. Empty string hides project's `#center-caption`.
+    projectSocket.setCenterCaption('')
+    // Reveal the four component corner labels on the standalone project
+    // at this moment — the top-cross click is the first beat where the
+    // user has committed to the relational view, so corner labels appear
+    // together with VIEW_4 mounting (which renders its own always-visible
+    // RelationComponent corner labels). Both screens land in
+    // MIRROR/TRACE/SHIFT/REPLAY in lockstep.
+    projectSocket.setCornerLabels(true)
   }
 
   function activateCentral(id: ImageId) {
@@ -302,6 +338,17 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   function toggleView3Interpretation() {
     view3InterpretationMode.value = !view3InterpretationMode.value
+    // Mirror the interface-side interpretation-panel reveal on the four
+    // project canvases. ON → push all four texts; OFF → clear all four.
+    for (let i = 0; i < 4; i++) {
+      if (view3InterpretationMode.value) {
+        const componentId = `component_${i + 1}` as View3ComponentId
+        const { title, body } = view3Interpretations[componentId]
+        projectSocket.setCanvasText(i, title, body)
+      } else {
+        projectSocket.setCanvasText(i, '', '')
+      }
+    }
   }
 
   function setCanvasBackground(mode: 'black' | 'gradient') {
@@ -309,14 +356,12 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCanvasBg(mode)
   }
 
-  // Reveal the four component corner labels on the standalone project's
-  // canvases. Called from VIEW_3 the moment its own corner labels fade in
-  // (1s after the fourth quadrant cross is clicked), so both screens
-  // reveal MIRROR / TRACE / SHIFT / REPLAY simultaneously. Once revealed
-  // the labels stay visible across subsequent state transitions until
-  // the next boot.
-  function revealCornerLabels() {
-    projectSocket.setCornerLabels(true)
+  // Mirror VIEW_3's centred modes-caption on the standalone project's
+  // viewport. Called from the 1s timer after the fourth quadrant cross.
+  // Pass empty string to clear (done in `enterRelationalView` on VIEW_4
+  // entry).
+  function setCenterCaption(text: string) {
+    projectSocket.setCenterCaption(text)
   }
 
   // Transient perception primitive. Highlights an id on the project canvas
@@ -356,7 +401,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     toggleView3Interpretation,
     canvasBackground,
     setCanvasBackground,
-    revealCornerLabels,
+    setCenterCaption,
     setHighlight,
   }
 })

@@ -491,13 +491,16 @@ skips VIEW-2 early, project's morph naturally truncates — no second
 ### Boot reset sequence
 
 On every `register` event between `interface_nuxt` and `project` (initial
-connect and reconnect), `interface_nuxt` emits the following four
-directives, in order:
+connect and reconnect), `interface_nuxt` emits the following directives,
+in order:
 
 1. `path-clear`
 2. `set-state('single')`
 3. `set-mask(0, 0)`
 4. `set-canvas-bg(store.canvasBackground)`
+5. `set-corner-labels(false)`
+6. `set-canvas-text(i, '', '')` for `i ∈ {0,1,2,3}`
+7. `set-center-caption('')`
 
 This is the canonical session-reset handshake. No aggregate `reset-session`
 wire verb exists; composition is sufficient because the wire vocabulary is
@@ -523,8 +526,18 @@ deliberately minimal and each constituent already carries clean semantics.
   The interface is the authoritative owner; on every register the current
   store value is re-emitted so a freshly-connected project lands on the
   correct background regardless of its prior state.
+* `set-corner-labels(false)` + four-up `set-canvas-text(i, '', '')` +
+  `set-center-caption('')` clear every **component-title** surface on
+  project so a fresh-mounted interface can never inherit a stale reveal
+  from a previous session (e.g. interface reload during VIEW_4 leaving
+  `body[data-corner-labels="visible"]` set; without these clears the
+  labels would re-appear the next time project hit split or overview).
+  CSS also gates each of these surfaces on `:not([data-state="single"])`
+  (see *Component-title invariant* below) so they cannot render in the
+  boot `single` state regardless of attribute hygiene — the data clears
+  here are belt-and-braces.
 
-Ordering between the four emissions is cosmetic — the four subsystems
+Ordering between the emissions is cosmetic — the four subsystems
 (`pathTrace`, `stateManager`, the render mask DOM element, and the
 `<body>` `data-canvas-bg` attribute) are independent and do not interact —
 but the listed order is preferred so that the path wipe is visible before
@@ -538,10 +551,57 @@ reconnect.
 | `pathTrace.segments[]` + glow | `path-clear` → `pathTrace.clear()` |
 | `currentName`, layout, `cameraZ`, drift | `set-state('single')` → `stateManager.goTo('single')` |
 | `targetX` / `targetY` / `panProgress` / highlight | `set-state('single')` → `single`-state focus reset (inside `goTo`) |
+| `body[data-corner-labels]` | `set-corner-labels(false)` → attribute cleared |
+| Each `.canvas-text` `.visible` + textContent | `set-canvas-text(i, '', '')` × 4 → class removed + text emptied |
+| `#center-caption` `.visible` + textContent | `set-center-caption('')` → class removed + text emptied |
 
 Together they leave `project` indistinguishable from a cold boot: empty
-path, camera at origin, no focal target, layout in `single`, auto-morph
-cycle restarted.
+path, camera at origin, no focal target, layout in `single`, every
+component-title surface empty, auto-morph cycle restarted.
+
+### Component-title invariant
+
+**No component title may render while project is in `single`.** The rule
+is enforced **structurally** in `project/src/style.css` by the
+`:not([data-state="single"])` guard on every visibility selector that
+controls a component-title surface:
+
+* `body[data-corner-labels="visible"]:not([data-state="single"]) .corner-label { opacity: 1 }`
+* `body:not([data-state="single"]) .canvas-text.visible { opacity: 1 }`
+* `body:not([data-state="single"]) #center-caption.visible { opacity: 1 }`
+
+Why this is needed: corner labels, canvas-texts, and the centre caption
+each carry their own DOM state (data-attribute on `<body>`, `.visible`
+classes on the elements). That state is set during VIEW_3 / VIEW_4 by
+interface emissions, but project's `set-state` directives never clear
+it — so an interface reload mid-session can leave the project DOM
+holding "labels revealed" while the boot reset sends project back to
+`single`. The CSS guard makes this impossible to perceive: the first
+visible appearance of any component title is gated on project being out
+of `single`, which in the canonical flow means **the moment all four
+VIEW_3 quadrant crosses have been clicked and the user has advanced
+toward `split`** (corner labels + centre caption fade in then, on both
+screens, via the 1 s VIEW_3 reveal timer).
+
+The boot-reset clears (#5–#7 above) are belt-and-braces: they keep the
+underlying data-attribute / `.visible` state honest so the structural
+guard never has to mask a divergence between data and visuals. The
+invariant holds **even if** one of the clears were skipped — the CSS
+rule is the load-bearing piece.
+
+**Second-layer defensive clear in `enterEntryView`.** The boot reset
+only fires on a full interface reload (socket re-register). A *hot
+reload* (Vite HMR refreshing the module without socket disconnect)
+doesn't trigger it, so a developer iterating in dev mode can leave
+project's `body[data-corner-labels="visible"]` set from a previous
+test of the full flow. The CSS guard hides those labels in `single`,
+but the moment the first state transition fires (`enterEntryView`'s
+`single → overview` morph), the gate opens and the stale labels would
+fade in under the revealing mask. To close that window, `enterEntryView`
+re-emits `setCornerLabels(false)` + four-up `setCanvasText('', '')` +
+`setCenterCaption('')` immediately after `viewState.advance()`, before
+the mask snap. These are no-ops on a cold-booted project but eliminate
+hot-reload leak in development.
 
 **Caveats:**
 
@@ -2301,6 +2361,210 @@ Key properties:
 
 ---
 
+## SET-CANVAS-TEXT — per-canvas interpretation overlay
+
+`set-canvas-text` is the wire directive that paints a title + body block
+onto a specific project canvas. It mirrors interface_nuxt's
+`.proximity-panel` content (the Mirror / Trace / Shift / Replay
+descriptive text) on the project side so the interface-side panel and
+the canvas-side overlay appear simultaneously, with identical typography,
+centred inside the same quadrant.
+
+This is the **tenth project-side exception**. Scoped tightly: a single
+DOM block per container, a CSS rule mirroring `.proximity-panel`'s
+typography, one handler in `commands.js`, registration in
+`commandsManager.js`. No render-loop, state-machine, or interaction-
+logic participation.
+
+### Wire vocabulary
+
+```
+set-canvas-text({ canvasIndex: 0|1|2|3, title: string, body: string })
+```
+
+* **`canvasIndex`** — which canvas to act on. Order matches project's
+  `STATES.split.rects`: 0 = top-left, 1 = top-right, 2 = bottom-left,
+  3 = bottom-right. Same mapping as `set-canvas-zoom` and the
+  `component_${i+1}` ids in `view3Interpretations`.
+* **`title`** / **`body`** — the text content. Empty strings (or
+  missing fields) clear the overlay and hide the block.
+
+Project is content-blind: it stores `textContent` and toggles a
+`.visible` class. All interpretation copy lives in
+`interface_nuxt/app/view3/view3Interpretations.ts`, keyed by
+`componentId`.
+
+### Emission rules
+
+Three call sites in `interaction.ts`, all keyed to mirror an existing
+interface-side reveal so both screens animate together:
+
+| Moment                                              | Emission                                                              |
+| --------------------------------------------------- | --------------------------------------------------------------------- |
+| VIEW_3 quadrant cross click (`zoomCanvas(i)`)       | `set-canvas-text(i, title, body)` for that quadrant's componentId — mirrors the per-cross interface `.quadrant-text.visible` reveal, gated on `canvasZoomed[i]`. |
+| VIEW_3 → VIEW_4 advance (`enterRelationalView`)     | `set-canvas-text(i, '', '')` for all four — clears the carried-over overlay so VIEW_4 starts blank (matches interpretation mode = OFF). |
+| VIEW_4 interpret-control toggle (`toggleView3Interpretation`) | ON → `set-canvas-text(i, title, body)` for all four; OFF → `set-canvas-text(i, '', '')` for all four. |
+
+Emissions are independent of the persistent render-state pipeline
+(`set-state` + `focus` + path directives) and of `set-canvas-zoom`. The
+overlay is a pure perceptual layer — adding or clearing it never
+touches camera state, point system, or path renderer.
+
+### Project-side rendering contract
+
+`project/index.html` adds one block per container:
+
+```html
+<div id="container-N" class="container">
+  <span class="corner-label" data-position="..."></span>
+  <div class="canvas-text" data-canvas="N-1">
+    <p class="canvas-text-title"></p>
+    <p class="canvas-text-body"></p>
+  </div>
+</div>
+```
+
+`.canvas-text` CSS in `project/src/style.css` exactly mirrors the
+global `.proximity-panel` block in `interface_nuxt/app/app.vue` (fixed
+30em width, serif, colour `#595b54`, identical title + body sizes),
+centred absolutely inside its container via `top/left: 50%` +
+`translate(-50%, -50%)`. Fades on opacity only, gated by `.visible`.
+
+On wire receipt of `set-canvas-text(payload)`:
+
+```js
+function setCanvasText(payload) {
+  const i = payload?.canvasIndex
+  if (typeof i !== 'number' || i < 0 || i > 3) return
+  const el = document.querySelector(`.canvas-text[data-canvas="${i}"]`)
+  if (!el) return
+  const title = typeof payload.title === 'string' ? payload.title : ''
+  const body = typeof payload.body === 'string' ? payload.body : ''
+  el.querySelector('.canvas-text-title').textContent = title
+  el.querySelector('.canvas-text-body').textContent = body
+  el.classList.toggle('visible', !!(title || body))
+}
+```
+
+### Invariants
+
+* `set-canvas-text` never touches `project`'s state machine, render
+  loop, point system, path renderer, focus state, or camera. It is
+  **purely a DOM textContent + class mutation** on a single element.
+* The overlay is **client-only visual state**. Not persisted on the
+  server, not in `localStorage`, not on the wire beyond the per-event
+  directive. Page reload destroys it; subsequent interactions rebuild
+  it from the next emission.
+* Same shape as `set-mask`, `set-canvas-bg`, `set-corner-labels`: a
+  scoped perceptual primitive driven by an explicit `interface_nuxt`
+  directive, with zero project-side interpretation.
+* Content is owned by `interface_nuxt` (`view3Interpretations.ts`);
+  project never lookup-resolves an id to text. Adding a new component
+  is therefore an interface-side change — project carries no
+  componentId table.
+* Boot handshake does **not** emit `set-canvas-text`. The overlay is
+  empty by default (no `.visible` class), which is the correct cold-
+  boot state.
+
+---
+
+## SET-CENTER-CAPTION — viewport-centred overlay text
+
+`set-center-caption` is the wire directive that paints a single short
+sentence at viewport centre on the project side. It mirrors
+interface_nuxt's `.modes-caption` element (in `View3Transition.vue`)
+exactly, so both screens reveal the line of copy at the same beat —
+currently the 1 s timer that fires after the user clicks the fourth
+VIEW_3 quadrant cross.
+
+This is the **eleventh project-side exception**. Scoped tightly: one
+DOM element at body level, a CSS rule, one handler in `commands.js`,
+registration in `commandsManager.js`. No render-loop, state-machine,
+or interaction-logic participation.
+
+### Wire vocabulary
+
+```
+set-center-caption({ text: string })
+```
+
+* **`text`** — the string to render. Empty string (or missing field)
+  clears the caption and hides the element.
+
+Project is content-blind. The copy lives interface-side in
+`View3Transition.vue` as the `MODES_CAPTION` constant, which is
+rendered into the interface `.modes-caption` element and *also* passed
+through `store.setCenterCaption(text)` to the wire.
+
+### Emission rules
+
+Two call sites in `interaction.ts`, both keyed to existing
+interface-side reveals so both screens animate in lockstep:
+
+| Moment                                                          | Emission                                                |
+| --------------------------------------------------------------- | -------------------------------------------------------- |
+| 1 s after fourth VIEW_3 quadrant cross click                    | `set-center-caption(MODES_CAPTION)` — fade in.    |
+| VIEW_3 → VIEW_4 advance (`enterRelationalView`)                 | `set-center-caption('')` — clear before VIEW_4 mounts. |
+
+Emissions are independent of `set-state`, `focus`, path directives,
+and the per-canvas `set-canvas-text`. The caption is a pure perceptual
+overlay layered on top of project's canvas; adding or clearing it
+never touches camera state, point system, or path renderer.
+
+### Project-side rendering contract
+
+`project/index.html` adds one element at body level, sibling to
+`render-mask`:
+
+```html
+<p id="center-caption" aria-hidden="true"></p>
+```
+
+`#center-caption` CSS in `project/src/style.css` mirrors interface's
+`.modes-caption` typography (serif, colour `#595b54`, single-line
+`white-space: nowrap`, same font size + line height) and pins itself
+to viewport centre via `position: fixed; top/left: 50%;
+transform: translate(-50%, -50%)`. Fades on opacity only, gated by a
+`.visible` class. `z-index: 1001` sits above `render-mask` so the
+caption is never veiled.
+
+On wire receipt of `set-center-caption(payload)`:
+
+```js
+function setCenterCaption(payload) {
+  const el = document.getElementById('center-caption')
+  if (!el) return
+  const text = typeof payload?.text === 'string' ? payload.text : ''
+  el.textContent = text
+  el.classList.toggle('visible', !!text)
+}
+```
+
+### Invariants
+
+* `set-center-caption` never touches `project`'s state machine, render
+  loop, point system, path renderer, focus state, or camera. It is
+  **purely a DOM textContent + class mutation** on a single element.
+* The caption is **client-only visual state**. Not persisted on the
+  server, not in `localStorage`, not on the wire beyond the per-event
+  directive. Page reload destroys it; the next VIEW_3 traversal
+  rebuilds it.
+* Same shape as `set-mask`, `set-canvas-bg`, `set-corner-labels`, and
+  `set-canvas-text`: a scoped perceptual primitive driven by an
+  explicit `interface_nuxt` directive, with zero project-side
+  interpretation.
+* Content is owned by `interface_nuxt` (`MODES_CAPTION` constant in
+  `View3Transition.vue`). Project carries no copy of the string.
+* Boot handshake does **not** emit `set-center-caption`. The element
+  is empty by default (no `.visible` class), which is the correct
+  cold-boot state.
+* Single-element design: the directive supports **one** centred
+  caption slot at a time. Reuse is fine — emit a new `text` and it
+  replaces the previous one — but two concurrent centred captions
+  would require a second slot.
+
+---
+
 ## VIEW-3 — VISUAL CONTINUITY WITH PROJECT
 
 `interface_nuxt`'s surface is composed to read as **one continuous field
@@ -2382,7 +2646,7 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with nine explicit exceptions**:
+Do not modify project, **with eleven explicit exceptions**:
 
 1. The user-driven path-rendering directive surface inside `project` —
    `path-segment`, `path-truncate`, and the `pathTrace` primitive they
@@ -2448,17 +2712,49 @@ Do not modify project, **with nine explicit exceptions**:
    `set-corner-labels({ visible })` wire directive that gates their
    opacity. Handler `actions.setCornerLabels` in `commands.js` toggles
    `body[data-corner-labels]`; CSS reveals the labels via
-   `body[data-corner-labels="visible"] .corner-label { opacity: 1 }`.
-   Visibility is **NOT** keyed to `body[data-state]` — interface_nuxt
-   holds the reveal until VIEW_3's caption timer fires
-   (`store.revealCornerLabels()` → `set-corner-labels(true)`) so both
-   screens show MIRROR / TRACE / SHIFT / REPLAY in sync. Once revealed
-   the labels stay visible across subsequent state transitions until
-   the next boot. Pure DOM + CSS + a thin handler — no render-loop,
+   `body[data-corner-labels="visible"]:not([data-state="single"]) .corner-label { opacity: 1 }`
+   (the `:not([data-state="single"])` guard is the *Component-title
+   invariant* — see the section under *Boot reset sequence*).
+   `interface_nuxt` defers the reveal until the user **clicks the top
+   advance cross** in VIEW_3, i.e. from inside `enterRelationalView`
+   (`projectSocket.setCornerLabels(true)`). The wire emission lands at
+   the same beat as project's `setState('split', 0)` and VIEW_4's mount
+   (which renders its own always-visible RelationComponent corner
+   labels), so both screens show MIRROR / TRACE / SHIFT / REPLAY in
+   sync as VIEW_4 takes over. Once revealed the labels stay visible
+   across subsequent state transitions (split / overview) until the
+   next boot. Pure DOM + CSS + a thin handler — no render-loop,
    state-machine, or interaction-logic participation. See *VIEW_4 —
    COMPONENT LAYOUT*.
+10. The **per-canvas text overlay** — `set-canvas-text`, the four
+    `<div class="canvas-text" data-canvas="...">` blocks (title + body)
+    added to each `<div id="container-*">` in `project/index.html`, a
+    `.canvas-text` block in `project/src/style.css` whose typography
+    exactly mirrors the global `.proximity-panel` in
+    `interface_nuxt/app/app.vue`, and `actions.setCanvasText` in
+    `commands.js`. Driven by interface emissions in `zoomCanvas` (per-
+    canvas reveal on VIEW_3 cross click), `enterRelationalView` (clear
+    all four on VIEW_3 → VIEW_4 transition), and
+    `toggleView3Interpretation` (reveal/clear all four on the VIEW_4
+    interpret-control toggle). Content lives entirely in
+    `view3Interpretations.ts`; project is content-blind. Pure DOM +
+    CSS + a thin handler — no render-loop, state-machine, or
+    interaction-logic participation. See *SET-CANVAS-TEXT*.
+11. The **centred-caption overlay** — `set-center-caption`, the
+    `<p id="center-caption">` element added at body level in
+    `project/index.html`, a `#center-caption` block in
+    `project/src/style.css` mirroring interface_nuxt's `.modes-caption`
+    typography (single line, serif, viewport-centred), and
+    `actions.setCenterCaption` in `commands.js`. Driven by interface
+    emissions on the 1 s VIEW_3 caption timer (`store.setCenterCaption(text)`)
+    and cleared on the VIEW_3 → VIEW_4 advance
+    (`enterRelationalView`). Content lives interface-side
+    (`MODES_CAPTION` constant in `View3Transition.vue`); project is
+    content-blind. Pure DOM + CSS + a thin handler — no render-loop,
+    state-machine, or interaction-logic participation. See
+    *SET-CENTER-CAPTION*.
 
-All nine exceptions are scoped tightly: pure rendering / configuration
+All eleven exceptions are scoped tightly: pure rendering / configuration
 surfaces driven by explicit `interface_nuxt` directives (or, in the
 VIEW_2 embed case, by an out-of-band `postMessage` channel for the
 canvas-pick input). No project-side interpretation, derivation, or

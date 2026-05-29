@@ -115,8 +115,8 @@ onBeforeUnmount(() => {
 }
 
 /* Caption + skip are absolutely positioned (out of the flex flow) so each
-   has its own bottom offset: the sentence sits at 4vh, the skip `>` button
-   2vh below it. Both centred via left:50% + translateX(-50%). */
+   has its own offset: the sentence sits at top: 4vh, the skip `>` button
+   at bottom: 2vh. Both centred via left:50% + translateX(-50%). */
 .caption,
 .skip {
   position: absolute;
@@ -126,7 +126,7 @@ onBeforeUnmount(() => {
 }
 
 .caption {
-  bottom: 4vh;
+  top: 4vh;
   /* One line per sentence: no wrap, width grows to the text. */
   max-width: none;
   white-space: nowrap;
