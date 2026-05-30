@@ -4,6 +4,7 @@ import { useInteractionStore } from '~/stores/interaction'
 import CentralImage from '~/components/CentralImage.vue'
 import ProximityPanel from '~/components/ProximityPanel.vue'
 import { type View3ComponentId } from '~/view3/view3Interpretations'
+import { ROTATE_PANEL_MS } from '~/utils/rotateText'
 
 const store = useInteractionStore()
 
@@ -43,18 +44,31 @@ const CORNERS = [
   { position: 'br', name: 'Replay' },
 ] as const
 
-// Intro sentences shown at VIEW_3 entry — same 5s rate, lower-centre
-// placement and per-panel fade-in as VIEW_1's explanation panels. Two
-// sentences: the context first, then the call to action. Advances once
-// and holds on the instruction (VIEW_3 is user-driven, no auto-advance);
-// hidden once all four crosses are zoomed.
+// Intro sentences shown at VIEW_3 entry — same cadence and styling as
+// VIEW_1's explanation panels. Two sentences cycle every
+// ROTATE_PANEL_MS; after the last sentence's display time the caption
+// auto-fades out (mirrors VIEW_1's last-sentence behaviour) so the
+// viewport clears the way for the cross clicks. The view itself
+// doesn't auto-advance — that's user-driven via the 4 quadrant
+// crosses.
+//
+// VIEW_3 uses the same JS-gated first-render workaround as VIEW_2 for
+// the initial appear delay: Vue's `<Transition appear>` was firing
+// before `--rotate-appear-delay` could register (the many child
+// elements mounting simultaneously — corner labels, quadrant crosses,
+// proximity panels, central image — caused a similar reflow race as
+// VIEW_2's iframe load). `introVisible` is gated by a setTimeout in
+// onMounted; the leave path is shared between the timer-driven
+// last-sentence fade-out AND the cross-click trigger.
 const INTRO_PANELS = [
   'You selected one image from 4,993 fragments',
   'Click on the crosses to reveal new related images through different modes of proximity',
 ]
-const INTRO_PANEL_MS = 5000
+const INTRO_PANEL_MS = ROTATE_PANEL_MS
 const introIndex = ref(0)
+const introVisible = ref(false) // gated by setTimeout — see comment block
 let introTimer: ReturnType<typeof setInterval> | null = null
+let introFirstShowTimer: ReturnType<typeof setTimeout> | null = null
 
 const showCaption = ref(false)
 let captionTimer: ReturnType<typeof setTimeout> | null = null
@@ -62,12 +76,41 @@ let captionTimer: ReturnType<typeof setTimeout> | null = null
 function clearTimers() {
   if (captionTimer) { clearTimeout(captionTimer); captionTimer = null }
   if (introTimer) { clearInterval(introTimer); introTimer = null }
+  if (introFirstShowTimer) { clearTimeout(introFirstShowTimer); introFirstShowTimer = null }
+}
+
+// Reads a CSS custom property as milliseconds. Falls back to 0 if the
+// value is missing or unparseable.
+function readMsVar(name: string): number {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  if (v.endsWith('ms')) return parseFloat(v)
+  if (v.endsWith('s')) return parseFloat(v) * 1000
+  return parseFloat(v) || 0
 }
 
 onMounted(() => {
+  // First-render delay (replaces Vue Transition's `appear` for this
+  // view — see top-of-file comment block). Once introVisible flips
+  // true, Vue Transition's enter-active class adds its own
+  // `--rotate-empty-beat` delay before the 500ms fade. Subtract that
+  // from the appear-delay target so the total elapsed time from mount
+  // to first sentence visible matches VIEW_1 exactly.
+  const appearDelayMs = readMsVar('--rotate-appear-delay')
+  const emptyBeatMs = readMsVar('--rotate-empty-beat')
+  const firstShowWait = Math.max(0, appearDelayMs - emptyBeatMs)
+  introFirstShowTimer = setTimeout(() => {
+    introVisible.value = true
+    introFirstShowTimer = null
+  }, firstShowWait)
   introTimer = setInterval(() => {
     if (introIndex.value >= INTRO_PANELS.length - 1) {
+      // Last sentence reached — fire its fade-out at this tick so it
+      // displays for one full PANEL_MS at the tip then leaves, same
+      // tick-rhythm as VIEW_1's advance(). View doesn't advance with
+      // it; introVisible just hides the caption, the user still
+      // clicks the 4 quadrant crosses to progress.
       if (introTimer) { clearInterval(introTimer); introTimer = null }
+      introVisible.value = false
       return
     }
     introIndex.value += 1
@@ -76,6 +119,10 @@ onMounted(() => {
 
 watch(() => store.allCanvasesZoomed, (zoomed) => {
   if (!zoomed) return
+  // User clicked all 4 crosses — hide intro (if still showing) and
+  // schedule the modes-caption reveal.
+  if (introTimer) { clearInterval(introTimer); introTimer = null }
+  introVisible.value = false
   captionTimer = setTimeout(() => {
     showCaption.value = true
     // Mirror the centred modes-caption on the standalone project at the
@@ -123,13 +170,23 @@ onBeforeUnmount(clearTimers)
       <CentralImage :ids="store.centralStack" :active-index="store.centralStackActiveIndex" source="original" />
     </div>
 
-    <p
-      v-if="!store.allCanvasesZoomed"
-      :key="introIndex"
-      class="intro-caption"
-    >
-      {{ INTRO_PANELS[introIndex] }}
-    </p>
+    <!-- Same shared `--rotate-*` vars and Vue <Transition> shape as
+         View1Explanation / View2Disperse, with no `appear`: the first
+         render is gated by `introVisible` (flipped true by the
+         appear-delay setTimeout in onMounted). The leave fires from
+         either path: timer-driven (introVisible flipped false after
+         the last sentence's display time) OR cross-click-driven
+         (watch on store.allCanvasesZoomed also sets introVisible
+         false). See top-of-file comment block. -->
+    <Transition name="intro" mode="out-in">
+      <p
+        v-if="introVisible"
+        :key="introIndex"
+        class="intro-caption"
+      >
+        {{ INTRO_PANELS[introIndex] }}
+      </p>
+    </Transition>
 
     <p class="modes-caption" :class="{ visible: showCaption }">
       {{ MODES_CAPTION }}
@@ -210,11 +267,6 @@ onBeforeUnmount(clearTimers)
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* monospace to match VIEW_4's `.interpret-control` glyph exactly —
-     View3's root sets no font, so `inherit` rendered the `+` in a
-     different face and the glyph sat at a slightly different height
-     than View4's, breaking the title-line alignment across the swap. */
-  font-family: monospace;
   font-size: 1.4rem;
   line-height: 1;
   letter-spacing: 0;
@@ -269,11 +321,11 @@ onBeforeUnmount(clearTimers)
   z-index: 10;
 }
 
-/* Intro sentences — same typography, upper-centre placement and 5s
-   per-panel fade-in as VIEW_1's `.caption`. `.view-2` is fixed/inset
-   (not a flex column like VIEW_1), so it's positioned absolutely at
-   `top: 4vh` and centred via translateX; the fade-in keyframe keeps
-   the -50% X-offset so centring isn't lost mid-animation. */
+/* Intro sentences — same typography + upper-centre placement as
+   VIEW_1's `.caption`. Animation is driven by the Vue <Transition
+   name="intro" mode="out-in" appear> wrapper in the template; the
+   keyframe-based fade-in was replaced with the .intro-appear/-enter/
+   -leave classes below for parity with View1Explanation's pattern. */
 .intro-caption {
   position: absolute;
   top: 4vh;
@@ -285,17 +337,31 @@ onBeforeUnmount(clearTimers)
   white-space: nowrap;
   margin: 0;
   padding: 0 1.5rem;
-  font-size: 1.25rem;
-  line-height: 1.5;
+  font-size: var(--label-size);
+  line-height: 1.3;
   text-align: center;
   color: #595b54;
   z-index: 12;
   pointer-events: none;
-  animation: intro-fade-in 400ms ease-out forwards;
 }
-@keyframes intro-fade-in {
-  from { opacity: 0; transform: translate(-50%, 4px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+
+/* Vue <Transition name="intro"> CSS hooks — opacity-only fades using
+   the shared --rotate-* custom properties in app.vue's :root so this
+   caption animates identically to View1's `.caption` and View2's
+   `.entry-caption`. No `appear-*` rules: VIEW_3 gates its first
+   render via JS (setTimeout in onMounted) for the same reason as
+   VIEW_2 — see the comment block at the top of <script setup>. */
+.intro-enter-active {
+  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing) var(--rotate-empty-beat);
+}
+.intro-enter-from {
+  opacity: 0;
+}
+.intro-leave-active {
+  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing);
+}
+.intro-leave-to {
+  opacity: 0;
 }
 
 /* Modes caption — anchored at the viewport centre (50%/50%) and centred
@@ -312,7 +378,7 @@ onBeforeUnmount(clearTimers)
   white-space: nowrap;
   text-align: center;
   font-size: 0.95rem;
-  line-height: 1.6;
+  line-height: 1.4;
   color: #595b54;
   pointer-events: none;
   z-index: 11;

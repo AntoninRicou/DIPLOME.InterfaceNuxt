@@ -43,6 +43,12 @@ export const useInteractionStore = defineStore('interaction', () => {
   const imageClick = ref(0)
   const overviewConfirmed = ref(false)
 
+  // Interface-only hover flag: true while the cursor is over the central
+  // image. Read by RelationComponent to fade all quadrant cells to full
+  // opacity. Never on the wire.
+  const centralHovered = ref(false)
+  function setCentralHovered(v: boolean) { centralHovered.value = v }
+
   // After `confirmOverview`, the user can request a second hidden-morph
   // that drops the standalone project from `overview` back to `single`
   // so the contributed path can be read on the full map. One-shot —
@@ -476,6 +482,8 @@ export const useInteractionStore = defineStore('interaction', () => {
     activeCentralImageId,
     centralStack,
     centralStackActiveIndex,
+    centralHovered,
+    setCentralHovered,
     imageClick,
     overviewConfirmed,
     overviewEligible,

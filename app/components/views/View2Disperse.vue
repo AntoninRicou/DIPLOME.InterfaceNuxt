@@ -3,6 +3,55 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import AtlasThumb from '~/components/AtlasThumb.vue'
 import type { ImageId } from '~/types/interaction'
+import { ROTATE_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
+
+// Rotating intro caption — same Vue <Transition> + shared --rotate-*
+// timing as View1Explanation `.caption` and View3Transition
+// `.intro-caption`. Two sentences cycle every ROTATE_PANEL_MS; on the
+// last sentence the timer stops and the caption sits visible until
+// the user clicks a sprite in the iframe. The click triggers a
+// smooth fade-out (entryCaptionVisible → false) before viewState
+// advances to VIEW_3.
+//
+// VIEW_2 workaround: Vue's `<Transition appear>` was firing immediately
+// instead of honouring the `--rotate-appear-delay` on VIEW_2 — likely
+// because the iframe load + the parent view-level transition's reflow
+// were committing styles before the appear classes could register. As a
+// result, the first sentence drifted in WITHOUT the 1400ms hold that
+// VIEW_1 and VIEW_3 have. To match VIEW_1's appear timing exactly, this
+// view gates the FIRST render of the <p> on a setTimeout instead of
+// relying on Vue's appear, then lets the enter-* classes (which read
+// the same `--rotate-*` vars) handle the fade. The setTimeout duration
+// is read from `--rotate-appear-delay` minus `--rotate-empty-beat` at
+// runtime, so any CSS-var tweak in :root automatically propagates here.
+const ENTRY_PANELS = [
+  "Here's a corpus from scientific and encyclopedic publications (15th–20th century), structured to classify and organize knowledge within Western systems.",
+  'Engage with this corpus through alternative readings and contribute to Proxima.',
+]
+const entryIndex = ref(0)
+const entryCaptionVisible = ref(false) // gated by setTimeout below — see comment block
+let entryTimer: ReturnType<typeof setInterval> | null = null
+let entryFirstShowTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearEntryTimer() {
+  if (entryTimer) {
+    clearInterval(entryTimer)
+    entryTimer = null
+  }
+  if (entryFirstShowTimer) {
+    clearTimeout(entryFirstShowTimer)
+    entryFirstShowTimer = null
+  }
+}
+
+// Reads a CSS custom property as milliseconds. Falls back to 0 if the
+// value is missing or unparseable.
+function readMsVar(name: string): number {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  if (v.endsWith('ms')) return parseFloat(v)
+  if (v.endsWith('s')) return parseFloat(v) * 1000
+  return parseFloat(v) || 0
+}
 
 const store = useInteractionStore()
 const config = useRuntimeConfig()
@@ -175,15 +224,59 @@ function onMessage(event: MessageEvent) {
   }
   if (data.type === 'view0:image-click') {
     if (typeof data.imageId !== 'string') return
-    store.selectImage(data.imageId)
+    const id = data.imageId
+    // Stop any running rotation timer regardless of caption state.
+    clearEntryTimer()
+    if (entryCaptionVisible.value) {
+      // Caption still visible — fade it out first, then advance.
+      // Mirrors VIEW_1's advance() fade-then-advance pattern.
+      entryCaptionVisible.value = false
+      setTimeout(() => store.selectImage(id), ROTATE_FADE_OUT_MS)
+    } else {
+      // Caption already faded (timer-driven fade-out completed
+      // before user clicked). Advance immediately.
+      store.selectImage(id)
+    }
   }
 }
 
 onMounted(() => {
   window.addEventListener('message', onMessage)
+  // First-render delay (replaces Vue Transition's `appear` for this
+  // view — see top-of-file comment block). Once entryCaptionVisible
+  // flips true, Vue Transition's enter-active class adds its own
+  // `--rotate-empty-beat` delay before the 500ms fade. Subtract that
+  // from the appear-delay target so the total elapsed time from mount
+  // to first sentence visible matches VIEW_1 exactly.
+  const appearDelayMs = readMsVar('--rotate-appear-delay')
+  const emptyBeatMs = readMsVar('--rotate-empty-beat')
+  const firstShowWait = Math.max(0, appearDelayMs - emptyBeatMs)
+  entryFirstShowTimer = setTimeout(() => {
+    entryCaptionVisible.value = true
+    entryFirstShowTimer = null
+  }, firstShowWait)
+  // Rotation timer — same tick rhythm as VIEW_1's panel timer.
+  // Advances entryIndex through ENTRY_PANELS, and on the tick AFTER
+  // the last sentence arrives (i.e. once the last sentence has had
+  // its full ROTATE_PANEL_MS display time) fires its fade-out by
+  // flipping entryCaptionVisible to false. The view itself doesn't
+  // auto-advance — the user still needs to click a sprite — but the
+  // caption clears the way so the canvas reads cleanly.
+  entryTimer = setInterval(() => {
+    if (entryIndex.value >= ENTRY_PANELS.length - 1) {
+      if (entryTimer) {
+        clearInterval(entryTimer)
+        entryTimer = null
+      }
+      entryCaptionVisible.value = false
+      return
+    }
+    entryIndex.value += 1
+  }, ROTATE_PANEL_MS)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('message', onMessage)
+  clearEntryTimer()
   if (rafHandle != null) {
     cancelAnimationFrame(rafHandle)
     rafHandle = null
@@ -198,6 +291,23 @@ onBeforeUnmount(() => {
       :src="projectUrl"
       title="project disperse canvas"
     />
+    <!-- Rotating intro caption — same shared `--rotate-*` vars and same
+         Vue <Transition> shape as View1Explanation / View3Transition,
+         EXCEPT no `appear` here: the first render is gated by JS
+         (entryCaptionVisible flips from false → true after the
+         appear-delay setTimeout in onMounted). See top-of-file
+         comment block for why VIEW_2 needs this workaround. The
+         enter-* classes still handle the actual fade timing via
+         `--rotate-empty-beat` + `--rotate-fade-ms`. -->
+    <Transition name="entry" mode="out-in">
+      <p
+        v-if="entryCaptionVisible"
+        :key="entryIndex"
+        class="entry-caption"
+      >
+        {{ ENTRY_PANELS[entryIndex] }}
+      </p>
+    </Transition>
     <!-- Spawn-and-fade hover previews. Each preview is anchored to the
          viewport position where the cursor first entered its sprite and
          runs its own fade-in → hold → fade-out lifecycle. Multiple can
@@ -279,5 +389,46 @@ onBeforeUnmount(() => {
   z-index: 10;
   /* No CSS transition on opacity — the rAF loop drives the curve
      directly; a CSS easing on top would fight it. */
+}
+
+/* Entry intro caption — same upper-centre placement and typography as
+   View1's `.caption` and View3's `.intro-caption`, but with `max-width`
+   + wrapping (instead of `white-space: nowrap`) because the corpus
+   description is too long to fit on one line. z-index sits above the
+   iframe and the hover previews. */
+.entry-caption {
+  position: absolute;
+  top: 4vh;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0 1.5rem;
+  max-width: 60vw;
+  font-size: var(--label-size);
+  line-height: 1.3;
+  text-align: center;
+  color: #595b54;
+  z-index: 12;
+  pointer-events: none;
+}
+
+/* Vue <Transition name="entry"> CSS hooks — opacity-only fades using
+   the shared --rotate-* custom properties so this caption animates
+   identically to View1's `.caption` and View3's `.intro-caption`.
+   Change a value once in app.vue's :root and all three views update.
+   No `appear-*` rules here: VIEW_2 gates its first render via JS
+   (setTimeout in onMounted) instead of Vue's `appear` attribute —
+   see the comment block at the top of <script setup>. */
+.entry-enter-active {
+  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing) var(--rotate-empty-beat);
+}
+.entry-enter-from {
+  opacity: 0;
+}
+.entry-leave-active {
+  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing);
+}
+.entry-leave-to {
+  opacity: 0;
 }
 </style>

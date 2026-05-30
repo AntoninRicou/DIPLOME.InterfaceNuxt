@@ -108,6 +108,7 @@ function onLeave() {
         :active-index="store.centralStackActiveIndex"
         :expanded="store.overviewConfirmed"
         source="original"
+        @update:hovered="store.setCentralHovered"
       />
     </div>
 
@@ -179,7 +180,6 @@ function onLeave() {
      style specificity. */
   color: #595b54;
   overflow: hidden;
-  font-family: monospace;
 }
 /* Grid cross — mirrors project's body::before (project/src/style.css L67-86)
    so the 2×2 split reads as the same structural surface in both apps.
@@ -315,13 +315,10 @@ function onLeave() {
   padding: 0 1.5rem;
   max-width: 36rem;
   text-align: center;
-  /* Match `.proximity-panel-title` (app.vue): serif overrides VIEW_4's
-     monospace inheritance, same weight + tracking + size + color. */
-  font-family: serif;
   font-size: 0.95rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1.3;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
   color: #595b54;
   opacity: 0;
   pointer-events: none;
@@ -377,9 +374,8 @@ function onLeave() {
   background: rgba(13, 13, 16, 0.7);
   color: #595b54;
   border: 1px solid #2a2a2e;
-  font-family: monospace;
   font-size: 0.7rem;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.04em;
   text-transform: lowercase;
   cursor: pointer;
   transition: background 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out;
@@ -471,11 +467,10 @@ function onLeave() {
   border: none;
   padding: 0.4rem 0.6rem;
   margin: 0;
-  font-family: serif;
   font-size: 0.95rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1.3;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
   color: #595b54;
   cursor: pointer;
   transition: color 150ms ease-out;

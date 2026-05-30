@@ -35,6 +35,53 @@ watch(centralImageId, (v) => {
 
 const cells = computed(() => (data.value?.related ?? []).slice(0, 4))
 
+// ── Single invisible oval layout ──
+// All sixteen cells (4 quadrants × 4 cells) sit on the SAME invisible
+// ellipse, centred on the central image at viewport centre. The ellipse
+// has its x semi-axis in `vw` and y semi-axis in `vh`, so its shape
+// follows the viewport's aspect ratio — a true oval that wraps the
+// central image and reaches close to the outer edges of each quadrant.
+//
+// Cells differ only in ANGLE around the oval, not in radius. Each
+// quadrant gets a 90° slice; within that slice four cells are placed
+// at uniformly spaced interior angles (11.25°, 33.75°, 56.25°, 78.75°
+// from the quadrant base). Reading order around the oval is therefore
+// continuous and the constellation looks as a single coherent ring,
+// not four independent concentric arcs.
+//
+// Hierarchy reading (cell-1 closest, cell-4 furthest) is preserved by
+// the existing z-index stacking (`.cell-1` z=4 front-most) and the
+// per-index `--reveal-delay` stagger — not by radius.
+//
+// Constants are inlined here so the table is computed once at module
+// load — no per-frame trig, no reactivity (positions are fixed per
+// (position, i)).
+const RX = 40 // vw — single x semi-axis (shared by all cells)
+const RY = 37 // vh — single y semi-axis (shared by all cells)
+const N_CELLS = 4
+const ARC_SPAN_DEG = 90 // quadrant span
+// CSS-screen angles: 0° = +x right, 90° = +y down, 180° = -x left, 270° = -y up.
+// Cells are spaced at the four interior centres of the 90° arc divided
+// into 8 slices: (i + 0.5) × (90 / 4) = (i + 0.5) × 22.5°.
+const QUADRANT_BASE_DEG: Record<'tl' | 'tr' | 'bl' | 'br', number> = {
+  br: 0,
+  bl: 90,
+  tl: 180,
+  tr: 270,
+}
+const CELL_OFFSETS: Record<'tl' | 'tr' | 'bl' | 'br', { x: string; y: string }[]> =
+  (Object.keys(QUADRANT_BASE_DEG) as (keyof typeof QUADRANT_BASE_DEG)[]).reduce((acc, key) => {
+    const base = QUADRANT_BASE_DEG[key]
+    acc[key] = Array.from({ length: N_CELLS }, (_, i) => {
+      const angleDeg = base + (i + 0.5) * (ARC_SPAN_DEG / N_CELLS)
+      const theta = (angleDeg * Math.PI) / 180
+      const x = RX * Math.cos(theta)
+      const y = RY * Math.sin(theta)
+      return { x: `${x.toFixed(2)}vw`, y: `${y.toFixed(2)}vh` }
+    })
+    return acc
+  }, {} as Record<'tl' | 'tr' | 'bl' | 'br', { x: string; y: string }[]>)
+
 function onRelatedClick(id: string) {
   store.activateCentral(id)
 }
@@ -83,14 +130,18 @@ function onMouseEnter(e: MouseEvent) {
   const x = (e.clientX - rect.left) / rect.width
   const y = (e.clientY - rect.top) / rect.height
 
-  // Each quadrant anchors cell-1 at a specific corner.
+  // Anchor for distance measurement is the inner corner of the quadrant —
+  // where the arc's centre of curvature sits and where cell-1 is anchored.
+  // Cursor close to the inner corner → forward stagger (cell-1 reveals
+  // first, nearest the entry). Cursor far from inner corner / close to
+  // outer corner → reverse stagger (cell-4 reveals first).
   let ax = 0
   let ay = 0
   switch (props.position) {
-    case 'tl': ax = 1; ay = 0; break // TR corner of quadrant
-    case 'tr': ax = 0; ay = 0; break // TL corner
-    case 'bl': ax = 1; ay = 1; break // BR corner
-    case 'br': ax = 0; ay = 1; break // BL corner
+    case 'tl': ax = 1; ay = 1; break // BR corner of TL quadrant = inner
+    case 'tr': ax = 0; ay = 1; break // BL corner of TR quadrant = inner
+    case 'bl': ax = 1; ay = 0; break // TR corner of BL quadrant = inner
+    case 'br': ax = 0; ay = 0; break // TL corner of BR quadrant = inner
   }
 
   // 0..√2; >0.7 ≈ past the diagonal midpoint, i.e. cursor entered from
@@ -128,12 +179,17 @@ function onMouseEnter(e: MouseEvent) {
       :class="{
         suppressed: interpretationActive,
         hidden: store.overviewConfirmed,
+        'central-revealed': store.centralHovered,
       }"
     >
       <button
         v-for="(id, i) in cells"
         :key="id"
         :class="['cell', `cell-${i + 1}`]"
+        :style="{
+          '--cell-x': CELL_OFFSETS[position ?? 'tl'][i]?.x,
+          '--cell-y': CELL_OFFSETS[position ?? 'tl'][i]?.y,
+        }"
         :title="id"
         @click="onRelatedClick(id)"
         @mouseenter="onCellHover(id)"
@@ -188,9 +244,42 @@ function onMouseEnter(e: MouseEvent) {
 /* Corner label appearance + position come from the global
    `.corner-label` class in app.vue (shared with VIEW_3's corner tags
    so the labels read as continuous through the VIEW_3 → VIEW_4 swap).
-   Locally we only need to bump the z-index above the cells. */
+   Locally we only need to bump the z-index above the cells AND fire a
+   one-shot glow pulse on mount — VIEW_4 only mounts once after the
+   top-cross click, so the animation here is the visible companion to
+   project's `body[data-corner-labels="visible"]:not([data-state="single"])
+   .corner-label { animation: corner-label-glow }` pulse (style.css).
+   Both screens swell their warm cream shadow then settle, in lockstep,
+   right as the labels announce themselves. */
 .corner-label {
   z-index: 2;
+  animation: corner-label-glow 3.5s ease-out 1 both;
+}
+
+@keyframes corner-label-glow {
+  0%   {
+    text-shadow:
+      0 0 8px rgba(255, 252, 230, 1),
+      0 0 20px rgba(255, 248, 220, 0.9),
+      0 0 42px rgba(255, 244, 210, 0.6),
+      0 0 75px rgba(255, 240, 200, 0.3);
+  }
+  28%  {
+    text-shadow:
+      0 0 6px rgba(255, 255, 245, 1),
+      0 0 20px rgba(255, 252, 225, 1),
+      0 0 55px rgba(252, 240, 195, 1),
+      0 0 115px rgba(248, 225, 165, 0.95),
+      0 0 210px rgba(240, 205, 130, 0.8),
+      0 0 340px rgba(230, 188, 100, 0.55);
+  }
+  100% {
+    text-shadow:
+      0 0 8px rgba(255, 252, 230, 1),
+      0 0 20px rgba(255, 248, 220, 0.9),
+      0 0 42px rgba(255, 244, 210, 0.6),
+      0 0 75px rgba(255, 240, 200, 0.3);
+  }
 }
 
 .status {
@@ -198,10 +287,9 @@ function onMouseEnter(e: MouseEvent) {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-family: monospace;
   font-size: 0.65rem;
   color: #595b54;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.04em;
   pointer-events: none;
 }
 .status.error { color: #855; }
@@ -232,6 +320,15 @@ function onMouseEnter(e: MouseEvent) {
   opacity: 0;
 }
 
+/* ── central-image hover reveal ──
+   When the cursor is over the central image, every cell across every
+   quadrant fades to full opacity so the user can see the whole field at
+   once. Visual only — pointer-events stay off (cells remain non-clickable
+   until the user moves into a quadrant and `.rel:hover` takes over). */
+.constellation.central-revealed .cell {
+  opacity: 1;
+}
+
 .cell {
   position: absolute;
   width: 12vmin;
@@ -255,44 +352,39 @@ function onMouseEnter(e: MouseEvent) {
     border-color 200ms ease-out;
   box-sizing: border-box;
 
-  /* ── Vector cascade ──
-     Each cell is anchored at the same per-quadrant base point (set by
-     .rel[data-position="*"] below) and then translated along a single
-     coupled vector (--dx, --dy) by index × step. This is a true diagonal
-     flow — no axis-biased grid. Hover scale composes with the translate
-     via --cell-scale so the position transform is never overwritten.
-
-     Step is split per axis (vw for horizontal, vh for vertical) so the
-     vector reaches the opposite corner of a non-square quadrant. It's
-     still one coupled motion per cell — both components grow together by
-     index — just calibrated to the quadrant's actual aspect ratio. With
-     14vw/14vh the cell-4 endpoint lands at ~84% of each axis from anchor,
-     close to the opposite corner across typical viewport aspects. */
+  /* ── Polar position with centre-on-oval anchoring ──
+     Each cell reads inline-bound --cell-x / --cell-y (precomputed in
+     script setup from a polar formula on a single shared ellipse).
+     --center-shift-x / --center-shift-y (set per quadrant via
+     data-position below) shift the cell by ±50% of its own bounding
+     box so that its CENTRE — not its corner — lands on the oval. This
+     keeps cells of different aspect ratios visually balanced on the
+     same curve (a tall portrait and a wide landscape both pivot from
+     their geometric centre instead of their inner corner). --cell-scale
+     carries hover amplification on top. */
   --i: 0;
-  --dx: 0;
-  --dy: 0;
-  --step-x: 11vw;
-  --step-y: 11vh;
   --cell-scale: 1;
-  transform:
-    translate(
-      calc(var(--i) * var(--step-x) * var(--dx)),
-      calc(var(--i) * var(--step-y) * var(--dy))
-    )
-    scale(var(--cell-scale));
+  --center-shift-x: 0%;
+  --center-shift-y: 0%;
+  transform: translate(
+    calc(var(--cell-x, 0) + var(--center-shift-x)),
+    calc(var(--cell-y, 0) + var(--center-shift-y))
+  ) scale(var(--cell-scale));
 }
 
-/* Cascade stacking — innermost (most-relevant) suggestion sits on top;
-   outer cells fan out behind it like a deck of cards. */
+/* Cell-N indices — `--i` feeds the reveal-delay stagger, z-index keeps
+   cell-1 (most-relevant) painting above cell-4 even though arcs don't
+   actually overlap. */
 .cell-1 { z-index: 4; --i: 0; }
 .cell-2 { z-index: 3; --i: 1; }
 .cell-3 { z-index: 2; --i: 2; }
 .cell-4 { z-index: 1; --i: 3; }
 
-/* component hover → cascade reveals with per-cell stagger.
+/* component hover → arc reveals with per-cell stagger.
    Direction depends on where the cursor crossed the quadrant border
-   (set by onMouseEnter): forward = innermost first, reverse = outermost
-   first. 80ms step yields ~240ms total stagger across 4 cells. */
+   (set by onMouseEnter): forward = innermost (cell-1) first, reverse =
+   outermost (cell-4) first. 80ms step yields ~240ms total stagger
+   across 4 cells. */
 .rel:hover .cell {
   opacity: 0.85;
   pointer-events: auto;
@@ -303,8 +395,8 @@ function onMouseEnter(e: MouseEvent) {
   --reveal-delay: calc((3 - var(--i)) * 80ms);
 }
 
-/* per-cell focus amplification — composes with the cascade translate via
-   --cell-scale so the cell's diagonal position is preserved. */
+/* per-cell focus amplification — composes with the polar translate via
+   --cell-scale so the cell's arc position is preserved. */
 .rel:hover .cell:hover,
 .rel:hover .cell:focus-visible {
   opacity: 1;
@@ -322,22 +414,45 @@ function onMouseEnter(e: MouseEvent) {
   opacity: 0.45;
 }
 
-/* ── per-quadrant anchor + direction vector ──
-   Each quadrant anchors all four of its cells at a single base corner,
-   then the cascade direction (--dx, --dy) carries them along the quadrant's
-   anti-diagonal. The transform on .cell does the actual displacement via
-   index × step × direction. One coupled vector per cell — no axis-biased
-   positioning, no deformed grid.
+/* ── per-quadrant anchor + centre shift ──
+   Each quadrant pins its cells against its inner corner — the
+   viewport-centre intersection — using `top/bottom: 0` and
+   `left/right: 0`. --center-shift-x / --center-shift-y then shifts
+   the cell by ±50% of its own bounding box so the cell's CENTRE
+   (not the anchored corner) sits on the oval after the inline-bound
+   --cell-x / --cell-y translate. The sign of the shift depends on
+   WHICH corner was anchored: it always points from the anchored
+   corner toward the cell's centre.
 
-       TL ─ anchor at TR corner → (-X, +Y) sweep toward BL
-       TR ─ anchor at TL corner → (+X, +Y) sweep toward BR
-       BL ─ anchor at BR corner → (-X, -Y) sweep toward TL
-       BR ─ anchor at BL corner → (+X, -Y) sweep toward TR
+         TL ─ corner anchor BR (bottom: 0; right: 0;) → shift (+50%, +50%)
+         TR ─ corner anchor BL (bottom: 0; left: 0;)  → shift (-50%, +50%)
+         BL ─ corner anchor TR (top: 0;    right: 0;) → shift (+50%, -50%)
+         BR ─ corner anchor TL (top: 0;    left: 0;)  → shift (-50%, -50%)
 */
-.rel[data-position="tl"] .cell { top: 10%;    right: 10%;  --dx: -1; --dy:  1; }
-.rel[data-position="tr"] .cell { top: 10%;    left: 10%;   --dx:  1; --dy:  1; }
-.rel[data-position="bl"] .cell { bottom: 10%; right: 10%;  --dx: -1; --dy: -1; }
-.rel[data-position="br"] .cell { bottom: 10%; left: 10%;   --dx:  1; --dy: -1; }
+.rel[data-position="tl"] .cell {
+  bottom: 0;
+  right: 0;
+  --center-shift-x: 50%;
+  --center-shift-y: 50%;
+}
+.rel[data-position="tr"] .cell {
+  bottom: 0;
+  left: 0;
+  --center-shift-x: -50%;
+  --center-shift-y: 50%;
+}
+.rel[data-position="bl"] .cell {
+  top: 0;
+  right: 0;
+  --center-shift-x: 50%;
+  --center-shift-y: -50%;
+}
+.rel[data-position="br"] .cell {
+  top: 0;
+  left: 0;
+  --center-shift-x: -50%;
+  --center-shift-y: -50%;
+}
 
 /* ── interpretation overlay ──
    Centered inside the quadrant. No chrome — text floats directly over the

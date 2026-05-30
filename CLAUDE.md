@@ -777,8 +777,15 @@ VIEW_0 is the title screen, mounted by
 [`View0Onboarding.vue`](app/components/views/View0Onboarding.vue). Pure
 gradient backdrop (`.bg-gradient` global utility from `app.vue`), no
 project emissions, no interaction state mutations. The user sees a
-centered "PROXIMA" caption and a short hint line; clicking anywhere on
-the section calls `viewState.advance()` directly to move to VIEW_1.
+"Proxima" title (7rem, ABC Otto Medium Italic, with `letter-spacing:
+-0.02em`) and a short hint line "No image belong to one place"
+(Neue Kabel Medium, 0.85rem). Clicking anywhere on the section calls
+`handleClick()` which sets `fadingOut = true` (triggering a 500ms
+opacity fade-out keyframe on both the title and hint) and after
+`FADE_OUT_MS = 500ms` calls `viewState.advance()` — matches the same
+500ms cubic-bezier easing used by VIEW_1/VIEW_2/VIEW_3's rotating-text
+fades for visual continuity across the view chain. See *TYPOGRAPHY
+SYSTEM* and *ROTATING-TEXT SYSTEM* for the shared timing parameters.
 
 ONBOARDING is the phase alias for VIEW_0 (`PHASE_BY_VIEW.VIEW_0`).
 `interaction.ts` has no guards on `is('ONBOARDING')` today — there are no
@@ -789,6 +796,16 @@ direct `viewState.advance()` path.
 
 The standalone project stays in its boot `single` state throughout (see
 *Boot reset sequence*). Nothing on the wire during VIEW_0.
+
+**Custom text-shadow effects (currently disabled):** the Proxima title
+carries an InDesign-style stack — cream-coloured glyph body (`#f9ecd0`)
+with 4 tight dark inner-edge layers simulating an inset shadow + 2
+blue-gray outer atmospheric halo layers. The subtitle carries an
+elaborate 11-layer blue halo (8 solid blue-gray core + 3 feathered
+rim, max 380px). Both are commented out behind `TEMP DISABLED`
+markers in the stylesheet to remove their paint cost while transitions
+are being tuned; uncomment to restore. See *TYPOGRAPHY SYSTEM > Text
+halo* for the shared `--halo` cascade.
 
 ---
 
@@ -805,13 +822,22 @@ const PANELS = [
   'Proxima is a tool for exploration of a visual corpus through modes of proximity.',
   'It allows you to engage with images for alternative perspectives.',
 ]
-const PANEL_MS = 5000
+const PANEL_MS = ROTATE_PANEL_MS  // shared via app/utils/rotateText.ts
 ```
 
-A `setInterval` advances the panel index every `PANEL_MS`; when the last
-panel finishes, the timer calls `store.enterEntryView()` to advance to
-VIEW_2. A `>` skip chevron in the lower portion of the viewport also
-calls `store.enterEntryView()` for manual skip.
+A `setInterval` advances the panel index every `ROTATE_PANEL_MS` (4s);
+when the tick fires while the index is already at the last panel,
+the timer calls `advance()` which sets `captionVisible = false`
+(triggers Vue Transition leave) and after `ROTATE_FADE_OUT_MS` (500ms)
+calls `store.enterEntryView()` to advance to VIEW_2. A `>` skip
+chevron in the lower portion of the viewport also calls `advance()`
+for manual skip — same smooth fade-then-advance path.
+
+Caption animation uses Vue `<Transition name="caption" mode="out-in"
+appear>` with the `--rotate-*` CSS vars driving every fade. VIEW_1 is
+the only rotating-text consumer that uses Vue's native `appear` —
+VIEW_2 and VIEW_3 work around it with a JS-gated first render
+(see *ROTATING-TEXT SYSTEM*).
 
 ### Cross-draw animation
 
@@ -891,6 +917,32 @@ iframe.
 This replaces the earlier DOM-based VIEW-1. VIEW-1 has been removed
 entirely: there is no DOM list of selectable thumbnails, no fallback path,
 no entry-routing branch. The canvas is the only entry surface.
+
+### Rotating entry caption
+
+VIEW_2 also displays a two-sentence rotating intro `.entry-caption`
+at the upper centre of the viewport (`top: 4vh`), overlaying the
+iframe at `z-index: 12`. Content:
+
+```ts
+const ENTRY_PANELS = [
+  "Here's a corpus from scientific and encyclopedic publications (15th–20th century), structured to classify and organize knowledge within Western systems.",
+  'Engage with this corpus through alternative readings and contribute to Proxima.',
+]
+```
+
+The first sentence is too long for one line so `.entry-caption` uses
+`max-width: 60vw` with normal wrapping (unlike VIEW_1's and VIEW_3's
+captions which use `white-space: nowrap`).
+
+Timing is sourced entirely from shared parameters — see *ROTATING-TEXT
+SYSTEM* for the full contract. VIEW_2 uses the JS-gated first-render
+workaround (no Vue `appear`) because the iframe load races with Vue's
+appear-class reflow. After the last sentence's display time, the
+caption auto-fades; the sprite-click handler (via `view0:image-click`
+postMessage from the iframe) treats "already faded" as "advance
+immediately", "still visible" as "fade-then-advance" — same shape as
+VIEW_1's `advance()` flow.
 
 ### Iframe contract: `?embed=1`
 
@@ -1089,6 +1141,21 @@ canvas-by-canvas visual change is achieved by per-canvas cameraZ
 overrides at the project layer (see *PER-CANVAS ZOOM*). The wire emits
 `set-canvas-zoom` once per cross click; no `set-state` during VIEW_3
 (project stays in overview by name).
+
+VIEW_3 also displays a two-sentence rotating intro `.intro-caption` at
+the upper centre — "You selected one image from 4,993 fragments" then
+"Click on the crosses to reveal new related images through different
+modes of proximity". Timing comes from the shared `--rotate-*` CSS
+vars and `ROTATE_PANEL_MS`; see *ROTATING-TEXT SYSTEM* for the full
+contract. Like VIEW_2, VIEW_3 uses the JS-gated first-render
+workaround (no Vue `appear`) because its many child elements (corner
+labels, 4 quadrant crosses, 4 ProximityPanels, CentralImage stack)
+mounting simultaneously race with Vue's appear-class reflow. The
+caption's leave fires from either path: timer-driven after the last
+sentence's display time, OR triggered by the watcher on
+`store.allCanvasesZoomed` (last cross clicked); both flip
+`introVisible` to false. VIEW_3 itself doesn't auto-advance — only
+the caption clears the way.
 
 ### Predecessor (pre-rename)
 
@@ -1650,63 +1717,133 @@ consequences** of the derived design:
 
 ---
 
-## VIEW-3 — RELATION CASCADE
+## VIEW_4 — RELATION OVAL
 
-Inside each `RelationComponent`, the four candidate suggestion cells lay
-out as a **vector cascade along the quadrant's anti-diagonal** — not a
-list, grid, or scattered constellation. This is the layout *inside* the
-2×2 quadrant grid defined in *VIEW-3 — COMPONENT LAYOUT*.
+Inside each `RelationComponent`, the four candidate suggestion cells sit
+on a **shared invisible ellipse** centred on the central image — not a
+list, grid, vector cascade, or scattered constellation. All sixteen
+cells across the four quadrants together trace a single continuous oval
+encircling the central image. This is the layout *inside* the 2×2
+quadrant grid defined in *VIEW_4 — COMPONENT LAYOUT*.
 
-### Vector model
+### Polar ellipse model
 
 ```text
-cell_position = anchor + index × step × direction_vector
+cell_position = ellipse_centre + ( RX·cos θ_i , RY·sin θ_i )
 ```
 
-* **anchor** — one base corner per quadrant, set via one `top|bottom` +
-  one `left|right` value. Cell-1 (innermost suggestion) sits here.
-* **direction_vector** — `(--dx, --dy)` in `(±1, ±1)` set per
-  `data-position`, so each quadrant's cascade points along its
-  anti-diagonal toward the opposite corner.
-* **step** — split per axis (`--step-x` in `vw`, `--step-y` in `vh`) so
-  the vector reaches the opposite corner of a non-square quadrant. The
-  motion is still **one coupled vector per cell** — both axes advance
-  together by index — just calibrated to the quadrant's aspect ratio.
-* **index** — `--i` from 0 to 3 per cell.
+* **ellipse_centre** — the inner corner of each `.rel` (where the four
+  quadrants meet — the viewport-centre intersection, i.e. the central
+  image's anchor). Set via one `top|bottom: 0` + one `left|right: 0`
+  per quadrant so the cell's anchored corner sits exactly at this
+  intersection.
+* **RX, RY** — single shared x/y semi-axes (`vw` and `vh` respectively)
+  so the ellipse stretches with the viewport's aspect ratio. A square
+  viewport yields a circular arc; landscape stretches the oval
+  horizontally; portrait stretches it vertically. The arc therefore
+  always genuinely fills each quadrant rather than sitting in a
+  concentric circle in a `vmin` cage.
+* **θ_i** — uniformly spaced interior angles within the quadrant's 90°
+  slice: `quadrant_base + (i + 0.5) × 22.5°` for `i ∈ {0..3}` → cells at
+  `11.25°, 33.75°, 56.25°, 78.75°` from each quadrant's base angle. The
+  quadrant base angles (CSS-screen convention: 0° = +x, 90° = +y down)
+  are `BR: 0°`, `BL: 90°`, `TL: 180°`, `TR: 270°` — chosen so the signs
+  of `cos`/`sin` already point outward into the right viewport quadrant
+  without any per-quadrant sign flip.
+* **No radius progression** — all sixteen cells share the same `RX` and
+  `RY`. The visual continuity of the oval depends on this; per-cell
+  radius variation reads as four independent concentric arcs, not as a
+  single ring.
 
-The cell transform is
-`translate(i × step_x × dx, i × step_y × dy) scale(var(--cell-scale))`.
-Hover focus composes via `--cell-scale` so the cascade position is never
-overwritten by focus state. Tuning the cascade across all four quadrants
-is done from one set of variables on `.cell` — no per-cell
-hand-positioning.
+The `(x, y)` offsets are precomputed once at module load and stored in a
+static `CELL_OFFSETS` table keyed by `position → i`, each value a
+`vw`/`vh` string. Each cell binds them as inline CSS custom properties
+`--cell-x` / `--cell-y`. The `.cell` transform reads them as:
+
+```css
+transform: translate(
+  calc(var(--cell-x) + var(--center-shift-x)),
+  calc(var(--cell-y) + var(--center-shift-y))
+) scale(var(--cell-scale));
+```
+
+### Centre-on-oval anchoring
+
+Cells are pinned by the corner of their CSS box closest to the inner
+corner of their `.rel` (e.g. BR-quadrant cells set `top: 0; left: 0` so
+their top-left sits at the viewport centre). Then a per-quadrant
+`--center-shift-x` / `--center-shift-y` of `±50%` shifts the cell by
+half its own bounding box — the sign points from the anchored corner
+toward the cell's centre:
+
+```
+TL ─ corner anchor BR (bottom: 0; right: 0;) → shift (+50%, +50%)
+TR ─ corner anchor BL (bottom: 0; left: 0;)  → shift (-50%, +50%)
+BL ─ corner anchor TR (top: 0;    right: 0;) → shift (+50%, -50%)
+BR ─ corner anchor TL (top: 0;    left: 0;)  → shift (-50%, -50%)
+```
+
+The cell's **centre** therefore lands on the oval, not its inner
+corner. This matters because `AtlasThumb fit="width"` gives every cell
+a fixed 12vmin width but lets the height vary by image aspect — a tall
+portrait (24vmin tall) and a wide landscape (6vmin tall) both pivot
+from their geometric centre instead of drifting outward by half-height
+along the curve.
+
+### Tuning
+
+`RX` / `RY` are the only two values to tune (in
+`RelationComponent.vue`'s `<script setup>`):
+
+* **Larger** values push the oval out toward the viewport edges and
+  give each cell more breathing room from the central image.
+* **Smaller** values tighten the ring around the central image.
+* Keep `RX` and `RY` similar in magnitude (typical: 30–40 each). A
+  large mismatch reads as an awkward oval rather than a confident
+  ellipse.
+
+There is no `DR` (radius step), no `CELL_INSET_DEG` (angular margin),
+no per-axis step in `vw`/`vh`. The single-oval invariant means tuning
+is two numbers, not a parameter sweep.
 
 ### Latent → focal grammar
 
-Preserved on top of the cascade:
+Preserved on top of the oval layout:
 
 * **Field default**: cells at near-zero opacity, pointer-events off — a
   quiet latent layer over the backdrop.
 * **Component hover**: cells fade in and re-enable interaction.
 * **Cell focus** (`:hover` or `:focus-visible`): focused cell amplifies
-  via `--cell-scale` plus border-color + box-shadow; siblings soften via
-  `:has()`.
+  via `--cell-scale` plus border-color + box-shadow; siblings soften
+  via `:has()`.
+* **Stagger reveal**: `--reveal-delay = i × 80ms` (forward) or
+  `(3 - i) × 80ms` (reverse) based on cursor entry direction.
+  `revealDirection` is set in `onMouseEnter` from the cursor's
+  normalised distance to the .rel's inner corner — close to inner =
+  forward (cell-1 first), close to outer = reverse (cell-4 first).
 
 ### Cell rendering contract
 
 Cells contain `AtlasThumb` instances and render **bare** — no padding,
 no visible background, no visible border in the default state. A
 transparent 1px border preserves a layout slot so hover's `border-color`
-can fill in without shifting layout. Cell width is in `vmin`; cell
-height follows from each thumb's intrinsic aspect ratio.
+can fill in without shifting layout. Cell width is fixed at 12vmin;
+cell height follows from each thumb's intrinsic aspect ratio.
 
 Z-index stacks **cell-1 frontmost, cell-4 backmost** — innermost
-(most-relevant) suggestion sits on top of the cascade; the focused cell
-elevates above all siblings while held.
+(most-relevant) suggestion paints above the others. Since cells on the
+oval don't actually overlap, the stack only matters for the focused
+cell (z=5 on `:hover`/`:focus-visible`) and the whole-quadrant lift
+(`.rel:hover { z-index: 50 }`) keeping the cells above the central
+image deck during cell amplification.
+
+Hierarchy reading (cell-1 closest, cell-4 furthest) is conveyed by the
+z-index stacking and the `--reveal-delay` stagger — **not** by radius.
 
 The server returns up to 8 related images per component; the client
-slices to 4 for the cascade. Increasing this number requires extending
-the cascade's per-cell index rules accordingly.
+slices to 4 for the oval. Increasing this number requires extending
+the per-cell index rules (`cell-1` … `cell-N`) and the `N_CELLS`
+constant in `CELL_OFFSETS`'s computation.
 
 ---
 
@@ -2166,6 +2303,259 @@ preserves the original LERP path for every existing caller; only
 * Highlight preset is per-canvas: `setCanvasZoom` only switches the
   preset on its target canvas. The other three keep their `'big'`
   preset until `goTo('split')` resets them en masse.
+
+---
+
+## VIEW_4 — QUADRANT HOVER ZOOM (per-canvas camera zoom / unzoom)
+
+Once VIEW_4 is mounted (project in `split`, all four canvases zoomed on
+the active central image), hovering a quadrant in the interface drives
+the **other three canvases to unzoom to overview** so the user can see
+the full map context for those canvases, while the hovered quadrant's
+canvas stays zoomed on the central image. Moving the cursor onto the
+central image (which is a hit zone) returns all four canvases to the
+default zoomed state. Moving between quadrants (j → k) demotes j
+(unzoom) and promotes k (re-zoom).
+
+The mechanism extends the per-canvas override infrastructure documented
+in *PER-CANVAS ZOOM* with a symmetric inverse directive and a per-canvas
+focus-pan suppression flag.
+
+### Wire vocabulary
+
+```
+set-canvas-overview({ canvasIndex: 0|1|2|3, durationSec?: number })
+set-canvas-zoom({ canvasIndex, imageId, durationSec? })   // re-used here
+```
+
+* **`set-canvas-overview`** is the symmetric inverse of
+  `set-canvas-zoom`: it lifts one canvas back to the overview cameraZ
+  (3.5) and pans its camera to map origin (0, 0). The optional
+  `durationSec` tunes the tween; default 0.6s for internal callers,
+  1.8s when emitted from VIEW_4 hover.
+* **`set-canvas-zoom`** is re-used (not extended) — VIEW_4 hover emits
+  it with `imageId = activeCentralImageId` and the matching
+  `durationSec` to re-zoom a previously-unzoomed canvas.
+
+Both directives carry an optional `durationSec` so VIEW_4 hover pacing
+(1.8s) is independent of VIEW_3's per-cross zoom-in pacing (1.5s
+default).
+
+### Emission rules
+
+All emissions originate from `store.setQuadrantHover(canvasIndex | null)`
+in the interaction store, called by:
+
+* **`RelationComponent.vue onMouseEnter`** → `setQuadrantHover(QUADRANT_INDEX[position])`
+  (entered a quadrant).
+* **`View4Relational.vue .center-anchor @mouseenter`** →
+  `setQuadrantHover(null)` (entered the central image hit zone — see
+  *VIEW_4 hit-area sizing* below).
+
+`setQuadrantHover` is gated to `viewState.is('RELATIONAL')` and
+`!overviewConfirmed` — never fires in VIEW_0/1/2/3 nor after overview
+is confirmed.
+
+The action computes the diff between the previous and next hover state
+and emits only what changed:
+
+| Transition       | Wire emissions                                                                                |
+| ---------------- | --------------------------------------------------------------------------------------------- |
+| `null → k`       | `setCanvasOverview(j, 1.8)` for j ∈ {0..3} \ {k} (3 others unzoom)                            |
+| `j → null`       | `setCanvasZoom(j', activeCentralImageId, 1.8)` for j' ∈ {0..3} \ {j} (the 3 that were unzoomed re-zoom) |
+| `j → k` (j ≠ k)  | `setCanvasOverview(j, 1.8)` (the canvas just left unzooms) + scheduled `setCanvasZoom(k, activeCentralImageId, 1.8)` 150 ms later (the canvas just entered re-zooms) |
+
+The 150 ms lead delay on `j → k` is implemented via `setTimeout` and
+read by the user as "the leaving canvas moves first, then the entering
+canvas catches up". Pending timers are cancelled on every
+`setQuadrantHover` call so rapid hover changes don't queue stale
+emissions.
+
+`activeCentralImageId` is read **at emit time**, not at the start of
+the hover. This is what gives the "overview canvases silently update
+their target, hovered canvas retargets smoothly" semantic without any
+per-canvas bookkeeping on the project side — see *History nav during
+hover* below.
+
+### Store-side bookkeeping
+
+```ts
+const view4HoveredQuadrant = ref<number | null>(null)
+const view4CanvasInOverview = ref<boolean[]>([false, false, false, false])
+```
+
+`view4CanvasInOverview` mirrors the actual project-side per-canvas
+state. It is **only** updated when an emission is sent (not when a
+delayed zoom-in is scheduled), so a cancelled timer correctly leaves
+the canvas marked as "still in overview" and the next hover transition
+naturally re-emits the zoom-in.
+
+`HOVER_DURATION_SEC = 1.8` and `HOVER_LEAD_MS = 150` are the only
+tunables.
+
+### Project-side rendering contract
+
+Three additions, all scoped to the existing per-canvas surface from
+*PER-CANVAS ZOOM*:
+
+**`app.setCameraTarget({ x, y, panDuration })`** — new method that
+sets `targetX` / `targetY` and configures a `positionTween` against
+explicit map coordinates without binding a focus target. Used by
+`setCanvasOverview` to pan the camera to map origin. The default
+`focusOn` path (which requires a `pointId`) is preserved for every
+existing caller.
+
+**`stateManager.setCanvasOverride(i, targetZ, duration, { suppressFocusPan })`**
+— the override record now carries a `suppressFocusPan` boolean.
+Default false; `setCanvasOverview` sets it true. The flag persists past
+tween completion (the override record stays pinned at `toZ`).
+
+The seeding of new overrides was also fixed in the same pass: when a
+new override replaces an in-flight one, `fromZ` is computed from the
+*interpolated* current z (using the previous override's eased `t`),
+not from `prev.toZ`. Without this, rapid hover changes caused a
+visible cameraZ snap to the previous target before animating to the
+new one.
+
+**`stateManager.shouldPanCanvas(i): boolean`** — returns
+`!override?.suppressFocusPan`. Consulted by `commands.focusOnId` per
+canvas:
+
+```js
+function focusOnId(pointId) {
+  const globalOverview = stateManager.state === 'overview'
+  apps.forEach((a, i) => {
+    if (!a.isReady) return
+    const pan = !globalOverview && stateManager.shouldPanCanvas(i)
+    a.object.focusOn(pointId, { pan })
+  })
+}
+```
+
+So history-nav `focus(id)` emissions still update the perceptual halo
+on every canvas (cell `.highlight` always runs), but only canvases
+without a `suppressFocusPan` override actually pan their camera.
+
+**`commands.setCanvasOverview(payload)`** — three actions per call, in
+order:
+
+1. `stateManager.setCanvasOverride(i, OVERVIEW_CAMERA_Z, duration, { suppressFocusPan: true })`
+   — start the cameraZ tween up to 3.5.
+2. `app.setHighlightPreset('big')` on that canvas — the inverse of
+   `setCanvasZoom`'s preset switch to `'default'`; at the far overview
+   cameraZ, sprites need amplification to read.
+3. `app.setCameraTarget({ x: 0, y: 0, panDuration: duration })` — pan
+   the camera to map origin in lockstep with the cameraZ tween.
+
+### History nav during hover
+
+The non-trivial behaviour is what happens when the user navigates
+history (`stepBack` / `stepForward` / `jumpToHistory`) while a quadrant
+is hovered. Those actions emit `focus(newId)` over the wire. With
+per-canvas pan suppression:
+
+* **Hovered canvas** (no override): `shouldPanCanvas(i) = true`, the
+  canvas LERP-pans to the new image. The visible image follows the
+  user's history navigation.
+* **Unzoomed canvases** (override with `suppressFocusPan: true`):
+  `shouldPanCanvas(i) = false`, the camera position stays pinned at
+  (0, 0). But `points.highlight(newId)` still runs internally, so the
+  active-image halo updates on the overview map. The user sees where
+  the active image is on the wider context.
+
+When the user later returns the cursor to the central image
+(`setQuadrantHover(null)`), the re-zoom emissions read
+`activeCentralImageId` at emit time — landing on the **latest** image,
+not the one active when the hover started.
+
+The same logic applies to `activateCentral` (clicking a related
+image) during hover.
+
+### Path-segment timer fallback
+
+`pathTrace.addSegment` accepts an optional `useTimer` flag carried per
+segment. When true, the segment animates over `SEGMENT_DRAW_DURATION
+= 1.0s` on its own clock instead of riding `panProgress`. This is
+necessary because pan-suppressed canvases have `panProgress` pinned at
+1 (no camera motion), so the previous `last.progress = panProgress`
+logic drew new segments instantly.
+
+`commands.addPathSegment` decides per-canvas:
+
+```js
+apps.forEach((a, i) => {
+  if (!a.isReady) return
+  const useTimer = !stateManager.shouldPanCanvas(i)
+  a.object.addPathSegment(fromId, toId, color, useTimer)
+})
+```
+
+So when the user clicks a related image while hovering a quadrant:
+- The hovered canvas's path segment grows with its LERP pan (as before).
+- The three unzoomed canvases' segments grow on the 1.0s timer.
+- All four finish drawing around the same wall-clock moment.
+
+### VIEW_4 hit-area sizing
+
+`.center-anchor`'s hit area must match the visible silhouette of the
+active central image — otherwise large images extend past the hit area
+(cursor on image → no hover) and small images leave dead zones inside
+(hover with no image under cursor). Implementation in
+`View4Relational.vue`:
+
+```ts
+const centerAnchorStyle = computed(() => {
+  if (store.overviewConfirmed) return {}
+  const id = store.activeCentralImageId
+  if (!id) return {}
+  const dims = naturalDimsVmin(id)  // from useCentralImageDims
+  return { width: `${dims.width}vmin`, height: `${dims.height}vmin` }
+})
+```
+
+`.center-anchor`'s width/height is **not** transitioned. The active
+layer in the central image deck is a fresh TransitionGroup mount on
+each `activateCentral` — it paints at its target dims instantly. A
+700 ms transition on the anchor would lag the hit area behind the
+visible image for those 700 ms. The hit area must snap in lockstep.
+
+`.center-anchor`'s z-index is `60` (above `.rel:hover { z-index: 50 }`)
+so when a quadrant is hovered and `.rel` lifts, the cursor moving onto
+the central image area still hits `.center-anchor` first — `.rel:hover`
+drops false automatically (cursor designates `.center-anchor` not
+`.rel`), and `setQuadrantHover(null)` fires. Without the lift, the
+quadrant's hover state would persist while the cursor was visually on
+the central image.
+
+### Durations and constants
+
+| Constant                | Value   | Where                                       | Why                                       |
+| ----------------------- | ------- | ------------------------------------------- | ----------------------------------------- |
+| `OVERVIEW_CAMERA_Z`     | 3.5     | `commands.js setCanvasOverview`             | Matches `STATES.overview.cameraZ`.        |
+| `HOVER_DURATION_SEC`    | 1.8 s   | `interaction.ts setQuadrantHover`           | Match unzoom and re-zoom; "deliberate" feel. |
+| `HOVER_LEAD_MS`         | 150 ms  | `interaction.ts setQuadrantHover`           | Lead delay on `j → k` so unzoom visibly starts before re-zoom. |
+| `SEGMENT_DRAW_DURATION` | 1.0 s   | `pathTrace.js addSegment`                   | Timer fallback for pan-suppressed canvases; roughly matches LERP settle time. |
+
+### Invariants
+
+* `setQuadrantHover` is gated to `RELATIONAL` phase + `!overviewConfirmed`.
+  Never fires outside VIEW_4.
+* `view4CanvasInOverview` only flips when an emission is actually
+  emitted (not when scheduled). A cancelled timer leaves the canvas
+  correctly marked.
+* `activeCentralImageId` is read at emit time, not at hover-start time
+  — so re-zooms after history navigation land on the latest image.
+* `setCanvasOverview` never changes `currentName` — project's state
+  stays `split` during the entire VIEW_4 hover sequence. The "three
+  canvases unzoomed" perception is purely the three overrides
+  converging on overview's cameraZ.
+* `suppressFocusPan` only takes effect on `focusOnId` (the wire-driven
+  focus). The `setCanvasZoom`'s direct `app.focusOn` call still pans
+  unconditionally because the user has explicitly asked that canvas to
+  zoom onto the selection.
+* `app.setCameraTarget` is independent of `app.focusOn` — it does not
+  call `points.setFocus`, so the persistent focus halo (the central
+  image's glow) is preserved across unzoom.
 
 ---
 
@@ -2637,6 +3027,234 @@ is global — any page using `100vw / 100vh` is affected.
 
 ---
 
+## TYPOGRAPHY SYSTEM
+
+The interface uses two custom font families served from
+`interface_nuxt/public/fonts/`, registered via `@font-face` in
+`app/app.vue`'s global `<style>` block (also mirrored in
+`project/src/style.css` so the project canvas overlays render the same
+families):
+
+* **ABC Otto** — display + body family (Regular + MediumItalic faces,
+  `.woff2` primary + `.woff` fallback). Applied globally via
+  `html { font-family: 'ABC Otto', serif }`. Drives the Proxima title,
+  rotating intro panels, corner labels, quadrant titles, etc.
+* **Neue Kabel** — geometric sans, Medium + MediumItalic faces
+  (`.otf` only — trial license). Applied to body text inside the
+  proximity panel (`.proximity-panel-body` interface +
+  `.canvas-text-body` project), giving the interpretation text a
+  distinct geometric voice from the surrounding ABC Otto.
+
+### Font loading + preload
+
+`@font-face` declarations use `font-display: swap` so text always
+renders (in fallback) immediately, then swaps to the real font when
+it arrives. To minimise the visible FOUT swap moment (which was
+producing inconsistent renders between page refreshes — the inset
+shadow stack on Proxima depends on glyph shape, so a fallback-to-real
+swap visually re-rasterises the shadow), `nuxt.config.ts` declares
+`<link rel="preload" as="font" crossorigin="anonymous">` tags for the
+four critical font files in `app.head.link`. The browser starts
+downloading fonts before it parses CSS, so by the time the
+`@font-face` rules are computed, the files are already in cache and
+the swap is invisible.
+
+`crossorigin="anonymous"` is **required** even for same-origin font
+preloads — without it the preload is fetched but the CSS request
+triggers a second download.
+
+### Label-size sync contract — `--label-size` CSS custom property
+
+Three typographic tiers share a single font-size, locked via the
+`--label-size` custom property defined on `:root` in BOTH
+`app/app.vue` AND `project/src/style.css` (currently `1.15rem`):
+
+1. **Corner labels** — `.corner-label` global rule in both apps. Also
+   referenced by `RelationComponent.vue`'s scoped style for z-index +
+   glow keyframe, but not for typography.
+2. **Quadrant title texts** — `.proximity-panel-title` (interface) +
+   `.canvas-text-title` (project).
+3. **Rotating intro text** — `.caption` (VIEW_1), `.entry-caption`
+   (VIEW_2), `.intro-caption` (VIEW_3).
+
+**Two rules govern the relationship:**
+
+* **Full typographic mirror** between `.corner-label` and the
+  quadrant titles — same `font-size`, `font-weight: 500`,
+  `font-style: italic`, `letter-spacing: 0.015em`. When one
+  property changes, all three selectors update in lockstep.
+  font-family is inherited (ABC Otto via `html`).
+* **Size-only sync** for rotating intro text — only `font-size`
+  follows `--label-size`. Weight, italic, and tracking are
+  independent per view.
+
+To resize the tier, edit `--label-size` in BOTH `:root` blocks (the
+two apps have separate CSS scopes). Never hardcode a font-size on any
+of those selectors; if a new element joins the tier, point it at
+`--label-size` too.
+
+### Text halo system — `--halo` CSS custom property (currently disabled)
+
+A project-wide blue-gray text halo (multi-layer `text-shadow`)
+defined as `--halo` in both apps' `:root`, with the cascade applied
+via `body { text-shadow: var(--halo) }`. text-shadow is an inherited
+CSS property, so the rule propagates to every text node automatically;
+selectors that need a custom shadow (corner-label warm pulse,
+VIEW_0's Proxima inset stack, VIEW_0's elaborate subtitle halo,
+VIEW_3's cross-glow keyframe) just declare their own text-shadow and
+override the inherited value.
+
+**Status: temporarily commented out** in both apps' `body` rule (and
+in VIEW_0's `.caption` + `.hint`) so transition timing can be tested
+without the paint cost of N text elements running multi-layer
+shadows. Each `TEMP DISABLED` block in the codebase carries a
+comment block; uncomment to re-enable. The `--halo` variable
+definitions remain in `:root` so the recipe is documented and
+parameterised — they're inert without the consuming `body` rule.
+
+**Why this matters when re-enabling:** at the original recipe
+(11 layers, max 380px reach) the paint cost was substantial,
+especially with VIEW_4's hover-zoom animation re-rasterising shadows
+each frame. The tightened recipe (4 layers, max 18px) is much
+lighter; if re-enabling causes jank, reduce the rim alpha or drop
+the outermost layer. See *VIEW_0 — ONBOARDING* for VIEW_0-specific
+shadow details (inset stack on Proxima + elaborate subtitle halo —
+both also currently disabled).
+
+---
+
+## ROTATING-TEXT SYSTEM
+
+Three views (`VIEW_1`, `VIEW_2`, `VIEW_3`) display rotating intro
+sentences that fade in, hold, cycle through, and fade out. All three
+share IDENTICAL timing parameters via shared CSS custom properties +
+shared TypeScript constants. Change a value once in the source and
+every consumer updates.
+
+### Shared parameters
+
+**CSS custom properties in `app/app.vue`'s `:root`** (visual fade
+timing):
+
+| Variable | Meaning | Current value |
+|---|---|---|
+| `--rotate-fade-ms` | Duration used for appear, enter, AND leave fades. | `500ms` |
+| `--rotate-fade-easing` | Easing curve for every fade. | `cubic-bezier(0.25, 0.46, 0.45, 0.94)` |
+| `--rotate-appear-delay` | Hold before the first sentence drifts in (lets the view-level cross-fade settle first). | `1400ms` |
+| `--rotate-empty-beat` | Empty pause between sentences (enter-delay under `mode="out-in"`). | `200ms` |
+
+**TypeScript constants in `app/utils/rotateText.ts`** (timer cadence,
+imported by all three views):
+
+| Constant | Meaning | Current value |
+|---|---|---|
+| `ROTATE_PANEL_MS` | How long each sentence sits at full opacity before the timer ticks. | `4000ms` |
+| `ROTATE_FADE_OUT_MS` | Duration of the leave animation; drives the `setTimeout` that delays the next view advance until the leave completes. **Must equal `--rotate-fade-ms`** numerically (the CSS var and the JS constant are two halves of the same number). | `500ms` |
+
+### Three consumers
+
+Each view wraps its rotating `<p>` in `<Transition name="..."
+mode="out-in">` with `:key` driving sentence-to-sentence remount, and
+a script-side ref driving the exit leave:
+
+| View | File | Class prefix | Sentence array | Visibility ref | Exit trigger |
+|---|---|---|---|---|---|
+| VIEW_1 | `View1Explanation.vue` | `.caption-*` | `PANELS` | `captionVisible` | timer (calls `advance()` after last panel) |
+| VIEW_2 | `View2Disperse.vue` | `.entry-*` | `ENTRY_PANELS` | `entryCaptionVisible` | sprite click in iframe via `view0:image-click` postMessage, OR timer after last sentence |
+| VIEW_3 | `View3Transition.vue` | `.intro-*` | `INTRO_PANELS` | `introVisible` | 4th quadrant cross clicked (watcher on `store.allCanvasesZoomed`), OR timer after last sentence |
+
+Each view's stylesheet declares `.{prefix}-enter-active`,
+`.{prefix}-enter-from`, `.{prefix}-leave-active`, `.{prefix}-leave-to`
+rules that reference the `--rotate-*` vars. Style is opacity-only —
+no transform drift. The base caption rule
+(`.caption` / `.entry-caption` / `.intro-caption`) sets
+`transform: translateX(-50%)` for centring, which would override any
+drift on the transition hooks via CSS cascade anyway.
+
+### `appear` vs JS-gated first render — VIEW_1 uses Vue, VIEW_2 + VIEW_3 use JS
+
+**VIEW_1** uses Vue's native `<Transition appear>` with the
+`.caption-appear-active` rule applying the `--rotate-appear-delay`
+transition-delay. This works on VIEW_1 because nothing else is loading
+at mount time — the view-level cross-fade settles cleanly before
+Vue's appear classes are removed.
+
+**VIEW_2** can't use Vue's appear: the iframe load + the parent
+view-level transition's reflow commit styles before Vue's
+appear-from class can register, so the `--rotate-appear-delay`
+silently doesn't apply and the first sentence drifts in immediately.
+
+**VIEW_3** has the same problem from a different cause — its many
+child elements (corner labels, 4 quadrant crosses, 4 ProximityPanel
+components, CentralImage stack) all mount at once, producing a
+similar reflow race.
+
+For both, the workaround is identical:
+
+1. The visibility ref starts `false` (e.g. `entryCaptionVisible = ref(false)`).
+2. `<Transition>` does **not** have `appear`.
+3. `onMounted` reads `--rotate-appear-delay` and `--rotate-empty-beat`
+   from the CSS at runtime via `getComputedStyle`, then
+   `setTimeout`s the ref to `true` after `appearDelay − emptyBeat` ms.
+4. When the ref flips true, Vue Transition's `enter-*` classes fire.
+   The enter-active rule has its own `--rotate-empty-beat` delay
+   built in, so the total time from view mount to first sentence
+   visible is `(appearDelay − emptyBeat) + emptyBeat + fadeMs =
+   appearDelay + fadeMs` — exactly matching VIEW_1's Vue-appear path.
+
+The JS reads the CSS vars at runtime, so any `:root` tweak
+automatically propagates to all three views — no second edit needed.
+
+VIEW_2 and VIEW_3 stylesheets therefore have NO `.*-appear-*` rules;
+only `.*-enter-*` and `.*-leave-*`. VIEW_1 keeps its
+`.caption-appear-*` rules.
+
+### Last-sentence auto-fade
+
+All three views auto-fade their last sentence after its full
+`ROTATE_PANEL_MS` display time, even if the view doesn't auto-advance.
+The timer's setInterval increments the sentence index each tick; on
+the tick AFTER the last sentence becomes current (i.e. once the last
+sentence has had its full `ROTATE_PANEL_MS` of display), the visibility
+ref flips false → Vue leave animation runs.
+
+* **VIEW_1** — flipping `captionVisible` to false also calls
+  `enterEntryView()` via setTimeout (advances the view).
+* **VIEW_2** — flipping `entryCaptionVisible` to false JUST hides the
+  caption; the view stays on VIEW_2 until the user clicks a sprite.
+  The sprite-click handler treats "already faded" as "advance
+  immediately" so the user isn't blocked.
+* **VIEW_3** — flipping `introVisible` to false JUST hides the
+  caption; the view stays on VIEW_3 until the user clicks all 4
+  quadrant crosses. The `store.allCanvasesZoomed` watcher also flips
+  `introVisible` false (defensive — handles the case where the user
+  clicks crosses before the last-sentence timer fires).
+
+### Exit fade-then-advance
+
+When a view DOES advance after the last sentence (VIEW_1) or after a
+user click (VIEW_2's sprite click), the pattern is:
+
+1. Set the visibility ref to false → Vue Transition leave runs.
+2. `setTimeout(advance, ROTATE_FADE_OUT_MS)` waits for the leave
+   animation to finish before triggering the view-level transition.
+
+This avoids the harsh-cut where the view-level cross-fade overlapped
+with the still-visible caption. The setTimeout duration MUST equal
+`--rotate-fade-ms`.
+
+### Visual continuity with VIEW_0's exit
+
+VIEW_0's title + subtitle fade-out (on click) uses the same
+`500ms cubic-bezier(0.25, 0.46, 0.45, 0.94)` timing for visual
+continuity across the view chain, but is implemented as a keyframe
+animation gated by a `fadingOut` flag (not Vue Transition) because
+the title and subtitle aren't conditionally rendered — they're always
+present. The click handler sets `fadingOut = true`, the CSS animation
+runs over 500ms, then `setTimeout(viewState.advance, 500)` advances.
+
+---
+
 # CURRENT DEVELOPMENT SCOPE
 
 Current phase:
@@ -2646,7 +3264,7 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with eleven explicit exceptions**:
+Do not modify project, **with twelve explicit exceptions**:
 
 1. The user-driven path-rendering directive surface inside `project` —
    `path-segment`, `path-truncate`, and the `pathTrace` primitive they
@@ -2723,7 +3341,17 @@ Do not modify project, **with eleven explicit exceptions**:
    labels), so both screens show MIRROR / TRACE / SHIFT / REPLAY in
    sync as VIEW_4 takes over. Once revealed the labels stay visible
    across subsequent state transitions (split / overview) until the
-   next boot. Pure DOM + CSS + a thin handler — no render-loop,
+   next boot. **One-shot glow pulse on appearance.** Both sides define
+   matching `@keyframes corner-label-glow` (project/src/style.css,
+   RelationComponent.vue) — a 3.5 s ease-out swell of the warm cream
+   `text-shadow` peaking at 28 % then settling slowly back to the
+   static glow. Peak stack reaches a 340 px outer halo so the four
+   tags draw the eye to the corners before they recede. On project, the animation is attached to the same visibility
+   rule that fades the labels in, so the rule starting to match
+   triggers the pulse. On interface, the animation lives on
+   `RelationComponent`'s scoped `.corner-label`, firing on mount of
+   VIEW_4. Both timings are identical so the four tags pulse in
+   lockstep. Pure DOM + CSS + a thin handler — no render-loop,
    state-machine, or interaction-logic participation. See *VIEW_4 —
    COMPONENT LAYOUT*.
 10. The **per-canvas text overlay** — `set-canvas-text`, the four
@@ -2753,8 +3381,27 @@ Do not modify project, **with eleven explicit exceptions**:
     content-blind. Pure DOM + CSS + a thin handler — no render-loop,
     state-machine, or interaction-logic participation. See
     *SET-CENTER-CAPTION*.
+12. The **VIEW_4 quadrant hover-zoom surface** — `set-canvas-overview`
+    (symmetric inverse of `set-canvas-zoom`), the `suppressFocusPan`
+    flag on `canvasOverrides[]` records in `stateManager.js`, the
+    `shouldPanCanvas(i)` helper consulted by `commands.focusOnId` for
+    per-canvas pan suppression, `actions.setCanvasOverview` in
+    `commands.js`, the `app.setCameraTarget({ x, y, panDuration })`
+    method on each canvas for explicit position panning without
+    binding a focus target, the interpolated-z seeding in
+    `setCanvasOverride` (so rapid hover changes don't snap), the
+    optional `durationSec` field on both `set-canvas-zoom` and
+    `set-canvas-overview` payloads, and the `useTimer` per-segment
+    flag on `pathTrace.addSegment` (with the
+    `SEGMENT_DRAW_DURATION = 1.0 s` fallback) for path segments drawn
+    on pan-suppressed canvases. Drives VIEW_4's hover-driven
+    "three canvases unzoom, hovered canvas stays zoomed" behaviour and
+    its symmetric return on mouse-out. Extends exception #6
+    (PER-CANVAS ZOOM) with the inverse direction and the focus-pan
+    suppression rule. No state-machine reinterpretation; project
+    stays in `split` throughout. See *VIEW_4 — QUADRANT HOVER ZOOM*.
 
-All eleven exceptions are scoped tightly: pure rendering / configuration
+All twelve exceptions are scoped tightly: pure rendering / configuration
 surfaces driven by explicit `interface_nuxt` directives (or, in the
 VIEW_2 embed case, by an out-of-band `postMessage` channel for the
 canvas-pick input). No project-side interpretation, derivation, or

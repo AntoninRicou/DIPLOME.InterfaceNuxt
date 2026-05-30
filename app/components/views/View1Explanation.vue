@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
+import { ROTATE_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 const store = useInteractionStore()
 
@@ -8,9 +9,14 @@ const PANELS = [
   'Proxima is a tool for exploration of a visual corpus through modes of proximity.',
   'It allows you to engage with images for alternative perspectives.',
 ]
-const PANEL_MS = 5000
+// PANEL_MS and FADE_OUT_MS are shared with View3Transition via the
+// `~/utils/rotateText` constants so both rotating-text components
+// always run on the same cadence. See feedback_rotate_text_sync.md.
+const PANEL_MS = ROTATE_PANEL_MS
+const FADE_OUT_MS = ROTATE_FADE_OUT_MS
 
 const index = ref(0)
+const captionVisible = ref(true)
 const crossDurationMs = computed(() => PANELS.length * PANEL_MS)
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -21,16 +27,26 @@ function clearTimer() {
   }
 }
 
-function skip() {
+// Smooth handoff to VIEW_2: hide the caption (v-if=false) so Vue's
+// <Transition> runs its leave animation, then once that's complete
+// trigger the view-level transition. Called by both the last-panel
+// timer expiry and the skip chevron, so both paths produce the same
+// smooth exit.
+function advance() {
+  if (!captionVisible.value) return
   clearTimer()
-  store.enterEntryView()
+  captionVisible.value = false
+  setTimeout(() => store.enterEntryView(), FADE_OUT_MS)
+}
+
+function skip() {
+  advance()
 }
 
 onMounted(() => {
   timer = setInterval(() => {
     if (index.value >= PANELS.length - 1) {
-      clearTimer()
-      store.enterEntryView()
+      advance()
       return
     }
     index.value += 1
@@ -48,16 +64,61 @@ onBeforeUnmount(() => {
     :style="{ '--cross-draw-duration': `${crossDurationMs}ms` }"
   >
     <button class="skip" @click="skip" aria-label="skip">&gt;</button>
-    <p :key="index" class="caption">{{ PANELS[index] }}</p>
+    <!-- Vue <Transition> with `appear` + `mode="out-in"`. The
+         out-in mode makes sentence-to-sentence transitions sequential:
+         the old sentence fully fades out before the new sentence
+         begins fading in (instead of cross-fading). A 600ms delay on
+         the enter side then holds the empty space deliberately before
+         the new sentence drifts in. Initial entrance, between-sentence
+         transition, and exit all share the same 500ms cubic-bezier
+         duration; only the appear adds its 1400ms hold and the enter
+         adds its 600ms empty-beat delay. -->
+    <Transition name="caption" mode="out-in" appear>
+      <p v-if="captionVisible" :key="index" class="caption">{{ PANELS[index] }}</p>
+    </Transition>
   </section>
 </template>
 
 <style scoped>
-@keyframes panel-fade-in {
-  /* keep the -50% X-centre offset through the fade so the absolutely
-     positioned caption doesn't jump off-centre mid-animation. */
-  from { opacity: 0; transform: translate(-50%, 4px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+/* Vue <Transition name="caption"> CSS hooks. All durations, easings,
+   delays, and drift values are sourced from `:root` custom properties
+   in app.vue (--rotate-* family) so this view's caption transition
+   and View3Transition's .intro-caption transition share one source
+   of truth — change a value once in :root, both views update.
+
+   Timeline (computed from current :root values):
+     Initial mount       : --rotate-appear-delay → --rotate-fade-ms fade-in
+     Between sentences   : leave (--rotate-fade-ms) → --rotate-empty-beat → enter
+     Exit toward VIEW_2  : leave (--rotate-fade-ms) → script calls advance()
+
+   IMPORTANT: the JS-side FADE_OUT_MS in <script setup> must match
+   --rotate-fade-ms (the leave duration) since setTimeout uses it to
+   delay the view advance until the fade completes. */
+
+/* Opacity-only fades: the base `.caption` rule (later in this file)
+   sets `transform: translateX(-50%)` for horizontal centring and would
+   override any transform set on the appear-from / enter-from / leave-to
+   classes due to CSS cascade order anyway. Sticking to opacity makes
+   the intent explicit and avoids the cascade-dependent surprise. */
+.caption-appear-active {
+  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing) var(--rotate-appear-delay);
+}
+.caption-appear-from {
+  opacity: 0;
+}
+
+.caption-enter-active {
+  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing) var(--rotate-empty-beat);
+}
+.caption-enter-from {
+  opacity: 0;
+}
+
+.caption-leave-active {
+  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing);
+}
+.caption-leave-to {
+  opacity: 0;
 }
 
 .view-1 {
@@ -132,10 +193,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   margin: 0;
   padding: 0 1.5rem;
-  font-size: 1.25rem;
-  line-height: 1.5;
+  font-size: var(--label-size);
+  line-height: 1.3;
   text-align: center;
-  animation: panel-fade-in 400ms ease-out forwards;
+  /* No animation here — Vue <Transition name="caption"> drives every
+     fade via the caption-appear/enter/leave classes above. */
 }
 
 .skip {

@@ -6,11 +6,79 @@
 </template>
 
 <style>
+@font-face {
+  font-family: 'ABC Otto';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/ABC%20Otto/ABCOtto-Regular-Trial.woff2') format('woff2'),
+       url('/fonts/ABC%20Otto/ABCOtto-Regular-Trial.woff') format('woff');
+}
+@font-face {
+  font-family: 'ABC Otto';
+  font-style: italic;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/ABC%20Otto/ABCOtto-MediumItalic-Trial.woff2') format('woff2'),
+       url('/fonts/ABC%20Otto/ABCOtto-MediumItalic-Trial.woff') format('woff');
+}
+@font-face {
+  font-family: 'Neue Kabel';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/Neue%20Kabel/NeueKabel-Medium.otf') format('opentype');
+}
+@font-face {
+  font-family: 'Neue Kabel';
+  font-style: italic;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/Neue%20Kabel/NeueKabel-MediumItalic.otf') format('opentype');
+}
+
 /* Global reset — unscoped so the rules apply to the real <html>/<body>.
    Without this the browser's default 8px body margin pushes the viewport-
    sized pages (100vw × 100vh) past the viewport, producing a small scroll
    in both axes. overflow: hidden on body prevents any inner element from
    reintroducing scroll at the document level. */
+:root {
+  /* Single source of truth for the "label tier" font-size — corner labels,
+     rotating intro text (.caption in VIEW_1, .intro-caption in VIEW_2), and
+     the per-quadrant title texts (.proximity-panel-title here,
+     .canvas-text-title in project) must all share this size. Style (weight,
+     italic, letter-spacing) is independent — only size is locked. Edit here
+     AND in project/src/style.css's :root in lockstep. */
+  --label-size: 1.15rem;
+
+  /* Project-wide blue-gray text halo. Two-tier composition: 3 tight
+     overlapping layers at full alpha build a solid muted blue-gray core
+     around each glyph; 2 wider feathered layers add the soft luminous
+     rim. Applied via `body { text-shadow: var(--halo) }` below and
+     inherited by every text node — selectors that need a different
+     effect (.corner-label warm pulse, View0 .caption Proxima inset
+     stack, View0 .hint elaborate halo) just declare their own
+     text-shadow which overrides the inherited value. Edit here AND in
+     project/src/style.css's :root in lockstep. */
+  /* Rotating-text transition parameters — single source of truth for
+     View1Explanation's `.caption` and View3Transition's `.intro-caption`.
+     Both views reference these vars in their .caption-* and .intro-*
+     transition classes; changing one value here propagates to both.
+     Keep the JS-side FADE_OUT_MS constant in each view's <script setup>
+     in sync with --rotate-fade-ms (currently 500ms), since that
+     setTimeout drives when the next view advance fires. */
+  --rotate-fade-ms: 500ms;
+  --rotate-fade-easing: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --rotate-appear-delay: 1400ms;
+  --rotate-empty-beat: 200ms;
+
+  --halo:
+    0 0 2px  rgba(150, 170, 200, 1),
+    0 0 5px  rgba(150, 170, 200, 1),
+    0 0 9px  rgba(150, 170, 200, 1),
+    0 0 18px rgba(180, 210, 250, 0.55);
+}
+
 html,
 body,
 #__nuxt {
@@ -19,6 +87,22 @@ body,
   height: 100%;
   width: 100%;
   overflow: hidden;
+}
+
+body {
+  /* Project-wide halo, inherited by all text nodes. Selectors that need
+     a custom shadow (`.corner-label` warm pulse, View0 `.caption` Proxima
+     inset stack, View0 `.hint` elaborate halo) just declare their own
+     text-shadow which overrides the inherited value. See :root --halo
+     above. */
+  /* TEMP DISABLED — uncomment to re-enable the project-wide blue-gray
+     halo. Commented out so transition timing can be tested without the
+     paint cost of N text elements each running a 4-layer shadow. */
+  /* text-shadow: var(--halo); */
+}
+
+html {
+  font-family: 'ABC Otto', serif;
 }
 
 /* ── Atmospheric backdrop classes ──
@@ -54,13 +138,13 @@ body,
    caption; VIEW_4 shows them from mount). */
 .corner-label {
   position: absolute;
-  font-family: monospace;
-  font-size: 0.62rem;
-  letter-spacing: 0.18em;
+  font-weight: 500;
+  font-style: italic;
+  font-size: var(--label-size);
+  letter-spacing: 0.015em;
   color: #595b54;
   padding: 0.75rem 0.95rem;
   pointer-events: none;
-  text-transform: uppercase;
   text-shadow:
     0 0 8px rgba(255, 252, 230, 1),
     0 0 20px rgba(255, 248, 220, 0.9),
@@ -96,24 +180,25 @@ body,
   color: #595b54;
   pointer-events: none;
   box-sizing: border-box;
-  /* Explicitly serif so both VIEW_3 and VIEW_4 render identically.
-     VIEW_4's root sets `font-family: monospace`, which the panel would
-     otherwise inherit; declaring it here breaks that inheritance and
-     locks both views to the same serif type — same look across the
-     VIEW_3 → VIEW_4 swap when interpretation mode toggles. */
-  font-family: serif;
 }
 .proximity-panel-title {
   margin: 0 0 0.4rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1.3;
+  /* Mirrors `.corner-label` typography (same family via inheritance, same
+     weight 500, same italic, same size + tracking) so the panel title and
+     the four corner labels read as the same typographic tier. See
+     [[feedback-label-size-sync]] memory for the contract. */
+  font-size: var(--label-size);
+  font-weight: 500;
+  font-style: italic;
+  letter-spacing: 0.015em;
+  line-height: 1.2;
 }
 .proximity-panel-body {
   margin: 0;
+  font-family: 'Neue Kabel', sans-serif;
   font-size: 0.9rem;
-  line-height: 1.5;
+  font-weight: 500;
+  line-height: 1.3;
 }
 
 .bg-gradient {

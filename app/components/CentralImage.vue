@@ -9,6 +9,8 @@ const props = withDefaults(defineProps<{
   source?: 'atlas' | 'original'
 }>(), { activeIndex: -1, expanded: false, source: 'atlas' })
 
+const emit = defineEmits<{ 'update:hovered': [boolean] }>()
+
 const { naturalDimsVmin } = useCentralImageDims()
 
 const RADIUS_VMIN = 22
@@ -65,6 +67,8 @@ function layerStyle(i: number) {
     tag="div"
     class="central-image"
     aria-hidden="true"
+    @mouseenter="emit('update:hovered', true)"
+    @mouseleave="emit('update:hovered', false)"
   >
     <div
       v-for="(id, i) in ids"
@@ -83,7 +87,7 @@ function layerStyle(i: number) {
   position: relative;
   width: 100%;
   height: 100%;
-  pointer-events: none;
+  pointer-events: auto;
 }
 .layer {
   position: absolute;
