@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
 import CentralImage from '~/components/CentralImage.vue'
@@ -8,6 +8,40 @@ const store = useInteractionStore()
 const { naturalDimsVmin } = useCentralImageDims()
 
 const MAX_BRANCH_DEPTH = 10
+
+// ── "Explore others" corner circles (post-"See your path") ──
+// Four existing Replay-proximity circles, one per quadrant. `x/y` are the
+// quadrant centres (mirroring the VIEW_3 cross spots).
+const CORNERS = [
+  { key: 'tl', x: 18, y: 18 },
+  { key: 'tr', x: 82, y: 18 },
+  { key: 'bl', x: 18, y: 82 },
+  { key: 'br', x: 82, y: 82 },
+] as const
+
+// Bumped on each corner selection (and on overview confirm) so the centred
+// circle wrapper remounts and the inner CentralImage replays its drift
+// reveal from the centre.
+const centerKey = ref(0)
+
+function onCornerClick(i: number) {
+  centerKey.value++
+  store.centerReplayCircle(i)
+}
+
+watch(() => store.overviewConfirmed, (v) => { if (v) centerKey.value++ })
+
+// ── Overview finale trigger ──
+// The moment the active branch reaches depth 10 (`overviewEligible`), the
+// store runs the finale sequence: the four quadrants' suggestion images
+// flash to full opacity, hold, then fade out clockwise (RelationComponent
+// reacts to store.overviewFinalePhase), after which confirmOverview fires
+// and the circle of 10 reveals. The central image + all interaction are
+// frozen for the duration (store gates hover-zoom + history nav).
+watch(
+  () => store.overviewEligible,
+  (eligible) => { if (eligible) store.startOverviewFinale() },
+)
 
 // Track the visible silhouette of the active central image so .center-
 // anchor (the hover-zoom sensor) matches it pixel-for-pixel. With the
@@ -26,6 +60,15 @@ const centerAnchorStyle = computed(() => {
     height: `${dims.height}vmin`,
   }
 })
+
+// Post-overview circle of images: hovering any image forwards its id to
+// the project canvases via set-highlight, so the matching sprite lights up
+// on every canvas (same primitive VIEW_2 sprite-hover and VIEW_4 cell-hover
+// use). Pure perception — does NOT touch the path, focus, or camera, so the
+// contributed path stays frozen exactly as drawn. null on leave clears it.
+function onCircleHover(id: string | null) {
+  store.setHighlight(id)
+}
 
 function dotStateAt(i: number): 'current' | 'past' | 'future' | 'empty' {
   if (i >= store.navigationHistory.length) return 'empty'
@@ -98,19 +141,46 @@ function onLeave() {
 
     <div
       class="center-anchor"
-      :class="{ suppressed: store.view3InterpretationMode }"
+      :class="{
+        suppressed: store.view3InterpretationMode,
+        expanded: store.overviewConfirmed,
+        'deck-fadeout': store.overviewFinalePhase === 'fadeout',
+      }"
       :style="centerAnchorStyle"
       aria-hidden="true"
       @mouseenter="store.setQuadrantHover(null)"
     >
-      <CentralImage
-        :ids="store.centralStack"
-        :active-index="store.centralStackActiveIndex"
-        :expanded="store.overviewConfirmed"
-        source="original"
-        @update:hovered="store.setCentralHovered"
-      />
+      <div :key="centerKey" class="center-focus">
+        <CentralImage
+          :ids="store.centeredStack"
+          :active-index="store.centeredCircleIds ? 0 : store.centralStackActiveIndex"
+          :expanded="store.overviewConfirmed"
+          :reveal="store.overviewConfirmed"
+          :reveal-key="centerKey"
+          :reveal-stagger="220"
+          :reveal-delay="400"
+          source="original"
+          @update:hovered="store.setCentralHovered"
+          @hover="onCircleHover"
+        />
+      </div>
     </div>
+
+    <!-- "Explore others" — four existing Replay-proximity circles, one per
+         quadrant, shown once the single-path view is active. Clicking one
+         promotes it to the centre and redraws the project's single-state
+         path to that circle (store.centerReplayCircle). -->
+    <button
+      v-for="(circle, i) in (store.singlePathViewActive ? store.replayCircles : [])"
+      :key="circle.anchorId"
+      class="corner-circle"
+      :data-corner="CORNERS[i]?.key"
+      :style="{ left: `${CORNERS[i]?.x}%`, top: `${CORNERS[i]?.y}%` }"
+      :aria-label="`focus existing circle ${i + 1}`"
+      @click="onCornerClick(i)"
+    >
+      <CentralImage :ids="circle.ids" expanded :interactive="false" reveal :reveal-stagger="110" source="original" />
+    </button>
 
     <p
       v-if="!store.overviewConfirmed"
@@ -121,13 +191,9 @@ function onLeave() {
       No image belong to one place
     </p>
 
-    <div v-if="store.overviewEligible" class="overview-control">
-      <button class="contribute" @click="store.confirmOverview()">
-        Contribute to proxima
-      </button>
-    </div>
+
     <div
-      v-else-if="store.overviewConfirmed && !store.singlePathViewActive"
+      v-if="store.overviewConfirmed && store.overviewControlsReady && !store.singlePathViewActive"
       class="overview-control"
     >
       <button class="contribute" @click="store.enterSinglePathView()">
@@ -289,6 +355,14 @@ function onLeave() {
      no quadrant hover can fire either way. */
   z-index: 10;
 }
+/* Overview finale `fadeout` phase — once the quadrants have disappeared the
+   central image deck fades out smoothly (before the circle reveals), so the
+   deck → ring hand-off has no size jump. Slower than the default 240ms
+   opacity transition. */
+.center-anchor.deck-fadeout {
+  opacity: 0;
+  transition: opacity 700ms ease-out;
+}
 /* Hover halo — warm beige glow matching the system palette
    (history-strip `.current` step, contribute button bloom). Targets
    ONLY the topmost layer (`.layer.is-active`) so the drop-shadow
@@ -298,12 +372,57 @@ function onLeave() {
    glow snaps in and out instantly — same feel as the quadrant cell
    hover. Suppressed in interpretation mode (`.center-anchor.suppressed`
    sits behind the `:not(.suppressed)` guard) — the central reference
-   is intentionally receding then. */
-.center-anchor:not(.suppressed):hover :deep(.layer.is-active) {
+   is intentionally receding then. Also disabled in `.expanded` (circle /
+   overview) mode: there the cursor is over the whole deck while hovering
+   any circle image, so this rule would force-glow the last selected image
+   on every hover. Per-image hover emphasis in circle mode is owned by
+   CentralImage's own `.is-highlighted` rule instead. */
+.center-anchor:not(.suppressed):not(.expanded):hover :deep(.layer.is-active) {
   filter:
     drop-shadow(0 0 8px rgba(249, 236, 208, 0.75))
     drop-shadow(0 0 18px rgba(249, 236, 208, 0.45))
     drop-shadow(0 0 32px rgba(249, 236, 208, 0.22));
+}
+
+/* Centred circle wrapper — fills the center-anchor box. The `:key` bump
+   (on overview confirm and each corner pick) remounts it so the inner
+   CentralImage replays its drift reveal. No wrapper animation of its own —
+   the per-image drift IS the entrance, and a wrapper fade/scale here would
+   dim the seamless hand-off from the central image deck. */
+.center-focus {
+  position: absolute;
+  inset: 0;
+  transform-origin: center center;
+}
+
+/* Corner "existing circle" — a scaled-down CentralImage as a single click
+   target. Peripheral by design (centre stays dominant): low base opacity +
+   small scale, with subtle hover amplification only. No glow, no extra
+   visual system. Positioned via inline left/top at the quadrant centre. */
+.corner-circle {
+  position: absolute;
+  /* Box bounds the oval deck (≈ 2×RADIUS_X wide, 2×RADIUS_Y tall, plus
+     image footprint) centred on the inline left/top point, then shrunk.
+     transform-origin centre so the hover scale-up grows in place. */
+  width: 70vmin;
+  height: 46vmin;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.85;
+  pointer-events: auto;
+  z-index: 40;
+  transform-origin: center center;
+  transform: translate(-50%, -50%) scale(0.44);
+  transition: opacity 150ms ease-out, transform 150ms ease-out;
+}
+.corner-circle:hover,
+.corner-circle:focus-visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(0.47);
+  outline: none;
 }
 
 .interpret-message {

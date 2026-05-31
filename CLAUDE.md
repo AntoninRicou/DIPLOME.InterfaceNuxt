@@ -671,14 +671,24 @@ Flow:
    rendered. Because the branch is at its maximum depth, no further image can
    be appended; the user must either confirm overview or step back to make
    room for a new sub-branch.
-3. The VIEW-3 UI surfaces a confirmation control (e.g. a button) only while
-   `overviewEligible` is `true`. If the user steps back below depth 10, the
-   control disappears; if they return to the tip (or rebuild a sub-branch
-   back to depth 10 after stepping back), it reappears.
-4. When the user explicitly confirms, `confirmOverview()`:
+3. Reaching depth 10 (`overviewEligible`) **auto-runs the overview finale**
+   — there is no longer a "Contribute to proxima" button. The finale is the
+   confirmation gesture; it ends by calling `confirmOverview()`. (Stepping
+   back below 10 before the finale starts cancels it; during the finale,
+   interaction is frozen — see *VIEW_4 — OVERVIEW FINALE & EXPLORE-OTHERS*.)
+4. `confirmOverview()` (fired at the end of the finale):
    * sets `overviewConfirmed = true`
    * emits `set-state('overview')` over the socket exactly once
+   * emits `set-marks(navigationHistory)` so the **whole contributed path**
+     lights on the canvas (not just the last image — see exception #13)
    * does **not** touch `imageClick`
+
+> **Historical note.** Earlier designs confirmed overview via an explicit
+> "Contribute to proxima" button (and, before that, a 16-tick radius/clock
+> ring loader). Both are removed — confirmation is now the auto finale.
+> Mentions of a "confirmation control / button" elsewhere in this doc refer
+> to that retired mechanism; the trigger is now `startOverviewFinale()` on
+> `overviewEligible`.
 
 ### overview — terminal, read-only state
 
@@ -1696,6 +1706,36 @@ consequences** of the derived design:
   entry is added. This mirrors `path-truncate` on the wire and
   preserves the "deck = active branch" invariant.
 
+### Central-image hover reveal
+
+`CentralImage` emits an `update:hovered` boolean on `mouseenter` /
+`mouseleave` of its wrapper. `View4Relational` binds it to
+`store.setCentralHovered(v)`, which toggles the `centralHovered` ref.
+
+Consumers read `store.centralHovered` directly. The only consumer today
+is `RelationComponent`, which adds a `central-revealed` class on its
+`.constellation` while the flag is true. A single CSS rule overrides
+the default cell opacity to `1`, so every quadrant's cells fade in
+together for the duration of the hover.
+
+Scope is deliberately narrow:
+
+* **Visual only.** Pointer-events on the cells are not touched —
+  clickability is still gated by `.rel:hover`. The user must move into
+  a specific quadrant for the existing reveal/focus grammar to take
+  over.
+* **No stagger override.** Cells use the existing `opacity` transition
+  on `.cell`; no per-cell `--reveal-delay` is applied for this path.
+* **Interface-only.** Never on the wire, never persisted. Consistent
+  with the rest of the central-image stack: a pure DOM-level visual
+  feedback layer.
+
+To enable hover detection, the `.central-image` wrapper sets
+`pointer-events: auto` (the `.center-anchor` parent stays
+`pointer-events: none`). The active layer occupies a small footprint at
+viewport centre, far from the cells on the oval, so this does not
+intercept cell interaction.
+
 ### Invariants
 
 * `centralStack` always equals `navigationHistory` once VIEW-3 has been
@@ -1714,6 +1754,9 @@ consequences** of the derived design:
   *VIEW-2 — RENDER MASK*, or *CANVAS BACKGROUND*.
 * `imageClick` is independent and must not be conflated with the
   stack's length or active index.
+* `centralHovered` is a hover-only feedback flag. It does **not** alter
+  navigation state, render state, or selection; toggling it has no
+  side effect beyond opacity of the relation cells.
 
 ---
 
@@ -1743,22 +1786,37 @@ cell_position = ellipse_centre + ( RX·cos θ_i , RY·sin θ_i )
   horizontally; portrait stretches it vertically. The arc therefore
   always genuinely fills each quadrant rather than sitting in a
   concentric circle in a `vmin` cage.
-* **θ_i** — uniformly spaced interior angles within the quadrant's 90°
-  slice: `quadrant_base + (i + 0.5) × 22.5°` for `i ∈ {0..3}` → cells at
-  `11.25°, 33.75°, 56.25°, 78.75°` from each quadrant's base angle. The
-  quadrant base angles (CSS-screen convention: 0° = +x, 90° = +y down)
-  are `BR: 0°`, `BL: 90°`, `TL: 180°`, `TR: 270°` — chosen so the signs
-  of `cos`/`sin` already point outward into the right viewport quadrant
-  without any per-quadrant sign flip.
+* **θ_i** — **equal-arc-length** angles within the quadrant's 90°
+  slice, computed at runtime. The ellipse's arc differential
+  `ds/dθ = √(a²sin²θ + b²cos²θ)` (with `a = RX·vw_px`, `b = RY·vh_px`)
+  is integrated numerically and the four cells land at the centres of
+  four equal arc-length segments — so the visible gap between adjacent
+  cells stays uniform on any viewport aspect ratio. Equal-angular
+  spacing (the earlier `11.25°, 33.75°, 56.25°, 78.75°` constants)
+  produced visibly bunched cells near the ellipse's steep part and a
+  stretched gap near the flat part; equal-arc-length corrects that.
+  The quadrant base angles (CSS-screen convention: 0° = +x, 90° = +y
+  down) are `BR: 0°`, `BL: 90°`, `TL: 180°`, `TR: 270°` — chosen so
+  the signs of `cos`/`sin` already point outward into the right viewport
+  quadrant without any per-quadrant sign flip.
+* **Direction matters per quadrant.** BR/TL parameterize the arc as
+  `(±a·cos t, ±b·sin t)` (slow at the x-axis end, fast at the y-axis
+  end); BL/TR parameterize it as `(∓a·sin t, ±b·cos t)` (fast at the
+  y-axis end, slow at the x-axis end). The two parameterizations are
+  duals: BL/TR's equal-arc-length angles are the reflection of BR/TL's
+  across `t = π/4`, i.e. `π/2 − tᵢ` reversed. Same visible spacing,
+  mirrored. Using BR/TL's angles indiscriminately in BL/TR shifts cells
+  the wrong way and is the bug that motivated the per-quadrant split.
 * **No radius progression** — all sixteen cells share the same `RX` and
   `RY`. The visual continuity of the oval depends on this; per-cell
   radius variation reads as four independent concentric arcs, not as a
   single ring.
 
-The `(x, y)` offsets are precomputed once at module load and stored in a
-static `CELL_OFFSETS` table keyed by `position → i`, each value a
-`vw`/`vh` string. Each cell binds them as inline CSS custom properties
-`--cell-x` / `--cell-y`. The `.cell` transform reads them as:
+The `(x, y)` offsets are **recomputed reactively** from the viewport
+size (a small in-component ref updated on `window.resize`) into a
+`CELL_OFFSETS` computed keyed by `position → i`, each value a `vw`/`vh`
+string. Each cell binds them as inline CSS custom properties `--cell-x`
+/ `--cell-y`. The `.cell` transform reads them as:
 
 ```css
 transform: translate(
@@ -1806,6 +1864,49 @@ There is no `DR` (radius step), no `CELL_INSET_DEG` (angular margin),
 no per-axis step in `vw`/`vh`. The single-oval invariant means tuning
 is two numbers, not a parameter sweep.
 
+### Aspect-aware slot assignment
+
+The 4 ids returned by the server (in proximity order) are **not**
+placed in the arc slots in the order they arrive. Each slot has a
+fixed maximum image height before the image is clipped by `.rel`'s
+overflow box:
+
+```
+half_height_max(slot) = min(cell_y_offset, 50vh − cell_y_offset)
+```
+
+Slot 1 sits right at the inner corner — its `cell_y_offset` is close
+to the midline, so it is the **most constrained** slot in every
+quadrant. The middle-of-arc slots win; which of slot 2 vs slot 3 wins
+depends on which axis the quadrant anchors on:
+
+| Quadrant | Headroom rank (most → least) |
+| -------- | ----------------------------- |
+| TL       | cell-2 → cell-3 → cell-4 → cell-1 |
+| BR       | cell-2 → cell-3 → cell-4 → cell-1 |
+| BL       | cell-3 → cell-2 → cell-1 → cell-4 |
+| TR       | cell-3 → cell-2 → cell-1 → cell-4 |
+
+(Encoded in `RelationComponent.vue` as `SLOT_RANK_BY_QUADRANT`, 0-indexed.)
+
+The 4 ids are sorted by atlas aspect **ascending** (tallest first; the
+ES2019 stable sort preserves the server's relevance order as a
+tiebreaker) and dropped into the ranked slots in order — tallest image
+into the most-headroom slot, etc.
+
+This is a **pure display permutation**. The server's proximity order is
+untouched on the wire and in the store; only which visual slot each id
+lands in changes. Within each visual quadrant the deepest impact is
+that the slot/relevance 1-to-1 mapping no longer holds — `cell-1` is a
+geometric position, not a "rank-1 suggestion" marker. Z-index stacking
+(`cell-1` frontmost) and `--reveal-delay` stagger are still indexed by
+slot number, so the visual hierarchy is the slot's geometric hierarchy.
+
+If the atlas metadata hasn't loaded yet (e.g. very first paint),
+`getAspect()` returns `1`; all ids count as wide and fall through to
+slots 1 → 4 → 2 → 3 by the ranking. Once the atlas resolves the
+computed re-derives and the layout settles.
+
 ### Latent → focal grammar
 
 Preserved on top of the oval layout:
@@ -1813,6 +1914,11 @@ Preserved on top of the oval layout:
 * **Field default**: cells at near-zero opacity, pointer-events off — a
   quiet latent layer over the backdrop.
 * **Component hover**: cells fade in and re-enable interaction.
+* **Central-image hover**: every cell in every quadrant fades to full
+  opacity (visual only — pointer-events stay off until the cursor
+  enters a quadrant and `.rel:hover` takes over). Driven by
+  `store.centralHovered`; see *Central-image hover reveal* in
+  *VIEW-2 / VIEW-3 — CENTRAL IMAGE STACK*.
 * **Cell focus** (`:hover` or `:focus-visible`): focused cell amplifies
   via `--cell-scale` plus border-color + box-shadow; siblings soften
   via `:has()`.
@@ -1831,14 +1937,18 @@ can fill in without shifting layout. Cell width is fixed at 12vmin;
 cell height follows from each thumb's intrinsic aspect ratio.
 
 Z-index stacks **cell-1 frontmost, cell-4 backmost** — innermost
-(most-relevant) suggestion paints above the others. Since cells on the
-oval don't actually overlap, the stack only matters for the focused
+(closest-to-centre) slot paints above the outer slots. Since cells on
+the oval don't actually overlap, the stack only matters for the focused
 cell (z=5 on `:hover`/`:focus-visible`) and the whole-quadrant lift
 (`.rel:hover { z-index: 50 }`) keeping the cells above the central
 image deck during cell amplification.
 
 Hierarchy reading (cell-1 closest, cell-4 furthest) is conveyed by the
 z-index stacking and the `--reveal-delay` stagger — **not** by radius.
+After *Aspect-aware slot assignment*, this hierarchy is **geometric**
+(which slot on the arc) rather than **relevance-based** (which rank in
+`related[]`). The server's proximity ordering is still the authoritative
+ranking; the visual slot grammar conveys spatial position, not rank.
 
 The server returns up to 8 related images per component; the client
 slices to 4 for the oval. Increasing this number requires extending
@@ -3255,6 +3365,121 @@ runs over 500ms, then `setTimeout(viewState.advance, 500)` advances.
 
 ---
 
+## CLOCKWISE REVEAL — reusable circle entrance
+
+`CentralImage` (the deck/circle component) supports a **clockwise reveal**:
+instead of all images appearing at once, they enter one-by-one in clockwise
+order (index 0 at 12 o'clock first), with a fade + scale-up. Driven by props
+so any caller can opt in:
+
+* `reveal` — enable the clockwise entrance (only in expanded/circle mode).
+* `revealStagger` — per-image delay (ms).
+* `revealDelay` — initial beat before the first image.
+* `revealKey` — change it to replay the cascade (e.g. each new selection).
+* `revealDrift` — variant: images start **stacked at the centre** and ease
+  OUT to their oval positions (same staggered order, no fade) instead of
+  fading in place. *(Currently unused — the centred circle uses the
+  fade-in-place reveal; `revealDrift` is kept for the seamless deck → ring
+  drift option.)*
+
+Implementation (in `CentralImage.vue`): visibility is derived synchronously
+from a `revealActive` computed + a `shown` Set (so a circle reads hidden the
+instant it becomes active — no one-frame "whole circle flashes" gap); a
+per-index timer adds indices to `shown`; an inner `.layer-reveal` wrapper
+owns the fade/scale so it composes on top of the layout transform; a
+`no-morph` flag suppresses the layout morph during the cascade.
+
+The same clockwise idea is reimplemented natively for the **VIEW_4 relation
+suggestion cells** (`RelationComponent.vue`), since they're a different
+component/layout: a `.cell-reveal` inner wrapper fades+scales each cell in,
+with a per-cell `--enter-delay` from its **absolute angle around the shared
+oval** (clockwise from 12 o'clock). On the **first** appearance (entry into
+VIEW_4) it's one continuous whole-oval sweep; on **every later selection**
+each quadrant reveals its own 4 cells **concurrently** (~¼ the time, same
+per-cell step — `isFirstReveal` switches between the two). Pure appearance:
+the cells still settle into their normal latent 0.05 / hover behaviour.
+
+---
+
+## VIEW_4 — OVERVIEW FINALE & EXPLORE-OTHERS
+
+The end-of-experience after reaching branch depth 10. Replaces the retired
+"Contribute to proxima" button and the (also retired) 16-tick radius/clock
+ring loader.
+
+### Overview finale (auto-confirmation)
+
+Reaching depth 10 (`overviewEligible`) fires `store.startOverviewFinale()`
+(from a `watch(overviewEligible)` in `View4Relational`). A phased sequence
+drives `overviewFinalePhase: 'idle' | 'bright' | 'dissolve' | 'fadeout'`:
+
+1. **bright** (`OVERVIEW_BRIGHT_MS`) — the four quadrants' suggestion images
+   flash to full opacity and hold.
+2. **dissolve** (`OVERVIEW_DISSOLVE_SWEEP_MS` + `OVERVIEW_DISSOLVE_FADE_MS`)
+   — they fade out one-by-one **clockwise across the whole oval** (per-cell
+   `--dissolve-delay` from the absolute clockwise angle × the sweep window).
+3. **fadeout** (`OVERVIEW_FADEOUT_MS`) — the central image **deck** fades out
+   smoothly (`.center-anchor.deck-fadeout`), a clean cut with no size jump.
+4. → `confirmOverview()` — `set-state('overview')` + `set-marks(navigation
+   History)` (whole path lit, exception #13); the **circle of the 10
+   selected images** clock-reveals (fade-in-place at the oval).
+5. After `SEE_YOUR_PATH_DELAY_MS` (post-confirm), `overviewControlsReady`
+   flips true and the **"See your path"** control appears.
+
+Interaction is **frozen** for the whole finale: `setQuadrantHover`,
+`stepBack/Forward/jumpToHistory` early-return on `overviewFinaleActive`, and
+each `RelationComponent` goes `pointer-events: none` (`.rel.is-frozen`). The
+quadrant cells react via `.constellation.finale-bright` / `.finale-dissolve`
+(the dissolve class is held through `fadeout` so cells don't pop back to
+latent). All timing constants live in `interaction.ts`; the two matching CSS
+durations are the dissolve transition in `RelationComponent.vue` and
+`.center-anchor.deck-fadeout` in `View4Relational.vue`.
+
+### "See your path" → single
+
+`enterSinglePathView()` morphs the standalone project `overview → single`
+behind the gradient render-mask (same hidden-morph choreography as
+`enterEntryView`) so the contributed path reads on the full map. It also
+fires `loadReplayCircles()` to prepare the explore-others circles.
+
+### Explore-others — replay circles
+
+Once in the single-path view, four **existing Replay-proximity circles**
+appear in the corners. Each is a random Replay neighbourhood from a new Nuxt
+endpoint **`server/api/replay-circles.get.ts`** (reuses `loadUmapDataset`
++ `pickRelations` on `component_4` / `umap_replay.json`; a **diversity guard**
+rejects circles ≥70% overlapping an accepted one). No new data source, no
+persistence — proximity already encodes the collaborative trace.
+
+Store surface (`interaction.ts`): `replayCircles`, `centeredCircleIds`,
+`centeredStack` (computed — `centeredCircleIds ?? centralStack`, so the
+centred `CentralImage` shows the user's own path until a corner is picked),
+`loadReplayCircles(force)`, and `centerReplayCircle(i)` which sets the centred
+ids, **redraws the project's single-state path** to that circle
+(`pathClear` → `pathSegment`s in circle order → `setMarks`, instant), and
+refreshes the four corners (`loadReplayCircles(true)`) so a new set appears
+each pick.
+
+* Corner circles use `CentralImage` with `interactive: false` (the whole
+  circle is one click target) at a reduced CSS scale.
+* Hovering an image in the **centred** circle forwards its id via
+  `store.setHighlight(id)` so the matching sprite lights on every canvas —
+  same `set-highlight` primitive as VIEW_2 / VIEW_4 cells. The frozen path
+  is never touched (marks/highlight don't mutate `pathTrace`).
+* `CentralImage`'s expanded ring is an **ellipse** (`RADIUS_X_VMIN >
+  RADIUS_Y_VMIN`) — wider than tall — shared by the centred and corner
+  circles; per-image size is `SCALE_OTHER / ACTIVE / HOVER`.
+
+### `set-marks` and read-equal highlighting
+
+`set-marks(navigationHistory)` lights every path image on the canvas at once.
+Project-side it clears the single `focus` track so all marked images read
+equally (this is also why the old "hover the last/active image does nothing"
+glitch disappeared — there's no privileged focus to suppress against). See
+exception #13.
+
+---
+
 # CURRENT DEVELOPMENT SCOPE
 
 Current phase:
@@ -3264,7 +3489,7 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with twelve explicit exceptions**:
+Do not modify project, **with thirteen explicit exceptions**:
 
 1. The user-driven path-rendering directive surface inside `project` —
    `path-segment`, `path-truncate`, and the `pathTrace` primitive they
@@ -3400,8 +3625,21 @@ Do not modify project, **with twelve explicit exceptions**:
     (PER-CANVAS ZOOM) with the inverse direction and the focus-pan
     suppression rule. No state-machine reinterpretation; project
     stays in `split` throughout. See *VIEW_4 — QUADRANT HOVER ZOOM*.
+13. The **persistent multi-highlight surface** — `set-marks({ ids })`,
+    `actions.setMarks` in `commands.js`, `app.setMarks(ids)` in `app.js`,
+    and the `markSet` track in `pointsManager.js` (folded into `applyLit`
+    so the lit set is `marks ∪ focus ∪ hover`; `setMarks` clears the
+    single focus so every marked sprite reads equally, and
+    `updateActiveGlow` was adjusted so a hover halo on a marked sprite
+    doesn't linger after hover-out). A persistent, multi-id sibling of
+    `set-highlight`: lights (scale-up) a whole set of sprites at once.
+    Used by the VIEW_4 overview to light the entire contributed path on
+    the canvas, and by the explore-others step to redraw a foreign
+    circle's path. Pure perceptual emphasis — no camera move, no state
+    change, no path mutation. See *VIEW_4 — OVERVIEW FINALE & EXPLORE-
+    OTHERS*.
 
-All twelve exceptions are scoped tightly: pure rendering / configuration
+All thirteen exceptions are scoped tightly: pure rendering / configuration
 surfaces driven by explicit `interface_nuxt` directives (or, in the
 VIEW_2 embed case, by an out-of-band `postMessage` channel for the
 canvas-pick input). No project-side interpretation, derivation, or

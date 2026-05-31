@@ -134,6 +134,16 @@ export function useProjectSocket() {
     return true
   }
 
+  function setMarks(ids: string[]): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-marks', ids)
+      return false
+    }
+    socket.emit('message', { type: 'set-marks', payload: { ids } })
+    return true
+  }
+
   function setGhostPath(fromId: string | null, toId: string | null): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
@@ -202,5 +212,5 @@ export function useProjectSocket() {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCanvasText, setCenterCaption, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCanvasText, setCenterCaption, isConnected }
 }

@@ -55,6 +55,21 @@ export const useInteractionStore = defineStore('interaction', () => {
   // flips true on the trigger and stays true (no inverse transition).
   const singlePathViewActive = ref(false)
 
+  // "Explore others" — once the single-path view is active, four existing
+  // Replay-proximity circles appear in the corners (loaded from
+  // /api/replay-circles). Clicking one centres it and redraws the project's
+  // single-state path to that circle. `centeredCircleIds` is the currently
+  // centred foreign circle, or null = showing the user's own path. All
+  // interface-only; the redraw reuses the existing path primitives.
+  const replayCircles = ref<{ anchorId: ImageId; ids: ImageId[] }[]>([])
+  const centeredCircleIds = ref<ImageId[] | null>(null)
+  // The deck the centred CentralImage renders: the clicked foreign circle if
+  // one is centred, otherwise the user's own path (centralStack). View4 binds
+  // this and never needs to know which source it is.
+  const centeredStack = computed<ImageId[]>(
+    () => centeredCircleIds.value ?? centralStack.value,
+  )
+
   const view3InterpretationMode = ref(false)
 
   const canvasBackground = ref<'black' | 'gradient'>('gradient')
@@ -99,6 +114,8 @@ export const useInteractionStore = defineStore('interaction', () => {
   function setQuadrantHover(canvasIndex: number | null) {
     if (!viewState.is('RELATIONAL')) return
     if (overviewConfirmed.value) return
+    // Central image is frozen during the overview finale — no hover-zoom.
+    if (overviewFinaleActive.value) return
     if (canvasIndex !== null && (canvasIndex < 0 || canvasIndex > 3)) return
     const prev = view4HoveredQuadrant.value
     const next = canvasIndex
@@ -345,6 +362,45 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.pathSegment(prevId, id)
   }
 
+  // ── Overview finale sequence (replaces the old tick-ring loader) ──
+  // When the 10th image is reached, the four quadrants' suggestion images
+  // flash to full opacity, hold, then fade out one-by-one in clockwise
+  // order; only then does confirmOverview fire (→ the circle of 10 reveals).
+  // The central image + all interaction are frozen for the duration.
+  // OVERVIEW_DISSOLVE_SWEEP_MS is the clockwise spread (matched in
+  // RelationComponent's per-cell dissolve delay); FADE is the per-cell fade.
+  const OVERVIEW_BRIGHT_MS = 1200
+  const OVERVIEW_DISSOLVE_SWEEP_MS = 4000
+  const OVERVIEW_DISSOLVE_FADE_MS = 800
+  // After the quadrants have disappeared, the central image deck fades out
+  // smoothly before the circle reveals (no size jump from deck → ring) — a
+  // clean fade-out cut between the disappearance and the circle.
+  const OVERVIEW_FADEOUT_MS = 800
+  // "See your path" appears this long after the circle has revealed.
+  const SEE_YOUR_PATH_DELAY_MS = 6000
+  const overviewFinalePhase = ref<'idle' | 'bright' | 'dissolve' | 'fadeout'>('idle')
+  const overviewFinaleActive = computed(() => overviewFinalePhase.value !== 'idle')
+  // Gates the post-confirm "See your path" control behind a delay.
+  const overviewControlsReady = ref(false)
+  let finaleTimers: ReturnType<typeof setTimeout>[] = []
+
+  function startOverviewFinale() {
+    if (!overviewEligible.value) return
+    if (overviewFinalePhase.value !== 'idle') return
+    const dissolveEnd = OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_SWEEP_MS + OVERVIEW_DISSOLVE_FADE_MS
+    overviewFinalePhase.value = 'bright'
+    finaleTimers.push(setTimeout(() => {
+      overviewFinalePhase.value = 'dissolve'
+    }, OVERVIEW_BRIGHT_MS))
+    finaleTimers.push(setTimeout(() => {
+      overviewFinalePhase.value = 'fadeout'
+    }, dissolveEnd))
+    finaleTimers.push(setTimeout(() => {
+      confirmOverview()
+      overviewFinalePhase.value = 'idle'
+    }, dissolveEnd + OVERVIEW_FADEOUT_MS))
+  }
+
   function confirmOverview() {
     if (!overviewEligible.value) return
     overviewConfirmed.value = true
@@ -355,6 +411,18 @@ export const useInteractionStore = defineStore('interaction', () => {
       clientTimestamp: Date.now(),
     })
     projectSocket.setState('overview')
+    // "See your path" surfaces only after a beat (the user takes in the
+    // circle first). Gated by overviewControlsReady, flipped 6s later.
+    overviewControlsReady.value = false
+    setTimeout(() => { overviewControlsReady.value = true }, SEE_YOUR_PATH_DELAY_MS)
+    // Light the WHOLE contributed path on every canvas (not just the last
+    // selected image). Emitted after set-state so the marks land after
+    // goTo('overview') has set the 'big' highlight preset and cleared its
+    // transition. set-marks clears the single focus track project-side, so
+    // every path image reads equally — and hover (set-highlight) then works
+    // uniformly for any of them, including the last. The path itself is
+    // untouched (marks never mutate pathTrace), so it stays frozen as drawn.
+    projectSocket.setMarks([...navigationHistory.value])
   }
 
   // Hidden-morph from `overview` back to `single` on the standalone
@@ -367,6 +435,9 @@ export const useInteractionStore = defineStore('interaction', () => {
     if (!overviewConfirmed.value) return
     if (singlePathViewActive.value) return
     singlePathViewActive.value = true
+    // Load the four "existing circles" (Replay proximities) for the corners
+    // so they're ready as the single-path view appears. Fire-and-forget.
+    loadReplayCircles()
     const FADE_IN_MS = 250
     const MORPH_MS = 350
     const HOLD_MS = 300
@@ -376,8 +447,54 @@ export const useInteractionStore = defineStore('interaction', () => {
     setTimeout(() => projectSocket.setMask(0, FADE_OUT_MS), FADE_IN_MS + MORPH_MS + HOLD_MS)
   }
 
+  // Fetch four corner circles, each a random Replay-proximity neighbourhood
+  // resolved server-side (see /api/replay-circles). `force` re-fetches a
+  // fresh set even if some are already loaded — used to refresh the corners
+  // after each pick so a new set of existing circles appears every time.
+  async function loadReplayCircles(force = false) {
+    if (!force && replayCircles.value.length > 0) return
+    try {
+      const res = await $fetch<{ circles: { anchorId: ImageId; ids: ImageId[] }[] }>(
+        '/api/replay-circles',
+        { query: { count: 4, size: 10 } },
+      )
+      replayCircles.value = res?.circles ?? []
+    } catch (err) {
+      console.warn('[interaction] loadReplayCircles failed', err)
+    }
+  }
+
+  // Redraw the standalone project's single-state path to an ordered list of
+  // ids — instant, no transition (the perspective switch must feel
+  // immediate). Connects the ids in array order (matching the centred
+  // circle's clockwise-from-top layout) and marks all of them. Shared by
+  // `centerReplayCircle` and the (future) restore-to-own-path hook.
+  function redrawCircleOnSingle(ids: ImageId[]) {
+    projectSocket.pathClear()
+    for (let i = 0; i < ids.length - 1; i++) {
+      projectSocket.pathSegment(ids[i]!, ids[i + 1]!)
+    }
+    projectSocket.setMarks([...ids])
+  }
+
+  // Click a corner circle: centre it (drives `centeredStack`) and redraw the
+  // project's single map to that circle. The four corners stay for continued
+  // browsing.
+  function centerReplayCircle(index: number) {
+    const circle = replayCircles.value[index]
+    if (!circle || circle.ids.length === 0) return
+    centeredCircleIds.value = circle.ids
+    redrawCircleOnSingle(circle.ids)
+    // Refresh the four corners so a fresh set of existing circles appears
+    // after each pick (the chosen one is now centred). `centeredCircleIds`
+    // holds its own copy of the ids, so replacing `replayCircles` doesn't
+    // disturb the centred circle.
+    loadReplayCircles(true)
+  }
+
   function stepBackInHistory() {
     if (!viewState.is('RELATIONAL')) return
+    if (overviewFinaleActive.value) return
     if (historyIndex.value <= 0) return
     const fromIndex = historyIndex.value
     historyIndex.value -= 1
@@ -394,6 +511,7 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   function stepForwardInHistory() {
     if (!viewState.is('RELATIONAL')) return
+    if (overviewFinaleActive.value) return
     if (historyIndex.value >= navigationHistory.value.length - 1) return
     const fromIndex = historyIndex.value
     historyIndex.value += 1
@@ -410,6 +528,7 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   function jumpToHistory(targetIndex: number) {
     if (!viewState.is('RELATIONAL')) return
+    if (overviewFinaleActive.value) return
     if (targetIndex < 0 || targetIndex >= navigationHistory.value.length) return
     if (targetIndex === historyIndex.value) return
     const fromIndex = historyIndex.value
@@ -500,8 +619,17 @@ export const useInteractionStore = defineStore('interaction', () => {
     enterRelationalView,
     activateCentral,
     confirmOverview,
+    overviewFinalePhase,
+    overviewFinaleActive,
+    overviewControlsReady,
+    startOverviewFinale,
+    overviewDissolveSweepMs: OVERVIEW_DISSOLVE_SWEEP_MS,
     singlePathViewActive,
     enterSinglePathView,
+    replayCircles,
+    centeredCircleIds,
+    centeredStack,
+    centerReplayCircle,
     stepBackInHistory,
     stepForwardInHistory,
     jumpToHistory,

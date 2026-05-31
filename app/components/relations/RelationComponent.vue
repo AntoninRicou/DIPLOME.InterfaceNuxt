@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import { view3Interpretations, type View3ComponentId } from '~/view3/view3Interpretations'
 import ProximityPanel from '~/components/ProximityPanel.vue'
@@ -33,7 +33,52 @@ watch(centralImageId, (v) => {
   if (v) refresh()
 })
 
-const cells = computed(() => (data.value?.related ?? []).slice(0, 4))
+const { getAspect } = useAtlas()
+
+// ── Per-quadrant slot ranking by max image height ──
+// Each slot has a fixed max half-height before the image gets clipped by
+// `.rel`'s overflow box: half_height_max = min(cell_y_offset, 50vh −
+// cell_y_offset). Slot 1 sits right at the inner corner (small y_offset
+// against the midline) and is the most constrained in every quadrant;
+// the middle-of-arc slots (2 or 3, depending on which axis the quadrant
+// anchors on) win. TL/BR share a ranking; BL/TR share another. Values
+// below are 0-indexed slot positions (0 = cell-1 … 3 = cell-4), most
+// headroom → least:
+//
+//   TL: 2, 3, 4, 1  (slot indices 1, 2, 3, 0)
+//   BR: 2, 3, 4, 1  (slot indices 1, 2, 3, 0)
+//   BL: 3, 2, 1, 4  (slot indices 2, 1, 0, 3)
+//   TR: 3, 2, 1, 4  (slot indices 2, 1, 0, 3)
+const SLOT_RANK_BY_QUADRANT: Record<'tl' | 'tr' | 'bl' | 'br', number[]> = {
+  tl: [1, 2, 3, 0],
+  br: [1, 2, 3, 0],
+  bl: [2, 1, 0, 3],
+  tr: [2, 1, 0, 3],
+}
+
+// ── Aspect-aware slot assignment ──
+// Sort the 4 ids by aspect ascending (tallest first); place them into
+// this quadrant's slots in headroom order — tallest image lands in the
+// most-headroom slot. Pure display permutation: the server's proximity
+// order is preserved as a tiebreaker (ES2019 stable sort) and is never
+// modified upstream.
+const cells = computed(() => {
+  const ids = (data.value?.related ?? []).slice(0, 4)
+  if (ids.length === 0) return []
+
+  const sortedIds = [...ids].sort((a, b) => getAspect(a) - getAspect(b))
+  const ranks = SLOT_RANK_BY_QUADRANT[props.position ?? 'tl']
+
+  const slots: (string | undefined)[] = [undefined, undefined, undefined, undefined]
+  sortedIds.forEach((id, i) => {
+    const slotIdx = ranks[i]
+    if (slotIdx !== undefined) slots[slotIdx] = id
+  })
+
+  return slots
+    .map((id, slotIdx) => (id ? { id, slotIdx } : null))
+    .filter((x): x is { id: string; slotIdx: number } => x !== null)
+})
 
 // ── Single invisible oval layout ──
 // All sixteen cells (4 quadrants × 4 cells) sit on the SAME invisible
@@ -44,43 +89,145 @@ const cells = computed(() => (data.value?.related ?? []).slice(0, 4))
 //
 // Cells differ only in ANGLE around the oval, not in radius. Each
 // quadrant gets a 90° slice; within that slice four cells are placed
-// at uniformly spaced interior angles (11.25°, 33.75°, 56.25°, 78.75°
-// from the quadrant base). Reading order around the oval is therefore
-// continuous and the constellation looks as a single coherent ring,
-// not four independent concentric arcs.
+// at the centres of four EQUAL ARC-LENGTH segments, so the visible
+// spacing between adjacent cells stays uniform regardless of the
+// viewport's aspect ratio. (Earlier equal-angular spacing produced
+// visibly bunched cells near the steep part of the ellipse and a
+// stretched gap near the flat part.)
 //
 // Hierarchy reading (cell-1 closest, cell-4 furthest) is preserved by
 // the existing z-index stacking (`.cell-1` z=4 front-most) and the
 // per-index `--reveal-delay` stagger — not by radius.
-//
-// Constants are inlined here so the table is computed once at module
-// load — no per-frame trig, no reactivity (positions are fixed per
-// (position, i)).
-const RX = 40 // vw — single x semi-axis (shared by all cells)
-const RY = 37 // vh — single y semi-axis (shared by all cells)
+const RX = 40 // vw — x semi-axis
+const RY = 40 // vh — y semi-axis
 const N_CELLS = 4
-const ARC_SPAN_DEG = 90 // quadrant span
 // CSS-screen angles: 0° = +x right, 90° = +y down, 180° = -x left, 270° = -y up.
-// Cells are spaced at the four interior centres of the 90° arc divided
-// into 8 slices: (i + 0.5) × (90 / 4) = (i + 0.5) × 22.5°.
 const QUADRANT_BASE_DEG: Record<'tl' | 'tr' | 'bl' | 'br', number> = {
   br: 0,
   bl: 90,
   tl: 180,
   tr: 270,
 }
-const CELL_OFFSETS: Record<'tl' | 'tr' | 'bl' | 'br', { x: string; y: string }[]> =
-  (Object.keys(QUADRANT_BASE_DEG) as (keyof typeof QUADRANT_BASE_DEG)[]).reduce((acc, key) => {
-    const base = QUADRANT_BASE_DEG[key]
-    acc[key] = Array.from({ length: N_CELLS }, (_, i) => {
-      const angleDeg = base + (i + 0.5) * (ARC_SPAN_DEG / N_CELLS)
-      const theta = (angleDeg * Math.PI) / 180
+
+// Viewport size in px — recomputed on resize. SSR default is a 16:9
+// guess; the real values land on mount.
+const viewportSize = ref<{ w: number; h: number }>({ w: 1920, h: 1080 })
+function updateViewportSize() {
+  viewportSize.value = { w: window.innerWidth, h: window.innerHeight }
+}
+onMounted(() => {
+  updateViewportSize()
+  window.addEventListener('resize', updateViewportSize)
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', updateViewportSize)
+})
+
+// Equal-arc-length cell angles. We numerically integrate the ellipse's
+// arc-length differential with the actual pixel semi-axes (a = RX·vw_px,
+// b = RY·vh_px), then place the four cells at the centres of four equal
+// arc-length segments.
+//
+// Direction matters per quadrant:
+// - BR/TL parameterize as (±a·cos t, ±b·sin t) → ds/dt = √(a²sin²t + b²cos²t).
+//   Slow at t=0 (x-axis end), fast at t=π/2 (y-axis end).
+// - BL/TR parameterize as (∓a·sin t, ±b·cos t) → ds/dt = √(a²cos²t + b²sin²t).
+//   Fast at t=0 (y-axis end), slow at t=π/2 (x-axis end).
+// The BL/TR angles are the reflection of BR/TL across t = π/4 — i.e.
+// `π/2 − tᵢ` reversed. Same equal-arc-length spacing, just mirrored.
+const cellArcAnglesByQuadrant = computed<Record<'tl' | 'tr' | 'bl' | 'br', number[]>>(() => {
+  const a = (RX / 100) * viewportSize.value.w
+  const b = (RY / 100) * viewportSize.value.h
+  const STEPS = 256
+  const dTheta = (Math.PI / 2) / STEPS
+  let total = 0
+  const cum: number[] = [0]
+  for (let i = 1; i <= STEPS; i++) {
+    const t = (i - 0.5) * dTheta
+    total += Math.sqrt(a * a * Math.sin(t) ** 2 + b * b * Math.cos(t) ** 2) * dTheta
+    cum.push(total)
+  }
+  const brAngles: number[] = []
+  for (let i = 0; i < N_CELLS; i++) {
+    const target = ((i + 0.5) * total) / N_CELLS
+    for (let j = 1; j <= STEPS; j++) {
+      const cumJ = cum[j]
+      const cumPrev = cum[j - 1]
+      if (cumJ !== undefined && cumPrev !== undefined && cumJ >= target) {
+        const frac = (target - cumPrev) / (cumJ - cumPrev)
+        brAngles.push(((j - 1) + frac) * dTheta)
+        break
+      }
+    }
+  }
+  const blAngles = brAngles.slice().reverse().map((t) => Math.PI / 2 - t)
+  return { br: brAngles, tl: brAngles, bl: blAngles, tr: blAngles }
+})
+
+const CELL_OFFSETS = computed<Record<'tl' | 'tr' | 'bl' | 'br', { x: string; y: string }[]>>(() => {
+  return (Object.keys(QUADRANT_BASE_DEG) as (keyof typeof QUADRANT_BASE_DEG)[]).reduce((acc, key) => {
+    const baseRad = (QUADRANT_BASE_DEG[key] * Math.PI) / 180
+    acc[key] = cellArcAnglesByQuadrant.value[key].map((a) => {
+      const theta = baseRad + a
       const x = RX * Math.cos(theta)
       const y = RY * Math.sin(theta)
       return { x: `${x.toFixed(2)}vw`, y: `${y.toFixed(2)}vh` }
     })
     return acc
   }, {} as Record<'tl' | 'tr' | 'bl' | 'br', { x: string; y: string }[]>)
+})
+
+// ── Clockwise entrance sweep (whole-oval, coordinated) ──
+// Each cell's entrance is delayed by its absolute angular position around
+// the shared ellipse, measured CLOCKWISE FROM 12 O'CLOCK. Because every
+// RelationComponent uses the same absolute formula and all four (re)mount
+// their cells on the same `centralImageId` change, the four quadrants read
+// as one continuous clockwise sweep. Pure appearance: the entrance lives on
+// an inner `.cell-reveal` wrapper and never touches the cell's own opacity /
+// transform / hover behaviour (the cells still settle into their normal
+// latent 0.05 state). Plays on the relational view appearing and on every
+// new central-image selection.
+// Total time for one full clockwise sweep across all 16 cells. The per-cell
+// STEP (sweep / 16) is shared by both reveal modes, so they run at the same
+// speed — only the span differs.
+const ENTER_SWEEP_MS = 1000
+const ENTER_STEP_MS = ENTER_SWEEP_MS / 16
+
+// First reveal = the transition INTO VIEW_4 → one continuous clockwise sweep
+// across the whole oval. Every later central-image change reveals each
+// quadrant's own 4 cells with all four quadrants running CONCURRENTLY (~¼
+// the time, same per-cell step).
+const isFirstReveal = ref(true)
+watch(centralImageId, () => { isFirstReveal.value = false })
+
+function enterDelay(slotIdx: number): string {
+  const pos = props.position ?? 'tl'
+  if (isFirstReveal.value) {
+    // Whole-oval sweep: delay = absolute clockwise position from 12 o'clock.
+    // CSS-screen angle: 0°=right, 90°=down, 270°=up. Increasing angle is
+    // clockwise on screen (y points down).
+    const a = cellArcAnglesByQuadrant.value[pos][slotIdx] ?? 0
+    const thetaDeg = QUADRANT_BASE_DEG[pos] + (a * 180) / Math.PI
+    const cw = (((thetaDeg - 270) % 360) + 360) % 360
+    return `${Math.round((cw / 360) * ENTER_SWEEP_MS)}ms`
+  }
+  // Per-quadrant, concurrent: local clockwise order within this quadrant.
+  // Slot index already follows clockwise order within a quadrant (arc angle
+  // is monotonic in slot), so delay = slotIdx × the shared per-cell step.
+  return `${Math.round(slotIdx * ENTER_STEP_MS)}ms`
+}
+
+// Overview finale: per-cell delay for the clockwise FADE-OUT, spread across
+// the whole oval (absolute clockwise position from 12 o'clock) over the
+// store's dissolve-sweep window. Consumed by the `.finale-dissolve`
+// transition-delay so all four quadrants fade out as one clockwise sweep.
+function dissolveDelay(slotIdx: number): string {
+  const pos = props.position ?? 'tl'
+  const a = cellArcAnglesByQuadrant.value[pos][slotIdx] ?? 0
+  const thetaDeg = QUADRANT_BASE_DEG[pos] + (a * 180) / Math.PI
+  const cw = (((thetaDeg - 270) % 360) + 360) % 360
+  return `${Math.round((cw / 360) * store.overviewDissolveSweepMs)}ms`
+}
 
 function onRelatedClick(id: string) {
   store.activateCentral(id)
@@ -162,7 +309,7 @@ function onMouseEnter(e: MouseEvent) {
 <template>
   <article
     class="rel"
-    :class="{ 'is-inert': interpretationActive }"
+    :class="{ 'is-inert': interpretationActive, 'is-frozen': store.overviewFinaleActive }"
     :data-position="position ?? 'tl'"
     :data-reveal="revealDirection"
     @mouseenter="onMouseEnter"
@@ -170,7 +317,10 @@ function onMouseEnter(e: MouseEvent) {
     <span class="corner-label" :data-position="position ?? 'tl'">{{ label }}</span>
 
     <div v-if="!centralImageId" class="status">no central image</div>
-    <div v-else-if="pending" class="status">querying…</div>
+    <!-- Loading is silent — no "querying…" text. The empty branch keeps the
+         constellation hidden until data lands, so the entrance plays cleanly
+         on fresh cells (blank → clockwise reveal). -->
+    <div v-else-if="pending" class="status" aria-hidden="true" />
     <div v-else-if="error" class="status error">error</div>
 
     <div
@@ -180,22 +330,29 @@ function onMouseEnter(e: MouseEvent) {
         suppressed: interpretationActive,
         hidden: store.overviewConfirmed,
         'central-revealed': store.centralHovered,
+        'finale-bright': store.overviewFinalePhase === 'bright',
+        'finale-dissolve':
+          store.overviewFinalePhase === 'dissolve' || store.overviewFinalePhase === 'fadeout',
       }"
     >
       <button
-        v-for="(id, i) in cells"
-        :key="id"
-        :class="['cell', `cell-${i + 1}`]"
+        v-for="cell in cells"
+        :key="cell.id"
+        :class="['cell', `cell-${cell.slotIdx + 1}`]"
         :style="{
-          '--cell-x': CELL_OFFSETS[position ?? 'tl'][i]?.x,
-          '--cell-y': CELL_OFFSETS[position ?? 'tl'][i]?.y,
+          '--cell-x': CELL_OFFSETS[position ?? 'tl'][cell.slotIdx]?.x,
+          '--cell-y': CELL_OFFSETS[position ?? 'tl'][cell.slotIdx]?.y,
+          '--enter-delay': enterDelay(cell.slotIdx),
+          '--dissolve-delay': dissolveDelay(cell.slotIdx),
         }"
-        :title="id"
-        @click="onRelatedClick(id)"
-        @mouseenter="onCellHover(id)"
+        :title="cell.id"
+        @click="onRelatedClick(cell.id)"
+        @mouseenter="onCellHover(cell.id)"
         @mouseleave="onCellLeave"
       >
-        <AtlasThumb :id="id" fit="width" source="original" />
+        <span class="cell-reveal">
+          <AtlasThumb :id="cell.id" fit="width" source="original" />
+        </span>
       </button>
     </div>
 
@@ -238,6 +395,14 @@ function onMouseEnter(e: MouseEvent) {
    reveal-on-hover, focus amplification, and clicks all go dormant by
    construction rather than by per-state override. */
 .rel.is-inert {
+  pointer-events: none;
+}
+
+/* ── overview finale — frozen ──
+   During the bright/dissolve finale the quadrant is non-interactive (no
+   hover-reveal, no clicks); the cells' opacity is driven entirely by the
+   `.finale-*` rules above. */
+.rel.is-frozen {
   pointer-events: none;
 }
 
@@ -329,6 +494,24 @@ function onMouseEnter(e: MouseEvent) {
   opacity: 1;
 }
 
+/* ── overview finale ──
+   When the 10th image is reached, every cell flashes to full opacity (a
+   brief bright hold), then fades out one-by-one CLOCKWISE across the whole
+   oval (per-cell `--dissolve-delay`), after which the deck collapses into
+   the contributed circle. Overrides the latent/hover opacity; interaction
+   is frozen via `.rel.is-frozen`. Pure appearance — these only touch
+   opacity, the cells' geometry/transform is untouched. */
+.constellation.finale-bright .cell {
+  opacity: 1;
+  transition: opacity 250ms ease-out;
+}
+.constellation.finale-dissolve .cell {
+  opacity: 0;
+  /* Per-cell fade length must match OVERVIEW_DISSOLVE_FADE_MS in
+     interaction.ts (the store waits BRIGHT + SWEEP + FADE before confirm). */
+  transition: opacity 800ms ease-out var(--dissolve-delay, 0ms);
+}
+
 .cell {
   position: absolute;
   width: 12vmin;
@@ -379,6 +562,25 @@ function onMouseEnter(e: MouseEvent) {
 .cell-2 { z-index: 3; --i: 1; }
 .cell-3 { z-index: 2; --i: 2; }
 .cell-4 { z-index: 1; --i: 3; }
+
+/* ── Clockwise entrance wrapper ──
+   Inner element that owns ONLY the appearance cascade (fade + scale-up),
+   composing multiplicatively over the cell's own opacity/transform — so the
+   cell still settles into its normal latent 0.05 state and all hover /
+   reveal behaviour is untouched. `backwards` fill keeps it hidden during
+   its per-cell delay, then it animates in; no `forwards`, so once done it
+   reverts to the default (opacity 1 / scale 1) and the cell's own rules take
+   over cleanly. `--enter-delay` is the absolute clockwise position around
+   the shared oval (set inline), so the four quadrants sweep as one. */
+.cell-reveal {
+  display: block;
+  transform-origin: center center;
+  animation: cell-reveal-in 600ms ease-out var(--enter-delay, 0ms) backwards;
+}
+@keyframes cell-reveal-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1); }
+}
 
 /* component hover → arc reveals with per-cell stagger.
    Direction depends on where the cursor crossed the quadrant border
