@@ -29,18 +29,31 @@ export interface View3Interpretation {
   align?: 'start' | 'end' | 'center'
 }
 
+// Centred image-credit shown in interpretation mode (VIEW_4 `+` toggle):
+// the three-line provenance note rendered at viewport centre. Single source
+// of truth — the interface renders these lines in `.interpret-message`, and
+// the store mirrors them onto the project canvas's `#center-caption` (joined
+// with newlines) so both screens show the credit together, exactly like the
+// per-quadrant `set-canvas-text` mirror. The last line (URL) is rendered at
+// 80% opacity on the interface.
+export const IMAGE_CREDIT_LINES: readonly string[] = [
+  'Images digitized from historical books (15th–20th century) via the Internet Archive.',
+  'Extracted and redistributed through the Internet Archive Book Images dataset on Flickr.',
+  'https://www.flickr.com/photos/internetarchivebookimages/',
+]
+
 export const view3Interpretations: Record<View3ComponentId, View3Interpretation> = {
   component_1: {
-    title: 'Visual mirroring',
-    body:
-      'The surrounding image are reflecting recurring visual structures ' +
-      'such as shapes, and textures to the selected image.',
-  },
-  component_2: {
     title: 'Historical tracing',
     body:
       'The surrounding image are retracing a lexical subject field based ' +
       'on historical sources linked to the selected image.',
+  },
+  component_2: {
+    title: 'Visual mirroring',
+    body:
+      'The surrounding image are reflecting recurring visual structures ' +
+      'such as shapes, and textures to the selected image.',
   },
   component_3: {
     title: 'Semantic shifting',

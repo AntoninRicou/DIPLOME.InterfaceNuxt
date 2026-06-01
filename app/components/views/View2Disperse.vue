@@ -285,7 +285,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="view view-0">
+  <section class="view view-0 bg-gradient">
     <iframe
       class="project-frame"
       :src="projectUrl"
@@ -338,7 +338,11 @@ onBeforeUnmount(() => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: #000;
+  /* Background paints via the global .bg-gradient class (app.vue) — the
+     same day-gradient as VIEW-1, so the cross-fade no longer reveals a
+     dark backdrop while project's iframe is still loading. Setting
+     `background` here would win against the global class via scoped
+     specificity. */
 }
 
 /* Grid cross — mirrors the cross in VIEW-1 / VIEW-3 / VIEW-4 so the

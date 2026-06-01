@@ -417,7 +417,10 @@ function onMouseEnter(e: MouseEvent) {
    Both screens swell their warm cream shadow then settle, in lockstep,
    right as the labels announce themselves. */
 .corner-label {
-  z-index: 2;
+  /* Above the cells AND above the interpretation veil (.interpret-veil,
+     z: 5) so the Mirror / Trace / Shift / Replay tags stay crisp and visible
+     in interpretation mode rather than being blurred away with the field. */
+  z-index: 6;
   animation: corner-label-glow 3.5s ease-out 1 both;
 }
 
@@ -466,12 +469,16 @@ function onMouseEnter(e: MouseEvent) {
   transition: opacity 240ms ease-out, filter 240ms ease-out;
 }
 
-/* ── interpretation mode field suppression ──
-   single perceptual rule per container: pushed back as a background field. */
+/* ── interpretation mode — reveal the whole field ──
+   Clicking the `+` interpret-control brings every quadrant image to full
+   opacity (and clicking again reverts to the latent field). Cells stay
+   non-interactive (pointer-events off) — this is a perceptual reveal, not
+   a click target. */
 .constellation.suppressed {
   pointer-events: none;
-  opacity: 0.4;
-  filter: blur(1px);
+}
+.constellation.suppressed .cell {
+  opacity: 1;
 }
 
 /* ── overview-confirmed: cells fade out entirely ──
@@ -667,7 +674,8 @@ function onMouseEnter(e: MouseEvent) {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 4;
+  /* above the beige veil (z: 5) so the text reads over the blurred field */
+  z-index: 6;
 }
 
 /* optional alignment override from the data layer; default is centered */

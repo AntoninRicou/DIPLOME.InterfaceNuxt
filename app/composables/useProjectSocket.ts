@@ -124,6 +124,16 @@ export function useProjectSocket() {
     return true
   }
 
+  function setCanvasVeil(active: boolean): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-canvas-veil', active)
+      return false
+    }
+    socket.emit('message', { type: 'set-canvas-veil', payload: { active } })
+    return true
+  }
+
   function setHighlight(id: string | null): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
@@ -212,5 +222,5 @@ export function useProjectSocket() {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCanvasText, setCenterCaption, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCanvasText, setCenterCaption, isConnected }
 }

@@ -38,8 +38,8 @@ const MODES_CAPTION = 'Four modes of proximity, each shaping relations different
 // positions VIEW-4's RelationComponent quarter-tags occupy, so the swap
 // between VIEW_3 → VIEW_4 reads as a continuation, not a new layer.
 const CORNERS = [
-  { position: 'tl', name: 'Mirror' },
-  { position: 'tr', name: 'Trace' },
+  { position: 'tl', name: 'Trace' },
+  { position: 'tr', name: 'Mirror' },
   { position: 'bl', name: 'Shift' },
   { position: 'br', name: 'Replay' },
 ] as const

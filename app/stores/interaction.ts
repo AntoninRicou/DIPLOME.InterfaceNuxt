@@ -4,7 +4,7 @@ import type { ImageId } from '~/types/interaction'
 import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 import { useProjectSocket } from '~/composables/useProjectSocket'
 import { useViewStateStore } from '~/stores/viewState'
-import { view3Interpretations, type View3ComponentId } from '~/view3/view3Interpretations'
+import { view3Interpretations, IMAGE_CREDIT_LINES, type View3ComponentId } from '~/view3/view3Interpretations'
 
 const OVERVIEW_THRESHOLD = 10
 
@@ -183,9 +183,9 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCanvasZoom(canvasIndex, id)
     // Mirror VIEW_3's per-quadrant text fade-in on the corresponding
     // project canvas — same content (title + body from
-    // view3Interpretations), same component-id mapping (canvasIndex
-    // 0..3 → component_1..4). One emission per cross click, matching
-    // the per-cross interface reveal gated on canvasZoomed[i].
+    // view3Interpretations), natural mapping canvasIndex 0..3 →
+    // component_1..4. One emission per cross click, matching the
+    // per-cross interface reveal gated on canvasZoomed[i].
     const componentId = `component_${canvasIndex + 1}` as View3ComponentId
     const { title, body } = view3Interpretations[componentId]
     projectSocket.setCanvasText(canvasIndex, title, body)
@@ -557,6 +557,15 @@ export const useInteractionStore = defineStore('interaction', () => {
         projectSocket.setCanvasText(i, '', '')
       }
     }
+    // Mirror the centred image-credit (the three-line provenance note) on the
+    // project's `#center-caption`, same on/off beat as the quadrant texts.
+    // Joined with newlines; the project caption renders them as three lines.
+    projectSocket.setCenterCaption(
+      view3InterpretationMode.value ? IMAGE_CREDIT_LINES.join('\n') : '',
+    )
+    // Mirror the interface's beige blur veil on the project canvas so the
+    // standalone reads the same "field recedes behind the text" effect.
+    projectSocket.setCanvasVeil(view3InterpretationMode.value)
   }
 
   function setCanvasBackground(mode: 'black' | 'gradient') {

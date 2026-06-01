@@ -19,9 +19,9 @@ const cache = new Map<string, UmapDataset>()
 // corresponding canvas in project renders, so component-N and canvas-N
 // share a coordinate space.
 const COMPONENT_DATASET_FILES: Record<string, string> = {
-  component_1: 'projection_2d.json',
-  component_2: 'umap_book2.json',
-  component_3: 'umap_subjects_embeddings2.json',
+  component_1: 'umap_book2.json',
+  component_2: 'mirror.json',
+  component_3: 'umap_semantic_llm.json',
   component_4: 'umap_replay.json',
 }
 

@@ -3,6 +3,7 @@ import { computed, watch, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
 import CentralImage from '~/components/CentralImage.vue'
+import { IMAGE_CREDIT_LINES } from '~/view3/view3Interpretations'
 
 const store = useInteractionStore()
 const { naturalDimsVmin } = useCentralImageDims()
@@ -94,7 +95,7 @@ function onLeave() {
 <template>
   <section
     class="view view-3"
-    :class="[`bg-${store.canvasBackground}`, { minimal: store.overviewConfirmed }]"
+    :class="[`bg-${store.canvasBackground}`, { minimal: store.overviewConfirmed, interpreting: store.view3InterpretationMode }]"
   >
     <div
       v-if="store.view2ExitReason === 'auto'"
@@ -102,9 +103,20 @@ function onLeave() {
       aria-hidden="true"
     />
 
+    <!-- Single full-field beige blur veil for interpretation mode. One element
+         (not four per-quadrant) so there are no seams between quadrants that
+         would read as a phantom second cross. Sits above the full-opacity
+         cells + grid cross (blurring them into a soft field) but below the
+         interpretation text panels (z: 6) so the quadrant copy stays legible. -->
+    <div
+      v-if="store.view3InterpretationMode && !store.overviewConfirmed"
+      class="interpret-veil"
+      aria-hidden="true"
+    />
+
     <div v-if="!store.overviewConfirmed" class="grid">
-      <RelationComponent component-id="component_1" label="Mirror" position="tl" />
-      <RelationComponent component-id="component_2" label="Trace" position="tr" />
+      <RelationComponent component-id="component_1" label="Trace" position="tl" />
+      <RelationComponent component-id="component_2" label="Mirror" position="tr" />
       <RelationComponent component-id="component_3" label="Shift" position="bl" />
       <RelationComponent component-id="component_4" label="Replay" position="br" />
     </div>
@@ -112,7 +124,7 @@ function onLeave() {
     <div v-if="!store.overviewConfirmed" class="top-controls">
       <button
         class="bg-toggle"
-        :class="{ active: store.canvasBackground === 'black' }"
+        :class="{ active: store.canvasBackground === 'black', revealed: store.view3InterpretationMode }"
         :aria-pressed="store.canvasBackground === 'black'"
         aria-label="night background"
         @click="store.setCanvasBackground('black')"
@@ -130,7 +142,7 @@ function onLeave() {
       </button>
       <button
         class="bg-toggle"
-        :class="{ active: store.canvasBackground === 'gradient' }"
+        :class="{ active: store.canvasBackground === 'gradient', revealed: store.view3InterpretationMode }"
         :aria-pressed="store.canvasBackground === 'gradient'"
         aria-label="day background"
         @click="store.setCanvasBackground('gradient')"
@@ -188,7 +200,10 @@ function onLeave() {
       :class="{ visible: store.view3InterpretationMode }"
       aria-live="polite"
     >
-      No image belong to one place
+      <template v-for="(line, i) in IMAGE_CREDIT_LINES" :key="i">
+        <span :class="{ 'interpret-message-url': i === IMAGE_CREDIT_LINES.length - 1 }">{{ line }}</span>
+        <br v-if="i < IMAGE_CREDIT_LINES.length - 1" />
+      </template>
     </p>
 
 
@@ -257,7 +272,12 @@ function onLeave() {
   position: absolute;
   inset: 5%;
   pointer-events: none;
-  z-index: 5;
+  /* Above the interpretation veil (z: 5) so the beige tint doesn't wash the
+     thin cross line out entirely; still below the central deck (z: 10). In
+     interpretation mode the cross gets its OWN blur (see `.interpreting`
+     below) so it stays a soft, discreet cross instead of vanishing. */
+  z-index: 6;
+  transition: filter 240ms ease-out;
   background:
     linear-gradient(to bottom,
       transparent calc(50% - 0.5px),
@@ -275,6 +295,27 @@ function onLeave() {
    cross is part of "everything else" and gets suppressed too. */
 .view-3.minimal::before {
   display: none;
+}
+/* In interpretation mode the cross stays visible but goes soft — blurred to
+   match the veiled field behind it, never removed. */
+.view-3.interpreting::before {
+  filter: blur(3px);
+}
+/* Interpretation-mode beige blur veil — single full-viewport element so the
+   four quadrants blur into one continuous field (no seams = no phantom
+   cross). z: 5 sits above the cross (z: 4) and the full-opacity cells, below
+   the text panels (z: 6) and the central deck (z: 10 suppressed). */
+.interpret-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  /* Light beige tint — the blur does the heavy lifting for readability; the
+     tint is kept low so the cross (and images) stay faintly visible behind
+     the blur rather than being painted out. */
+  background: rgba(232, 224, 206, 0.32);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  pointer-events: none;
 }
 /* Canvas-background modes live globally in app.vue (`.bg-black` /
    `.bg-gradient`) — shared across all views. .view-3 just applies the
@@ -432,7 +473,8 @@ function onLeave() {
   transform: translate(-50%, -50%);
   margin: 0;
   padding: 0 1.5rem;
-  max-width: 36rem;
+  max-width: 70rem;
+  white-space: nowrap;
   text-align: center;
   font-size: 0.95rem;
   font-weight: 600;
@@ -446,6 +488,9 @@ function onLeave() {
 }
 .interpret-message.visible {
   opacity: 1;
+}
+.interpret-message-url {
+  opacity: 0.8;
 }
 
 .overview-control {
@@ -512,6 +557,17 @@ function onLeave() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* Hidden by default — the background toggles are only revealed once the
+     user clicks the `+` (interpretation mode). They keep their layout slot
+     (opacity, not display) so the `+` stays centred between them. Clicking
+     `+` again hides them. */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms ease-out;
+}
+.bg-toggle.revealed {
+  opacity: 1;
+  pointer-events: auto;
 }
 .bg-toggle .dot {
   /* Square (not circle), sized to match the timeline history squares.

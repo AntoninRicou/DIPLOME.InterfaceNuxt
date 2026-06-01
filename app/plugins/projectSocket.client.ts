@@ -3,13 +3,15 @@ import { useInteractionStore } from '~/stores/interaction'
 
 export default defineNuxtPlugin(() => {
   const {
-    init, onRegister, setState, pathClear, setMask, setCanvasBg,
+    init, onRegister, setState, pathClear, setMask, setCanvasBg, setCanvasVeil,
     setCornerLabels, setCanvasText, setCenterCaption, setMarks,
   } = useProjectSocket()
   onRegister(() => {
     pathClear()
     setState('single')
     setMask(0, 0)
+    // Defensive: interpretation veil off on every (re)connect.
+    setCanvasVeil(false)
     const store = useInteractionStore()
     setCanvasBg(store.canvasBackground)
     // Clear any persistent path marks — a reload/reconnect must not carry

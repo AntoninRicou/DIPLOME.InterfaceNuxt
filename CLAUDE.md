@@ -151,7 +151,7 @@ VIEW_0 → VIEW_1 → VIEW_2 → VIEW_3 → VIEW_4
   flip — no visible change, since the overrides already match split) and
   advances to VIEW_4.
 * **VIEW_4 (RELATIONAL)** — the main relational interface. Project is in
-  `split`. Four named relation components — **Mirror** (tl), **Trace**
+  `split`. Four named relation components — **Trace** (tl), **Mirror**
   (tr), **Shift** (bl), **Replay** (br) — surround the centered image (see
   *VIEW_4 — COMPONENT LAYOUT* and *VIEW_4 — RELATION CASCADE*).
 
@@ -1294,17 +1294,17 @@ The same image therefore generates different proximities depending on the active
 
 The 4 relation components are arranged in a fixed 2×2 grid:
 
-[ Mirror (tl) ] [ Trace (tr)  ]
+[ Trace (tl)  ] [ Mirror (tr) ]
 [ Shift  (bl) ] [ Replay (br) ]
 
 Each component is identified by a position name (`tl` / `tr` / `bl` / `br`,
 matching project's `STATES.split.rects` ordering) and rendered with a
 human-readable label via the `<RelationComponent>` prop `label`:
 
-* **Mirror** (top-left, `component_1`) — visual structures, shapes,
-  textures. Highlights recurring visual form.
-* **Trace** (top-right, `component_2`) — lexical / historical sources
+* **Trace** (top-left, `component_1`) — lexical / historical sources
   linked to the image. Retraces a subject field.
+* **Mirror** (top-right, `component_2`) — visual structures, shapes,
+  textures. Highlights recurring visual form.
 * **Shift** (bottom-left, `component_3`) — semantic embeddings related
   to the image. Shifts the reading laterally through meaning.
 * **Replay** (bottom-right, `component_4`) — previous user selections
@@ -1357,6 +1357,46 @@ When the active central image changes:
 The components therefore behave as reactive renderers of synchronized relational state.
 
 Each component displays different related images even though they originate from the same central image reference.
+
+### Component → UMAP dataset mapping
+
+Proximity resolution lives in
+[`server/utils/mockRelations.ts`](server/utils/mockRelations.ts):
+`loadUmapDataset(componentId)` reads the component's JSON from
+`assets/mock/`, and `pickRelations(dataset, centralImageId, count = 8)`
+returns the Euclidean k-nearest neighbours on `(x, y)` within that single
+dataset (ordering is scale-invariant, so no cross-dataset normalization;
+returns `[]` if the central id isn't in that dataset — routine, since the
+four quadrant datasets don't share id populations).
+
+`COMPONENT_DATASET_FILES` is the authoritative map (each component pulls
+proximity from the same UMAP its sibling canvas renders, so `component_N`
+and `canvas_N` share a coordinate space):
+
+| componentId   | Mode   | Dataset file (`assets/mock/`) |
+| ------------- | ------ | ----------------------------- |
+| `component_1` | Trace  | `umap_book2.json`             |
+| `component_2` | Mirror | `mirror.json`                 |
+| `component_3` | Shift  | `umap_semantic_llm.json`      |
+| `component_4` | Replay | `umap_replay.json`            |
+
+Components are numbered to match their canvas: `component_N` renders on
+`canvas_N` (tl = canvas-1 = `component_1`, tr = canvas-2 = `component_2`,
+bl = canvas-3 = `component_3`, br = canvas-4 = `component_4`). The two top
+modes were swapped at the *definition* level so tl shows **Trace**
+(`component_1`) and tr shows **Mirror** (`component_2`) — i.e. the swap
+lives in what `component_1` / `component_2` mean (dataset, interpretation
+text, label), not in any index remap. `zoomCanvas` and
+`toggleView3Interpretation` in `interaction.ts` therefore map canvasIndex
+0..3 straight to `component_1..4`, `View4Relational` places `component_N`
+at the matching corner, and project's `index.html` corner labels agree —
+so each canvas's text overlay + label matches the proximity it shows.
+
+The dataset loader caches each parsed dataset by componentId. The
+JSON may be either a bare `UmapPoint[]` or a `{ count, method, points }`
+wrapper; both are accepted. The explore-others endpoint
+(`server/api/replay-circles.get.ts`) reuses `loadUmapDataset` +
+`pickRelations` on `component_4`.
 
 ---
 
@@ -2970,12 +3010,21 @@ function setCanvasText(payload) {
 
 ## SET-CENTER-CAPTION — viewport-centred overlay text
 
-`set-center-caption` is the wire directive that paints a single short
-sentence at viewport centre on the project side. It mirrors
-interface_nuxt's `.modes-caption` element (in `View3Transition.vue`)
-exactly, so both screens reveal the line of copy at the same beat —
-currently the 1 s timer that fires after the user clicks the fourth
-VIEW_3 quadrant cross.
+`set-center-caption` is the wire directive that paints centred overlay
+copy at viewport centre on the project side. It has **two consumers**:
+
+* **VIEW_3 modes-caption** — a single short sentence, mirroring
+  interface_nuxt's `.modes-caption` element (in `View3Transition.vue`),
+  revealed by the 1 s timer that fires after the user clicks the fourth
+  VIEW_3 quadrant cross.
+* **VIEW_4 image-credit** — the three-line provenance note (the
+  `IMAGE_CREDIT_LINES` constant in `view3Interpretations.ts`), mirroring
+  interface_nuxt's `.interpret-message`, revealed when the user toggles
+  interpretation mode via the VIEW_4 `+`. The three lines are passed over
+  the wire as a single `\n`-joined string; the project caption renders
+  them as three lines via `white-space: pre` (see *Project-side rendering
+  contract* below). See *VIEW_4 — INTERPRETATION MODE (REVEAL + BLUR
+  VEIL)*.
 
 This is the **eleventh project-side exception**. Scoped tightly: one
 DOM element at body level, a CSS rule, one handler in `commands.js`,
@@ -2991,20 +3040,22 @@ set-center-caption({ text: string })
 * **`text`** — the string to render. Empty string (or missing field)
   clears the caption and hides the element.
 
-Project is content-blind. The copy lives interface-side in
-`View3Transition.vue` as the `MODES_CAPTION` constant, which is
-rendered into the interface `.modes-caption` element and *also* passed
-through `store.setCenterCaption(text)` to the wire.
+Project is content-blind. Both copies live interface-side: the
+`MODES_CAPTION` constant in `View3Transition.vue` and the
+`IMAGE_CREDIT_LINES` constant in `view3Interpretations.ts`, each rendered
+into its own interface element (`.modes-caption` / `.interpret-message`)
+and *also* passed through `store.setCenterCaption(text)` to the wire.
 
 ### Emission rules
 
-Two call sites in `interaction.ts`, both keyed to existing
-interface-side reveals so both screens animate in lockstep:
+Call sites in `interaction.ts`, all keyed to existing interface-side
+reveals so both screens animate in lockstep:
 
 | Moment                                                          | Emission                                                |
 | --------------------------------------------------------------- | -------------------------------------------------------- |
 | 1 s after fourth VIEW_3 quadrant cross click                    | `set-center-caption(MODES_CAPTION)` — fade in.    |
 | VIEW_3 → VIEW_4 advance (`enterRelationalView`)                 | `set-center-caption('')` — clear before VIEW_4 mounts. |
+| VIEW_4 interpret-control toggle (`toggleView3Interpretation`)   | ON → `set-center-caption(IMAGE_CREDIT_LINES.join('\n'))`; OFF → `set-center-caption('')`. Same beat as the four `set-canvas-text` calls + `set-canvas-veil`. |
 
 Emissions are independent of `set-state`, `focus`, path directives,
 and the per-canvas `set-canvas-text`. The caption is a pure perceptual
@@ -3021,12 +3072,16 @@ never touches camera state, point system, or path renderer.
 ```
 
 `#center-caption` CSS in `project/src/style.css` mirrors interface's
-`.modes-caption` typography (serif, colour `#595b54`, single-line
-`white-space: nowrap`, same font size + line height) and pins itself
-to viewport centre via `position: fixed; top/left: 50%;
-transform: translate(-50%, -50%)`. Fades on opacity only, gated by a
-`.visible` class. `z-index: 1001` sits above `render-mask` so the
-caption is never veiled.
+`.modes-caption` typography (serif, colour `#595b54`, same font size +
+line height) and pins itself to viewport centre via `position: fixed;
+top/left: 50%; transform: translate(-50%, -50%)`. Fades on opacity only,
+gated by a `.visible` class. `z-index: 1001` sits above `render-mask`
+**and** the interpretation veil (`#render-veil`, z: 5) so the caption is
+never veiled. `white-space: pre` so a `\n`-joined caption (the VIEW_4
+image-credit) breaks into exactly N lines with no wrapping — the block
+auto-grows to the widest line, mirroring the interface's `nowrap` +
+`<br>`; the single-line VIEW_3 modes-caption (no newlines) stays one
+line, unaffected.
 
 On wire receipt of `set-center-caption(payload)`:
 
@@ -3062,6 +3117,101 @@ function setCenterCaption(payload) {
   caption slot at a time. Reuse is fine — emit a new `text` and it
   replaces the previous one — but two concurrent centred captions
   would require a second slot.
+
+---
+
+## VIEW_4 — INTERPRETATION MODE (REVEAL + BLUR VEIL)
+
+The top-centre `+` (`.interpret-control` in `View4Relational.vue`) toggles
+`store.view3InterpretationMode`. The mode is a **read-the-field** overlay:
+the relational images are brought to full opacity and the whole field
+recedes behind a warm blurred veil so the interpretation text becomes the
+readable foreground. Toggling `+` again reverts everything. The same beat
+mirrors onto the project canvas.
+
+### What the toggle drives (interface)
+
+* **Quadrant images → full opacity.** `.constellation.suppressed .cell`
+  is set to `opacity: 1` (was the latent `0.05`). The earlier behaviour —
+  dimming the whole constellation to `0.4` + blur, which made the images
+  *vanish* on top of their latent opacity — is removed.
+* **Single full-field beige blur veil.** One `.interpret-veil` element
+  (`v-if="store.view3InterpretationMode && !store.overviewConfirmed"`) at
+  the `View4Relational` root, `position: absolute; inset: 0; z-index: 5`,
+  `background: rgba(232, 224, 206, 0.32)` + `backdrop-filter: blur(7px)`.
+  It is **one** element on purpose — an earlier per-quadrant
+  (`.rel.is-inert::after`) version produced seams between the four veils
+  that read as a phantom second cross. The light tint + the blur do the
+  readability work; the tint is kept low so the cross and images stay
+  faintly visible rather than being painted out.
+* **The grid cross stays visible but soft.** `.view-3::before` is lifted
+  to `z-index: 6` (above the veil, so the beige tint can't wash the thin
+  1 px line out) and, in interpretation mode, gets its **own**
+  `filter: blur(3px)` via `.view-3.interpreting::before` (the root carries
+  an `interpreting` class bound to the mode). A 1 px line under the veil's
+  `backdrop-filter` blur disappears entirely — hence the own-blur approach
+  instead of letting the veil blur it. `transition: filter 240ms`.
+* **Corner labels stay crisp.** `RelationComponent`'s `.corner-label` is at
+  `z-index: 6` (above the veil) so Mirror / Trace / Shift / Replay remain
+  legible; the interpretation text panels are at `z-index: 6` too.
+* **Centred image-credit.** The `.interpret-message` `<p>` renders the
+  three `IMAGE_CREDIT_LINES` (`view3Interpretations.ts`) separated by
+  `<br>`, the last line (the Flickr URL) at `opacity: 0.8`
+  (`.interpret-message-url`). `white-space: nowrap` + a wide `max-width`
+  keep each sentence on its own line.
+* **Background toggles revealed by the same `+`.** The two `.bg-toggle`
+  dots (night / day) are `opacity: 0; pointer-events: none` by default and
+  gain a `revealed` class (→ `opacity: 1; pointer-events: auto`) only while
+  `view3InterpretationMode` is true — so they are reachable only after the
+  user opens interpretation mode, and hide again on the next `+`. They keep
+  their layout slot (opacity, not `display`) so the `+` stays centred.
+
+### z-layering (interpretation mode)
+
+| Layer                         | z-index | Blurred by veil? |
+| ----------------------------- | ------- | ---------------- |
+| cells (full opacity)          | 1–4     | yes (below veil) |
+| `.interpret-veil`             | 5       | —                |
+| grid cross (`.view-3::before`)| 6       | no — own `blur(3px)` |
+| corner labels, text panels    | 6       | no               |
+| central deck (`.center-anchor.suppressed`) | 10 | no (dimmed separately) |
+| `.interpret-message`          | 11      | no               |
+
+### Project mirror
+
+`toggleView3Interpretation` (in `interaction.ts`) emits, on the **same**
+on/off beat, three things to the project canvas:
+
+1. `set-canvas-text(i, title, body)` ×4 — the per-quadrant interpretation
+   copy (see *SET-CANVAS-TEXT*).
+2. `set-center-caption(IMAGE_CREDIT_LINES.join('\n'))` — the three-line
+   credit at viewport centre (see *SET-CENTER-CAPTION*; `white-space: pre`
+   renders the three lines).
+3. `set-canvas-veil(active)` — the beige blur veil (project-side exception
+   #14). Project shows `<div id="render-veil">` (`z-index: 5`,
+   `rgba(232, 224, 206, 0.32)` + `blur(7px)`) and sets
+   `body[data-veil="on"]`; the cross (`body::before`) is lifted to
+   `z-index: 6` with its own `body[data-veil="on"]::before { filter:
+   blur(3px) }`, and corner labels (z: 6) / canvas-text (z: 7) /
+   center-caption (z: 1001) stay crisp above the veil — exactly mirroring
+   the interface layering. Cleared (`set-canvas-veil(false)`) defensively
+   on every register in the boot handshake.
+
+OFF clears all of the above (empty texts, empty caption, veil off).
+
+### Invariants
+
+* `IMAGE_CREDIT_LINES` is the **single source of truth** for the credit —
+  rendered by the interface `.interpret-message` and emitted to the project
+  `#center-caption`. Both screens always show the same copy.
+* The veil is **client-only visual state** on each side; never persisted,
+  never on the wire beyond the per-event `set-canvas-veil` directive.
+* The `+` toggle owns the entire reveal: images-to-full-opacity, veil,
+  cross-blur, credit, bg-toggle reveal, and the three project emissions are
+  all flipped together by `view3InterpretationMode` / a single
+  `toggleView3Interpretation` call.
+* Interpretation mode is gated to `!overviewConfirmed` (the `+`, the veil,
+  and the message all disappear once overview is confirmed).
 
 ---
 
@@ -3115,6 +3265,42 @@ If project's gradient values change in `style.css`, the two app.vue
 classes must update with them. This is the single point of duplication;
 it exists because the two systems must visually agree as one
 atmosphere.
+
+### Cross-fade smoothness — body wears the gradient too
+
+Vue's view-component swap uses an opacity cross-fade (`<Transition>` in
+`pages/index.vue`, ~350ms). Mid-fade both views are at ~50% opacity and
+the **body** shows through at ~25%. If body has its default white
+backdrop, that 25% white injection reads as a brief "cut" or flash
+between every view transition — most visible on VIEW-1 → VIEW-2 and
+VIEW-2 → VIEW-3.
+
+Fix: paint the *same* day-gradient stack onto `body` in app.vue (a third
+copy, alongside `.bg-gradient` and project's
+`body[data-canvas-bg="gradient"]`). Mid-fade the body now contributes the
+same gradient that the views are themselves blending — net visual change
+across the fade is zero. The duplication is intentional and the price of
+the fix; folding it into a single shared source (e.g., a CSS custom
+property holding the gradient string) is a future cleanup.
+
+Two structural rules follow from this fix:
+
+1. **Views must not declare their own scoped `background` on the root
+   that carries `.bg-*`.** A scoped declaration wins over the global
+   class via Vue's data-attribute specificity bump (the same bug we hit
+   on VIEW-3 earlier), and during loading states it leaks a non-gradient
+   color through the fade. Example bug, since fixed: VIEW-2's iframe
+   loader had `background: #000` as a fallback while project's canvas
+   was loading; during the VIEW-1 → VIEW-2 fade this black showed
+   through both translucent layers as a dark cut. Removing the scoped
+   `background` and trusting the global class eliminates the leak.
+2. **The body gradient currently follows VIEW-1 / VIEW-2 / VIEW-3's
+   hardcoded `gradient` mode, not VIEW-4's toggleable
+   `store.canvasBackground`.** VIEW-4 is terminal (no further cross-fade
+   out of it), so this is acceptable. If a future view does cross-fade
+   out of VIEW-4's `night` mode, the body would need to follow the
+   store too — done by toggling a class on `<body>` from JS, since CSS
+   can't bind to a store value directly.
 
 ### Grid cross mirrored from project
 
@@ -3489,7 +3675,7 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with thirteen explicit exceptions**:
+Do not modify project, **with fourteen explicit exceptions**:
 
 1. The user-driven path-rendering directive surface inside `project` —
    `path-segment`, `path-truncate`, and the `pathTrace` primitive they
@@ -3638,8 +3824,22 @@ Do not modify project, **with thirteen explicit exceptions**:
     circle's path. Pure perceptual emphasis — no camera move, no state
     change, no path mutation. See *VIEW_4 — OVERVIEW FINALE & EXPLORE-
     OTHERS*.
+14. The **interpretation-mode blur veil surface** — `set-canvas-veil({ active })`,
+    the `<div id="render-veil">` DOM element at body level in
+    `project/index.html`, the `#render-veil` + `body[data-veil="on"]::before`
+    rules in `project/src/style.css`, and `actions.setCanvasVeil` in
+    `commands.js` (which toggles `#render-veil.visible` AND the
+    `body[data-veil]` attribute). A beige blurred overlay that mirrors
+    interface_nuxt's `.interpret-veil` so the standalone canvas reads the
+    same "field recedes behind the centred credit" effect when the user
+    toggles interpretation mode via the VIEW_4 `+`. Driven by interface
+    emissions in `toggleView3Interpretation` (on/off with the canvas-text +
+    centre-caption) and cleared defensively on every register in the boot
+    handshake. Pure DOM/CSS overlay — no render-loop, state-machine, or
+    interaction-logic participation. See *VIEW_4 — INTERPRETATION MODE
+    (REVEAL + BLUR VEIL)*.
 
-All thirteen exceptions are scoped tightly: pure rendering / configuration
+All fourteen exceptions are scoped tightly: pure rendering / configuration
 surfaces driven by explicit `interface_nuxt` directives (or, in the
 VIEW_2 embed case, by an out-of-band `postMessage` channel for the
 canvas-pick input). No project-side interpretation, derivation, or
