@@ -7,7 +7,7 @@ const store = useInteractionStore()
 
 const PANELS = [
   'Proxima is a tool for exploration of a visual corpus through modes of proximity.',
-  'It allows you to engage with images for alternative perspectives.',
+  'It allows to engage with images for alternative perspectives.',
 ]
 // PANEL_MS and FADE_OUT_MS are shared with View3Transition via the
 // `~/utils/rotateText` constants so both rotating-text components
@@ -74,7 +74,7 @@ onBeforeUnmount(() => {
          duration; only the appear adds its 1400ms hold and the enter
          adds its 600ms empty-beat delay. -->
     <Transition name="caption" mode="out-in" appear>
-      <p v-if="captionVisible" :key="index" class="caption">{{ PANELS[index] }}</p>
+      <p v-if="captionVisible" :key="index" class="caption"><span class="caption-text">{{ PANELS[index] }}</span></p>
     </Transition>
   </section>
 </template>
@@ -187,17 +187,40 @@ onBeforeUnmount(() => {
 }
 
 .caption {
-  top: 4vh;
+  /* Centred in the viewport (was top: 4vh). Overrides the translateX-only
+     transform from the shared `.caption, .skip` rule above so the box is
+     centred on both axes; the fade hooks are opacity-only so this won't
+     fight the transitions. */
+  top: 50%;
+  transform: translate(-50%, -50%);
   /* One line per sentence: no wrap, width grows to the text. */
   max-width: none;
   white-space: nowrap;
   margin: 0;
-  padding: 0 1.5rem;
-  font-size: var(--label-size);
-  line-height: 1.3;
+  padding: 0;
+  font-size: var(--rotate-size);
+  line-height: 1.5;
   text-align: center;
   /* No animation here — Vue <Transition name="caption"> drives every
      fade via the caption-appear/enter/leave classes above. */
+}
+
+/* Organic backing that traces the text glyphs (not a box): a layered
+   text-shadow in the blue-grey panel colour (80% opacity, set on
+   --rotate-panel-bg) builds a soft "stroke" hugging the letterforms, so the
+   fill reads as part of the text shape rather than a rectangle behind the
+   line. Tight inner layers give it body; the wider layers feather out. */
+.caption-text {
+  text-shadow:
+    0 0 4px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 15px var(--rotate-panel-bg),
+    0 0 18px var(--rotate-panel-bg);
 }
 
 .skip {

@@ -21,6 +21,6 @@ export const ROTATE_PANEL_MS = 4000
 
 /** How long the leave animation takes before the script triggers the
  *  next view advance. MUST equal `--rotate-fade-ms` in app.vue's `:root`
- *  (currently 500ms) since this drives the setTimeout that delays
+ *  (currently 400ms) since this drives the setTimeout that delays
  *  `enterEntryView()` until the leave animation finishes. */
-export const ROTATE_FADE_OUT_MS = 500
+export const ROTATE_FADE_OUT_MS = 400

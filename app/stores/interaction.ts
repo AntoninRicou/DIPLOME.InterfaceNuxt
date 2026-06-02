@@ -222,18 +222,72 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCornerLabels(false)
     for (let i = 0; i < 4; i++) projectSocket.setCanvasText(i, '', '')
     projectSocket.setCenterCaption('')
-    // Hidden-morph on the project screen: gradient mask fades in to
-    // cover the canvases, single → overview morph runs entirely behind
-    // the opaque mask, a HOLD buffer absorbs socket/tick slop so the
-    // morph fully settles before the reveal, then the mask fades out.
-    // Without the HOLD, the morph tail leaks into the reveal frame.
+    // Hidden-morph on the project screen, revealed IN SYNC with the VIEW_2
+    // disperse spawn. The gradient mask fades to opaque, the single →
+    // overview change is applied INSTANTLY (MORPH_MS = 0) so the four-canvas
+    // grid snaps fully into place behind the opaque mask (the user never
+    // sees the rect-reshape morph), then the mask fades out to reveal the
+    // settled grid — but the reveal is held until the iframe's disperse
+    // burst actually begins, so the standalone project lights up at the same
+    // moment the spawning sprites appear on the interface.
+    //
+    // The reveal fires from `maybeRevealOverview()` only once BOTH are true:
+    //   - the grid has snapped (`overviewSnapDone`) — so the reveal can never
+    //     expose the in-flight snap, even if the iframe bursts very early;
+    //   - the disperse burst has begun (`disperseSpawned`, set by
+    //     `notifyDisperseSpawned()` from the iframe's `view0:dispersed`
+    //     postMessage).
+    // A fallback marks the burst "spawned" after REVEAL_FALLBACK_MS so a
+    // missing signal (embed disabled, load failure) can't hang the reveal.
     const FADE_IN_MS = 250
-    const MORPH_MS = 350
-    const HOLD_MS = 300
-    const FADE_OUT_MS = 500
+    const MORPH_DELAY_MS = 80
+    const FADE_OUT_MS = 400
+    const REVEAL_FALLBACK_MS = 1800
+
+    overviewSnapDone = false
+    disperseSpawned = false
+    overviewRevealed = false
+    overviewRevealFadeMs = FADE_OUT_MS
+    if (revealFallbackTimer !== null) clearTimeout(revealFallbackTimer)
+
     projectSocket.setMask(1, FADE_IN_MS)
-    setTimeout(() => projectSocket.setState('overview', MORPH_MS), FADE_IN_MS)
-    setTimeout(() => projectSocket.setMask(0, FADE_OUT_MS), FADE_IN_MS + MORPH_MS + HOLD_MS)
+    setTimeout(() => {
+      projectSocket.setState('overview', 0)
+      overviewSnapDone = true
+      maybeRevealOverview()
+    }, FADE_IN_MS + MORPH_DELAY_MS)
+    revealFallbackTimer = setTimeout(() => {
+      disperseSpawned = true
+      maybeRevealOverview()
+    }, REVEAL_FALLBACK_MS)
+  }
+
+  // ── VIEW_1 → VIEW_2 overview-reveal coordination ──
+  // The standalone project's overview reveal (mask fade-out) is gated on two
+  // independent events so it lands exactly as the VIEW_2 disperse sprites
+  // spawn — see enterEntryView.
+  let overviewSnapDone = false
+  let disperseSpawned = false
+  let overviewRevealed = false
+  let overviewRevealFadeMs = 400
+  let revealFallbackTimer: ReturnType<typeof setTimeout> | null = null
+
+  function maybeRevealOverview() {
+    if (overviewRevealed) return
+    if (!overviewSnapDone || !disperseSpawned) return
+    overviewRevealed = true
+    if (revealFallbackTimer !== null) {
+      clearTimeout(revealFallbackTimer)
+      revealFallbackTimer = null
+    }
+    projectSocket.setMask(0, overviewRevealFadeMs)
+  }
+
+  // Called by View2Disperse when the iframe posts `view0:dispersed` (the
+  // disperse burst has begun). Triggers the project overview reveal in sync.
+  function notifyDisperseSpawned() {
+    disperseSpawned = true
+    maybeRevealOverview()
   }
 
   function selectImage(id: ImageId) {
@@ -367,14 +421,21 @@ export const useInteractionStore = defineStore('interaction', () => {
   // flash to full opacity, hold, then fade out one-by-one in clockwise
   // order; only then does confirmOverview fire (→ the circle of 10 reveals).
   // The central image + all interaction are frozen for the duration.
-  // OVERVIEW_DISSOLVE_SWEEP_MS is the clockwise spread (matched in
-  // RelationComponent's per-cell dissolve delay); FADE is the per-cell fade.
+  // The clock-effect dissolve: SWEEP is the clockwise hand (per-cell delay
+  // spread, matched in RelationComponent's `--dissolve-delay`). Each cell's
+  // own fade lives in CSS only (`.finale-dissolve .cell` → opacity 200ms);
+  // it's not a JS timing input. The clockwise hand finishes at bright + SWEEP
+  // (= 5100ms) — THAT is when the `fadeout` phase begins and the central deck,
+  // the grid cross, AND the corner labels all fade out TOGETHER (deck via
+  // `.center-anchor.deck-fadeout`, cross + labels via `.finale-fadeout`
+  // rules). The last cell's 200ms fade tail runs out just after, so the
+  // visual dissolve spans bright..bright+SWEEP+200 (1200..5300 = 4100ms).
   const OVERVIEW_BRIGHT_MS = 1200
-  const OVERVIEW_DISSOLVE_SWEEP_MS = 4000
-  const OVERVIEW_DISSOLVE_FADE_MS = 800
-  // After the quadrants have disappeared, the central image deck fades out
-  // smoothly before the circle reveals (no size jump from deck → ring) — a
-  // clean fade-out cut between the disappearance and the circle.
+  const OVERVIEW_DISSOLVE_SWEEP_MS = 3900
+  // After the quadrants have disappeared, the central deck + cross + corner
+  // labels fade out together over this window (matches the 700ms CSS fades on
+  // `.center-anchor.deck-fadeout`, `.view-3.finale-fadeout::before`, and
+  // `.rel.finale-fadeout .corner-label`) before confirmOverview fires.
   const OVERVIEW_FADEOUT_MS = 800
   // "See your path" appears this long after the circle has revealed.
   const SEE_YOUR_PATH_DELAY_MS = 6000
@@ -387,18 +448,21 @@ export const useInteractionStore = defineStore('interaction', () => {
   function startOverviewFinale() {
     if (!overviewEligible.value) return
     if (overviewFinalePhase.value !== 'idle') return
-    const dissolveEnd = OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_SWEEP_MS + OVERVIEW_DISSOLVE_FADE_MS
+    // Fadeout begins when the clockwise hand completes (bright + SWEEP), NOT
+    // when the last cell's fade tail ends — so the deck/cross/labels start
+    // leaving exactly as the sweep reaches the final cell.
+    const fadeoutStart = OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_SWEEP_MS
     overviewFinalePhase.value = 'bright'
     finaleTimers.push(setTimeout(() => {
       overviewFinalePhase.value = 'dissolve'
     }, OVERVIEW_BRIGHT_MS))
     finaleTimers.push(setTimeout(() => {
       overviewFinalePhase.value = 'fadeout'
-    }, dissolveEnd))
+    }, fadeoutStart))
     finaleTimers.push(setTimeout(() => {
       confirmOverview()
       overviewFinalePhase.value = 'idle'
-    }, dissolveEnd + OVERVIEW_FADEOUT_MS))
+    }, fadeoutStart + OVERVIEW_FADEOUT_MS))
   }
 
   function confirmOverview() {
@@ -577,8 +641,11 @@ export const useInteractionStore = defineStore('interaction', () => {
   // viewport. Called from the 1s timer after the fourth quadrant cross.
   // Pass empty string to clear (done in `enterRelationalView` on VIEW_4
   // entry).
-  function setCenterCaption(text: string) {
-    projectSocket.setCenterCaption(text)
+  // `variant` is forwarded to project: 'rotate' styles the caption like the
+  // interface rotating intro (VIEW_2/VIEW_3 mirror); 'default' (modes-caption,
+  // image-credit) keeps project's plain center-caption style.
+  function setCenterCaption(text: string, variant: 'default' | 'rotate' = 'default') {
+    projectSocket.setCenterCaption(text, variant)
   }
 
   // Transient perception primitive. Highlights an id on the project canvas
@@ -624,6 +691,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     historyHasPrevious,
     historyHasForward,
     enterEntryView,
+    notifyDisperseSpawned,
     selectImage,
     enterRelationalView,
     activateCentral,

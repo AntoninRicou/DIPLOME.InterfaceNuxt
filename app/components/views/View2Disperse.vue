@@ -3,11 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import AtlasThumb from '~/components/AtlasThumb.vue'
 import type { ImageId } from '~/types/interaction'
-import { ROTATE_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
+import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 // Rotating intro caption — same Vue <Transition> + shared --rotate-*
 // timing as View1Explanation `.caption` and View3Transition
-// `.intro-caption`. Two sentences cycle every ROTATE_PANEL_MS; on the
+// `.intro-caption`. Two sentences cycle every ENTRY_PANEL_MS (5000ms); on the
 // last sentence the timer stops and the caption sits visible until
 // the user clicks a sprite in the iframe. The click triggers a
 // smooth fade-out (entryCaptionVisible → false) before viewState
@@ -25,13 +25,31 @@ import { ROTATE_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 // is read from `--rotate-appear-delay` minus `--rotate-empty-beat` at
 // runtime, so any CSS-var tweak in :root automatically propagates here.
 const ENTRY_PANELS = [
-  "Here's a corpus from scientific and encyclopedic publications (15th–20th century), structured to classify and organize knowledge within Western systems.",
-  'Engage with this corpus through alternative readings and contribute to Proxima.',
+  'This corpus comes from scientific and encyclopedic books published between the 15th and 20th centuries.',
+  'It was structured within a single dominant Western system of vision to classify and organize knowledge.',
+  'Select an image to initiate exploration.',
 ]
 const entryIndex = ref(0)
 const entryCaptionVisible = ref(false) // gated by setTimeout below — see comment block
+// On image click, the disperse field (iframe sprites) fades out smoothly
+// BEFORE the view advances to VIEW_3, so the swap happens from a calm
+// gradient instead of cross-fading busy moving sprites into VIEW_3's layout
+// (which read as harsh). Mirrors the mask-cover smoothing on the VIEW_1 →
+// VIEW_2 step. The pinned preview of the clicked image is intentionally NOT
+// faded here — it stays as a visual anchor through the swap.
+const entryExiting = ref(false)
+const ENTRY_EXIT_MS = 500
+// Sprite interaction (hover preview/highlight + click-to-select) is gated
+// OFF until the rotating intro text has fully finished — so the user reads
+// the corpus intro before the canvas becomes interactive. This is LINKED to
+// the rotation, not a parallel timer: it flips true from inside the same
+// last-sentence branch of `entryTimer` (below), delayed by the shared
+// ROTATE_FADE_OUT_MS so it lands exactly when the last sentence has faded
+// out. Change the 5000ms hold / ENTRY_PANELS and this moves with them.
+const interactionReady = ref(false)
 let entryTimer: ReturnType<typeof setInterval> | null = null
 let entryFirstShowTimer: ReturnType<typeof setTimeout> | null = null
+let interactionReadyTimer: ReturnType<typeof setTimeout> | null = null
 
 function clearEntryTimer() {
   if (entryTimer) {
@@ -41,6 +59,10 @@ function clearEntryTimer() {
   if (entryFirstShowTimer) {
     clearTimeout(entryFirstShowTimer)
     entryFirstShowTimer = null
+  }
+  if (interactionReadyTimer) {
+    clearTimeout(interactionReadyTimer)
+    interactionReadyTimer = null
   }
 }
 
@@ -205,7 +227,16 @@ function onMessage(event: MessageEvent) {
   }
   const data = event.data as { type?: string; imageId?: unknown; x?: unknown; y?: unknown } | null
   if (!data) return
+  if (data.type === 'view0:dispersed') {
+    // The iframe's disperse burst has begun — release the standalone
+    // project's overview reveal so it lights up in sync with the spawning
+    // sprites here.
+    store.notifyDisperseSpawned()
+    return
+  }
   if (data.type === 'view0:image-hover') {
+    // Hover preview/highlight is inert until the intro text has finished.
+    if (!interactionReady.value) return
     const next = typeof data.imageId === 'string' ? data.imageId : null
     store.setHighlight(next)
     if (next != null && next !== lastHoverId) {
@@ -223,20 +254,19 @@ function onMessage(event: MessageEvent) {
     return
   }
   if (data.type === 'view0:image-click') {
+    // Selecting an image is inert until the intro text has finished.
+    if (!interactionReady.value) return
     if (typeof data.imageId !== 'string') return
+    if (entryExiting.value) return // ignore further clicks once the exit began
     const id = data.imageId
     // Stop any running rotation timer regardless of caption state.
     clearEntryTimer()
-    if (entryCaptionVisible.value) {
-      // Caption still visible — fade it out first, then advance.
-      // Mirrors VIEW_1's advance() fade-then-advance pattern.
-      entryCaptionVisible.value = false
-      setTimeout(() => store.selectImage(id), ROTATE_FADE_OUT_MS)
-    } else {
-      // Caption already faded (timer-driven fade-out completed
-      // before user clicked). Advance immediately.
-      store.selectImage(id)
-    }
+    // Fade the caption (if still up) and the disperse field out together,
+    // then advance once the field has calmed. The clicked image's pinned
+    // preview stays visible as an anchor through the fade + view swap.
+    entryCaptionVisible.value = false
+    entryExiting.value = true
+    setTimeout(() => store.selectImage(id), ENTRY_EXIT_MS)
   }
 }
 
@@ -258,7 +288,7 @@ onMounted(() => {
   // Rotation timer — same tick rhythm as VIEW_1's panel timer.
   // Advances entryIndex through ENTRY_PANELS, and on the tick AFTER
   // the last sentence arrives (i.e. once the last sentence has had
-  // its full ROTATE_PANEL_MS display time) fires its fade-out by
+  // its full 5000ms display time) fires its fade-out by
   // flipping entryCaptionVisible to false. The view itself doesn't
   // auto-advance — the user still needs to click a sprite — but the
   // caption clears the way so the canvas reads cleanly.
@@ -269,14 +299,38 @@ onMounted(() => {
         entryTimer = null
       }
       entryCaptionVisible.value = false
+      // Open sprite interaction once the last sentence has fully faded out
+      // (ROTATE_FADE_OUT_MS = the leave-fade duration). Linked to the same
+      // branch that ends the text — no separate cadence to keep in sync.
+      interactionReadyTimer = setTimeout(() => {
+        interactionReady.value = true
+        interactionReadyTimer = null
+      }, ROTATE_FADE_OUT_MS)
       return
     }
     entryIndex.value += 1
-  }, ROTATE_PANEL_MS)
+  }, 5000) /* VIEW_2 hold: 5000ms (longer than VIEW_1/3 shared 4000ms); fade stays shared --rotate-fade-ms */
 })
+// Mirror the rotating entry caption onto the project canvas (the feedback
+// screen) so both screens show the same intro sentence — and fade in/out
+// SIMULTANEOUSLY. The emissions are driven by the caption's own <Transition>
+// enter/leave hooks (not a watch), so they fire at the exact moment the
+// interface caption begins each fade; project's `#center-caption.rotate` uses
+// the same `--rotate-*` duration/easing/empty-beat, so the two fades match.
+// `variant: 'rotate'` styles the project caption like the interface.
+// Project is in `overview` during VIEW_2, so its caption guard is satisfied.
+function onCaptionEnter() {
+  store.setCenterCaption(ENTRY_PANELS[entryIndex.value] ?? '', 'rotate')
+}
+function onCaptionLeave() {
+  store.setCenterCaption('', 'rotate')
+}
+
 onBeforeUnmount(() => {
   window.removeEventListener('message', onMessage)
   clearEntryTimer()
+  // Clear the mirrored caption so it doesn't linger on project into VIEW_3.
+  store.setCenterCaption('')
   if (rafHandle != null) {
     cancelAnimationFrame(rafHandle)
     rafHandle = null
@@ -285,7 +339,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="view view-0 bg-gradient">
+  <section class="view view-0 bg-gradient" :class="{ 'is-exiting': entryExiting }">
     <iframe
       class="project-frame"
       :src="projectUrl"
@@ -299,13 +353,13 @@ onBeforeUnmount(() => {
          comment block for why VIEW_2 needs this workaround. The
          enter-* classes still handle the actual fade timing via
          `--rotate-empty-beat` + `--rotate-fade-ms`. -->
-    <Transition name="entry" mode="out-in">
+    <Transition name="entry" mode="out-in" @enter="onCaptionEnter" @leave="onCaptionLeave">
       <p
         v-if="entryCaptionVisible"
         :key="entryIndex"
         class="entry-caption"
       >
-        {{ ENTRY_PANELS[entryIndex] }}
+        <span class="caption-text">{{ ENTRY_PANELS[entryIndex] }}</span>
       </p>
     </Transition>
     <!-- Spawn-and-fade hover previews. Each preview is anchored to the
@@ -381,6 +435,15 @@ onBeforeUnmount(() => {
   height: 100%;
   border: 0;
   display: block;
+  /* On image click, the disperse field fades out smoothly (.is-exiting)
+     before the view advances to VIEW_3, so the swap reads as a calm
+     gradient → VIEW_3 fade rather than a harsh overlap of moving sprites
+     and the new layout. Duration matches ENTRY_EXIT_MS in <script>. */
+  transition: opacity 500ms ease;
+}
+.view-0.is-exiting .project-frame {
+  opacity: 0;
+  pointer-events: none;
 }
 .preview {
   position: absolute;
@@ -402,18 +465,40 @@ onBeforeUnmount(() => {
    iframe and the hover previews. */
 .entry-caption {
   position: absolute;
-  top: 4vh;
+  /* Centred in the viewport (was top: 4vh), over the disperse canvas. */
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   margin: 0;
-  padding: 0 1.5rem;
-  max-width: 60vw;
-  font-size: var(--label-size);
-  line-height: 1.3;
+  padding: 0;
+  /* Wide enough that the long corpus sentence wraps to ~2 lines (not 3-4).
+     `em` ties the wrap to the font-size; the vw cap keeps it inside narrow
+     viewports. */
+  max-width: min(46em, 88vw);
+  font-size: var(--rotate-size);
+  line-height: 1.5;
   text-align: center;
   color: #595b54;
   z-index: 12;
   pointer-events: none;
+}
+
+/* Organic backing that traces the text glyphs (not a box) — layered
+   text-shadow in the blue-grey panel colour hugs the letterforms across the
+   wrapped lines, reading as a soft text-shaped stroke rather than a 60vw
+   rectangle. Matches VIEW_1 `.caption-text` / VIEW_3 `.intro-caption
+   .caption-text`. */
+.entry-caption .caption-text {
+  text-shadow:
+    0 0 4px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 15px var(--rotate-panel-bg),
+    0 0 18px var(--rotate-panel-bg);
 }
 
 /* Vue <Transition name="entry"> CSS hooks — opacity-only fades using

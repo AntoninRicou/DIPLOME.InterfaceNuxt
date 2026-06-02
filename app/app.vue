@@ -43,13 +43,30 @@
    in both axes. overflow: hidden on body prevents any inner element from
    reintroducing scroll at the document level. */
 :root {
-  /* Single source of truth for the "label tier" font-size — corner labels,
-     rotating intro text (.caption in VIEW_1, .intro-caption in VIEW_2), and
-     the per-quadrant title texts (.proximity-panel-title here,
+  /* Single source of truth for the "label tier" font-size — corner labels
+     and the per-quadrant title texts (.proximity-panel-title here,
      .canvas-text-title in project) must all share this size. Style (weight,
      italic, letter-spacing) is independent — only size is locked. Edit here
-     AND in project/src/style.css's :root in lockstep. */
+     AND in project/src/style.css's :root in lockstep.
+     NOTE: the rotating intro captions (.caption / .entry-caption /
+     .intro-caption) used to share this size, but were DECOUPLED — they now
+     use --rotate-size (below) so they can be sized + panelled independently
+     of the corner labels/titles. */
   --label-size: 1.15rem;
+
+  /* Rotating intro caption presentation — single source of truth for the
+     centred, panelled rotating text in VIEW_1 (.caption), VIEW_2
+     (.entry-caption), and VIEW_3 (.intro-caption). Interface size is 1.7rem;
+     the project-side mirror (#center-caption.rotate) is intentionally larger
+     (2× --label-size) — the user preferred the bigger size on the feedback
+     screen. Stays its OWN var so it can be retuned without touching the
+     corner labels / titles.
+     The backing is a light blue-grey at 90% opacity that traces the text
+     glyphs themselves — a soft organic "stroke" hugging the letterforms via a
+     layered `text-shadow` on the inner `.caption-text` span (NOT a rectangle
+     behind the line). */
+  --rotate-size: 1.7rem;
+  --rotate-panel-bg: rgba(170, 180, 194, 0.9);
 
   /* Project-wide blue-gray text halo. Two-tier composition: 3 tight
      overlapping layers at full alpha build a solid muted blue-gray core
@@ -65,9 +82,11 @@
      Both views reference these vars in their .caption-* and .intro-*
      transition classes; changing one value here propagates to both.
      Keep the JS-side FADE_OUT_MS constant in each view's <script setup>
-     in sync with --rotate-fade-ms (currently 500ms), since that
-     setTimeout drives when the next view advance fires. */
-  --rotate-fade-ms: 500ms;
+     in sync with --rotate-fade-ms (currently 400ms), since that
+     setTimeout drives when the next view advance fires. Used for BOTH the
+     fade-in and fade-out of every rotating caption (all three views want
+     400ms each), and mirrored in project/src/style.css's :root. */
+  --rotate-fade-ms: 400ms;
   --rotate-fade-easing: cubic-bezier(0.25, 0.46, 0.45, 0.94);
   --rotate-appear-delay: 1400ms;
   --rotate-empty-beat: 200ms;

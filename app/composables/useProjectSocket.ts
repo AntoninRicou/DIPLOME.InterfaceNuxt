@@ -208,13 +208,16 @@ export function useProjectSocket() {
     return true
   }
 
-  function setCenterCaption(text: string): boolean {
+  // `variant` lets project style the mirrored rotating-intro captions
+  // (VIEW_2/VIEW_3) like the interface (bigger + blue-grey stroke) while the
+  // default modes-caption / image-credit keep project's plain center style.
+  function setCenterCaption(text: string, variant: 'default' | 'rotate' = 'default'): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
       console.warn('[socket] not connected; dropping set-center-caption')
       return false
     }
-    socket.emit('message', { type: 'set-center-caption', payload: { text } })
+    socket.emit('message', { type: 'set-center-caption', payload: { text, variant } })
     return true
   }
 

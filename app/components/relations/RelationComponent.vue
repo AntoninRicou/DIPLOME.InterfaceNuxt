@@ -189,8 +189,9 @@ const CELL_OFFSETS = computed<Record<'tl' | 'tr' | 'bl' | 'br', { x: string; y: 
 // new central-image selection.
 // Total time for one full clockwise sweep across all 16 cells. The per-cell
 // STEP (sweep / 16) is shared by both reveal modes, so they run at the same
-// speed — only the span differs.
-const ENTER_SWEEP_MS = 1000
+// speed — only the span differs. Tuned snappy: central + cells fade out
+// together (~220ms), then this sweep clocks the new cells back in.
+const ENTER_SWEEP_MS = 500
 const ENTER_STEP_MS = ENTER_SWEEP_MS / 16
 
 // First reveal = the transition INTO VIEW_4 → one continuous clockwise sweep
@@ -309,7 +310,11 @@ function onMouseEnter(e: MouseEvent) {
 <template>
   <article
     class="rel"
-    :class="{ 'is-inert': interpretationActive, 'is-frozen': store.overviewFinaleActive }"
+    :class="{
+      'is-inert': interpretationActive,
+      'is-frozen': store.overviewFinaleActive,
+      'finale-fadeout': store.overviewFinalePhase === 'fadeout',
+    }"
     :data-position="position ?? 'tl'"
     :data-reveal="revealDirection"
     @mouseenter="onMouseEnter"
@@ -323,8 +328,17 @@ function onMouseEnter(e: MouseEvent) {
     <div v-else-if="pending" class="status" aria-hidden="true" />
     <div v-else-if="error" class="status error">error</div>
 
-    <div
+    <!-- TransitionGroup so that when the central image changes (new cell
+         set), all leaving cells fade out simultaneously alongside the
+         central image's own fade-out — instead of vanishing instantly
+         then leaving a beat before the new cells clock in. The
+         cell-reveal-in animation still drives the new cells' entrance
+         (per-cell clockwise stagger); the TransitionGroup adds only the
+         coordinated leave. -->
+    <TransitionGroup
       v-else
+      name="cell-fade"
+      tag="div"
       class="constellation"
       :class="{
         suppressed: interpretationActive,
@@ -354,7 +368,7 @@ function onMouseEnter(e: MouseEvent) {
           <AtlasThumb :id="cell.id" fit="width" source="original" />
         </span>
       </button>
-    </div>
+    </TransitionGroup>
 
     <ProximityPanel
       v-if="interpretationActive && interpretation"
@@ -422,6 +436,16 @@ function onMouseEnter(e: MouseEvent) {
      in interpretation mode rather than being blurred away with the field. */
   z-index: 6;
   animation: corner-label-glow 3.5s ease-out 1 both;
+}
+
+/* Overview finale `fadeout` phase — the corner labels fade out TOGETHER with
+   the central deck (`.center-anchor.deck-fadeout`) and the grid cross
+   (`.view-3.finale-fadeout::before`), all starting at the end of the 700ms
+   clock-effect dissolve. 700ms matches OVERVIEW_FADEOUT_MS / the deck fade so
+   the three leave in lockstep, before the grid is unmounted at confirm. */
+.rel.finale-fadeout .corner-label {
+  opacity: 0;
+  transition: opacity 700ms ease-out;
 }
 
 @keyframes corner-label-glow {
@@ -504,8 +528,11 @@ function onMouseEnter(e: MouseEvent) {
 /* ── overview finale ──
    When the 10th image is reached, every cell flashes to full opacity (a
    brief bright hold), then fades out one-by-one CLOCKWISE across the whole
-   oval (per-cell `--dissolve-delay`), after which the deck collapses into
-   the contributed circle. Overrides the latent/hover opacity; interaction
+   oval (per-cell `--dissolve-delay`). The sweep is kept short
+   (OVERVIEW_DISSOLVE_SWEEP_MS = 400ms in interaction.ts) so it reads as a
+   quick clockwise wipe that ends with everything gone, leaving only the
+   gradient; the deck then fades and the contributed circle reveals.
+   Overrides the latent/hover opacity; interaction
    is frozen via `.rel.is-frozen`. Pure appearance — these only touch
    opacity, the cells' geometry/transform is untouched. */
 .constellation.finale-bright .cell {
@@ -514,9 +541,11 @@ function onMouseEnter(e: MouseEvent) {
 }
 .constellation.finale-dissolve .cell {
   opacity: 0;
-  /* Per-cell fade length must match OVERVIEW_DISSOLVE_FADE_MS in
-     interaction.ts (the store waits BRIGHT + SWEEP + FADE before confirm). */
-  transition: opacity 800ms ease-out var(--dissolve-delay, 0ms);
+  /* Per-cell fade tail (200ms). The clockwise hand (per-cell `--dissolve-delay`
+     spread) is SWEEP = 3900ms in interaction.ts; the `fadeout` phase fires at
+     bright + SWEEP, so this 200ms tail overlaps the start of the deck/cross/
+     label fade. Visual dissolve = SWEEP (3900) + 200 = 4100ms total. */
+  transition: opacity 200ms ease-out var(--dissolve-delay, 0ms);
 }
 
 .cell {
@@ -582,7 +611,18 @@ function onMouseEnter(e: MouseEvent) {
 .cell-reveal {
   display: block;
   transform-origin: center center;
-  animation: cell-reveal-in 600ms ease-out var(--enter-delay, 0ms) backwards;
+  animation: cell-reveal-in 280ms ease-out var(--enter-delay, 0ms) backwards;
+}
+
+/* TransitionGroup leave — all leaving cells fade out simultaneously over
+   the same window as CentralImage's layer-fade-leave, so the central
+   image and its surrounding cells disappear together as one beat. New
+   cells appear right after with the clockwise sweep. */
+.cell-fade-leave-active {
+  transition: opacity 220ms ease-out;
+}
+.cell-fade-leave-to {
+  opacity: 0;
 }
 @keyframes cell-reveal-in {
   from { opacity: 0; transform: scale(0.6); }

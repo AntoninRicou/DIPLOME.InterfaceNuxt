@@ -95,7 +95,11 @@ function onLeave() {
 <template>
   <section
     class="view view-3"
-    :class="[`bg-${store.canvasBackground}`, { minimal: store.overviewConfirmed, interpreting: store.view3InterpretationMode }]"
+    :class="[`bg-${store.canvasBackground}`, {
+      minimal: store.overviewConfirmed,
+      interpreting: store.view3InterpretationMode,
+      'finale-fadeout': store.overviewFinalePhase === 'fadeout',
+    }]"
   >
     <div
       v-if="store.view2ExitReason === 'auto'"
@@ -169,7 +173,7 @@ function onLeave() {
           :expanded="store.overviewConfirmed"
           :reveal="store.overviewConfirmed"
           :reveal-key="centerKey"
-          :reveal-stagger="220"
+          :reveal-stagger="0"
           :reveal-delay="400"
           source="original"
           @update:hovered="store.setCentralHovered"
@@ -277,7 +281,7 @@ function onLeave() {
      interpretation mode the cross gets its OWN blur (see `.interpreting`
      below) so it stays a soft, discreet cross instead of vanishing. */
   z-index: 6;
-  transition: filter 240ms ease-out;
+  transition: filter 240ms ease-out, opacity 700ms ease-out;
   background:
     linear-gradient(to bottom,
       transparent calc(50% - 0.5px),
@@ -289,6 +293,14 @@ function onLeave() {
       rgba(166, 154, 128, 0.85) calc(50% - 0.5px),
       rgba(166, 154, 128, 0.85) calc(50% + 0.5px),
       transparent calc(50% + 0.5px));
+}
+/* Overview finale `fadeout` phase — the grid cross fades out TOGETHER with
+   the central deck (`.center-anchor.deck-fadeout`) and the corner labels
+   (`.rel.finale-fadeout .corner-label`), all starting at the end of the
+   700ms clock-effect dissolve. By the time `.minimal` removes it at confirm
+   the cross has already faded to 0, so there's no visible cut. */
+.view-3.finale-fadeout::before {
+  opacity: 0;
 }
 /* `.minimal` mode (post-Contribute) — only the central image deck, the
    gradient backdrop, and the `See your path` button remain. The grid

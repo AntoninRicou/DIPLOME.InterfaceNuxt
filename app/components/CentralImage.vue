@@ -282,9 +282,13 @@ function layerStyle(i: number) {
    caller may pin them, and a fade-in would feel laggy on hover). Layers
    leaving the v-for fade out instead of cutting. The existing transition
    on transform/width/height keeps stagger reshuffles smooth — opacity is
-   an additive concern on top. */
+   an additive concern on top.
+
+   Fade-out duration tuned to feel like "the image disappears and
+   reappears" on every new central activation: snappy enough to read as a
+   replacement, slow enough to be perceived rather than cut. */
 .layer-fade-leave-active {
-  transition: opacity 1400ms ease-out;
+  transition: opacity 220ms ease-out;
 }
 .layer-fade-leave-to {
   opacity: 0;

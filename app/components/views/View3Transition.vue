@@ -4,7 +4,7 @@ import { useInteractionStore } from '~/stores/interaction'
 import CentralImage from '~/components/CentralImage.vue'
 import ProximityPanel from '~/components/ProximityPanel.vue'
 import { type View3ComponentId } from '~/view3/view3Interpretations'
-import { ROTATE_PANEL_MS } from '~/utils/rotateText'
+import { ROTATE_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 const store = useInteractionStore()
 
@@ -61,14 +61,23 @@ const CORNERS = [
 // onMounted; the leave path is shared between the timer-driven
 // last-sentence fade-out AND the cross-click trigger.
 const INTRO_PANELS = [
-  'You selected one image from 4,993 fragments',
-  'Click on the crosses to reveal new related images through different modes of proximity',
+  'One image out of 4,993 has been selected.',
+  'Activate the four modes of proximity to reveal relational differences between images.',
 ]
 const INTRO_PANEL_MS = ROTATE_PANEL_MS
 const introIndex = ref(0)
 const introVisible = ref(false) // gated by setTimeout — see comment block
 let introTimer: ReturnType<typeof setInterval> | null = null
 let introFirstShowTimer: ReturnType<typeof setTimeout> | null = null
+
+// The 4 quadrant crosses are NOT clickable until the rotating intro text has
+// fully finished — so the user reads the intro before zooming. LINKED to the
+// rotation, not a parallel timer: flips true from inside the same
+// last-sentence branch of `introTimer` (below), delayed by the shared
+// ROTATE_FADE_OUT_MS so it lands exactly when the last sentence has faded
+// out. Change ROTATE_PANEL_MS / INTRO_PANELS and this moves with them.
+const crossesReady = ref(false)
+let crossesReadyTimer: ReturnType<typeof setTimeout> | null = null
 
 const showCaption = ref(false)
 let captionTimer: ReturnType<typeof setTimeout> | null = null
@@ -77,6 +86,7 @@ function clearTimers() {
   if (captionTimer) { clearTimeout(captionTimer); captionTimer = null }
   if (introTimer) { clearInterval(introTimer); introTimer = null }
   if (introFirstShowTimer) { clearTimeout(introFirstShowTimer); introFirstShowTimer = null }
+  if (crossesReadyTimer) { clearTimeout(crossesReadyTimer); crossesReadyTimer = null }
 }
 
 // Reads a CSS custom property as milliseconds. Falls back to 0 if the
@@ -111,6 +121,13 @@ onMounted(() => {
       // clicks the 4 quadrant crosses to progress.
       if (introTimer) { clearInterval(introTimer); introTimer = null }
       introVisible.value = false
+      // Open the quadrant crosses once the last sentence has fully faded out
+      // (ROTATE_FADE_OUT_MS = the leave-fade duration). Linked to the same
+      // branch that ends the text — no separate cadence to keep in sync.
+      crossesReadyTimer = setTimeout(() => {
+        crossesReady.value = true
+        crossesReadyTimer = null
+      }, ROTATE_FADE_OUT_MS)
       return
     }
     introIndex.value += 1
@@ -130,9 +147,23 @@ watch(() => store.allCanvasesZoomed, (zoomed) => {
     // labels (MIRROR/TRACE/SHIFT/REPLAY) are deferred to the top-cross
     // click — they reveal at the VIEW_3 → VIEW_4 advance moment, not
     // here, so the labels appear together with VIEW_4 mounting.
-    store.setCenterCaption(MODES_CAPTION)
+    store.setCenterCaption(MODES_CAPTION, 'rotate')
   }, CAPTION_DELAY_MS)
 })
+
+// Mirror the rotating intro caption onto the project canvas (the feedback
+// screen) so both screens fade in/out SIMULTANEOUSLY. Driven by the caption's
+// own <Transition> enter/leave hooks (not a watch), so the project emission
+// fires at the exact moment the interface caption begins each fade; project's
+// `#center-caption.rotate` uses the matching `--rotate-*` timing. The intro
+// clears (leave) before the crosses are clicked, so it never overlaps the
+// later modes-caption (default variant). Project is in `overview` here.
+function onCaptionEnter() {
+  store.setCenterCaption(INTRO_PANELS[introIndex.value] ?? '', 'rotate')
+}
+function onCaptionLeave() {
+  store.setCenterCaption('', 'rotate')
+}
 
 onBeforeUnmount(clearTimers)
 </script>
@@ -151,9 +182,10 @@ onBeforeUnmount(clearTimers)
     <template v-for="q in QUADRANTS" :key="q.index">
       <button
         class="cross-button cross-quadrant"
-        :class="{ faded: store.canvasZoomed[q.index] }"
+        :class="{ faded: store.canvasZoomed[q.index], pending: !crossesReady }"
         :style="{ left: q.x, top: q.y }"
         :aria-label="`zoom canvas ${q.index + 1}`"
+        :disabled="!crossesReady"
         @click="store.zoomCanvas(q.index)"
       >
         +
@@ -178,18 +210,18 @@ onBeforeUnmount(clearTimers)
          the last sentence's display time) OR cross-click-driven
          (watch on store.allCanvasesZoomed also sets introVisible
          false). See top-of-file comment block. -->
-    <Transition name="intro" mode="out-in">
+    <Transition name="intro" mode="out-in" @enter="onCaptionEnter" @leave="onCaptionLeave">
       <p
         v-if="introVisible"
         :key="introIndex"
         class="intro-caption"
       >
-        {{ INTRO_PANELS[introIndex] }}
+        <span class="caption-text">{{ INTRO_PANELS[introIndex] }}</span>
       </p>
     </Transition>
 
     <p class="modes-caption" :class="{ visible: showCaption }">
-      {{ MODES_CAPTION }}
+      <span class="caption-text">{{ MODES_CAPTION }}</span>
     </p>
 
     <button
@@ -279,6 +311,15 @@ onBeforeUnmount(clearTimers)
 .cross-button:hover {
   color: #2a2e36;
 }
+/* Inert until the intro text finishes (crossesReady false): hidden,
+   non-interactive, and no attention glow. When crossesReady flips true the
+   class drops and the crosses fade in via the base opacity transition. The
+   `:disabled` attr is the belt-and-braces that actually blocks the click. */
+.cross-button.pending {
+  opacity: 0;
+  pointer-events: none;
+  animation: none;
+}
 
 /* Quadrant variant — positioned by inline style (q.x / q.y) and centred
    on that point. Visible from VIEW_3 mount; faded out once the canvas
@@ -328,21 +369,43 @@ onBeforeUnmount(clearTimers)
    -leave classes below for parity with View1Explanation's pattern. */
 .intro-caption {
   position: absolute;
-  top: 4vh;
+  /* Centred in the viewport (was top: 4vh). Sits above the central image
+     deck (z: 12 > center-anchor z: 10) for the brief intro overlay. */
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   /* One line per sentence: no wrap, width grows to the text (centred by
-     the left:50% + translateX). */
+     the left:50% + translate). */
   max-width: none;
   white-space: nowrap;
   margin: 0;
-  padding: 0 1.5rem;
-  font-size: var(--label-size);
-  line-height: 1.3;
+  padding: 0;
+  font-size: var(--rotate-size);
+  line-height: 1.5;
   text-align: center;
   color: #595b54;
   z-index: 12;
   pointer-events: none;
+}
+
+/* Organic backing that traces the text glyphs (not a box) — layered
+   text-shadow in the blue-grey panel colour hugs the letterforms, reading as
+   a soft text-shaped stroke rather than a rectangle. Matches VIEW_1
+   `.caption-text` / VIEW_2 `.entry-caption .caption-text`. */
+/* Organic blue-grey stroke shared by the intro-caption AND the modes-caption
+   (both wrap their text in `.caption-text`), so the modes line reads in the
+   same rotate-caption style. */
+.caption-text {
+  text-shadow:
+    0 0 4px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 15px var(--rotate-panel-bg),
+    0 0 18px var(--rotate-panel-bg);
 }
 
 /* Vue <Transition name="intro"> CSS hooks — opacity-only fades using
@@ -377,13 +440,16 @@ onBeforeUnmount(clearTimers)
   padding: 0 1rem;
   white-space: nowrap;
   text-align: center;
-  font-size: 0.95rem;
+  /* Same rotate-caption style: --rotate-size + the organic stroke on the
+     inner .caption-text span, and the shared rotate fade timing so it reveals
+     like (and in sync with) the project mirror. */
+  font-size: var(--rotate-size);
   line-height: 1.4;
   color: #595b54;
   pointer-events: none;
   z-index: 11;
   opacity: 0;
-  transition: opacity 600ms ease-out;
+  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing);
 }
 .modes-caption.visible {
   opacity: 1;

@@ -132,10 +132,12 @@ VIEW_0 → VIEW_1 → VIEW_2 → VIEW_3 → VIEW_4
   drawing from center over the full panel runtime. Two rotating text panels
   describing the tool, 5 s each. A `>` skip chevron is available; the
   advance also fires automatically when the last panel finishes. On
-  advance, `enterEntryView` emits a hidden-morph sequence
-  (`set-mask(1, 400)` → `set-state('overview', 500)` → `set-mask(0, 400)`)
-  so the standalone project transitions `single → overview` behind the
-  opaque mask.
+  advance, `enterEntryView` emits `set-mask(1, 250)` → `set-state('overview',
+  0)` (instant snap behind the opaque mask) → and a disperse-synced
+  `set-mask(0, 400)` reveal (held until the VIEW_2 burst begins — see
+  *`enterEntryView()` — hidden snap to overview, disperse-synced reveal*) so
+  the standalone project transitions `single → overview` behind the opaque
+  mask and reveals in sync with the spawning sprites.
 * **VIEW_2 (ENTRY)** — canvas-disperse entry phase, an iframe-embedded
   instance of `project` running locally inside `interface_nuxt`. The
   standalone project is in `overview`. Clicking a sprite on the iframe
@@ -401,7 +403,7 @@ Drivers (current flow, post-rename):
 | -------------------------------------------------------------------------- | -------------------------------------- | ---------------------- |
 | socket-register bootstrap or reconnect (no clicks yet, `imageClick = 0`)    | `path-clear` + `set-state('single')` + `set-mask(0, 0)` + `set-canvas-bg(store.canvasBackground)` | `single` (full reset; mask transparent) |
 | VIEW_0 → VIEW_1 (`viewState.advance()` from `View0Onboarding` click)        | **nothing**                             | `single` (unchanged)   |
-| VIEW_1 → VIEW_2 auto-end-of-panels or skip (`enterEntryView`)               | `set-mask(1, 400)` → `set-state('overview', 500)` (after 400 ms) → `set-mask(0, 400)` (after 900 ms) | `single → overview` (morph hidden behind the opaque mask; total 1.3 s) |
+| VIEW_1 → VIEW_2 auto-end-of-panels or skip (`enterEntryView`)               | `set-mask(1, 250)` → `set-state('overview', 0)` (instant snap, after ~330 ms) → `set-mask(0, 400)` (disperse-synced reveal, held until the VIEW_2 burst) | `single → overview` (grid snapped behind the opaque mask; reveal in sync with the spawning sprites) |
 | VIEW_2 → VIEW_3 (`selectImage`, iframe sprite click)                        | `focus(id)` only                       | `overview` (no state change; `focus` is highlight-only per *FOCUS-IN-OVERVIEW*) |
 | VIEW_3 quadrant cross click (`zoomCanvas`)                                  | `set-canvas-zoom({ canvasIndex, imageId: activeId })` | `overview` (no state-name change; per-canvas cameraZ + position tween — see *PER-CANVAS ZOOM*) |
 | VIEW_3 → VIEW_4 advance-control click (`enterRelationalView('skip')`)       | `set-state('split', 0)` + `focus(activeId)` | `overview → split` (instant flip, no visible change — the four per-canvas overrides already render at split's cameraZ; flip releases the overrides) |
@@ -830,7 +832,7 @@ sequence of text panels rotating at a fixed cadence:
 ```ts
 const PANELS = [
   'Proxima is a tool for exploration of a visual corpus through modes of proximity.',
-  'It allows you to engage with images for alternative perspectives.',
+  'It allows to engage with images for alternative perspectives.',
 ]
 const PANEL_MS = ROTATE_PANEL_MS  // shared via app/utils/rotateText.ts
 ```
@@ -875,38 +877,81 @@ from the centre rather than from an edge. Same shape for `::after` with
 `scaleY`. Skipping the view mid-draw is fine; the cross unmounts with the
 view, no explicit cleanup needed.
 
-### `enterEntryView()` — hidden-morph to overview
+### `enterEntryView()` — hidden snap to overview, disperse-synced reveal
 
 The advance from VIEW_1 to VIEW_2 is the moment the standalone project
 transitions from `single` (boot state) to `overview`. The transition is
-hidden behind the render mask for a clean visual:
+hidden behind the render mask, the grid is snapped into place **instantly**
+(no visible morph), and the reveal is **held until the VIEW_2 disperse burst
+begins** so the standalone lights up at the same moment the spawning sprites
+appear on the interface:
 
 ```ts
 function enterEntryView() {
   if (!viewState.is('EXPLANATION')) return
-  const from = viewState.current
-  viewState.advance()
-  emit({ type: 'view_advance', from, to: viewState.current, ... })
+  viewState.advance()                  // mounts VIEW_2 → iframe begins loading
+  // ... view_advance emit + defensive component-title clears ...
 
-  const FADE_MS = 400
-  const MORPH_MS = 500
-  projectSocket.setMask(1, FADE_MS)
-  setTimeout(() => projectSocket.setState('overview', MORPH_MS), FADE_MS)
-  setTimeout(() => projectSocket.setMask(0, FADE_MS), FADE_MS + MORPH_MS)
+  const FADE_IN_MS = 250        // mask → opaque
+  const MORPH_DELAY_MS = 80     // gap after mask opaque before the snap
+  const FADE_OUT_MS = 400       // reveal fade
+  const REVEAL_FALLBACK_MS = 1800
+
+  overviewSnapDone = false; disperseSpawned = false; overviewRevealed = false
+  projectSocket.setMask(1, FADE_IN_MS)
+  setTimeout(() => {
+    projectSocket.setState('overview', 0)   // INSTANT snap, behind opaque mask
+    overviewSnapDone = true; maybeRevealOverview()
+  }, FADE_IN_MS + MORPH_DELAY_MS)
+  revealFallbackTimer = setTimeout(() => {  // safety: never hang the reveal
+    disperseSpawned = true; maybeRevealOverview()
+  }, REVEAL_FALLBACK_MS)
 }
 ```
 
-* `t = 0`: emit `set-mask(1, 400)` — project mask starts fading to opaque.
-* `t = 400 ms`: emit `set-state('overview', 500)` — morph happens behind
-  the now-opaque mask.
-* `t = 900 ms`: emit `set-mask(0, 400)` — fade reveals the settled
-  overview.
+* `t = 0`: `viewState.advance()` mounts VIEW_2 (the disperse iframe starts
+  loading); emit `set-mask(1, 250)` — project mask fades to opaque.
+* `t = 330 ms`: emit `set-state('overview', 0)` — the four-canvas grid
+  **snaps instantly** into place behind the fully-opaque mask. `MORPH_MS`
+  is `0` on purpose: the user must never see the rect-reshape morph, so it
+  is applied as a snap, not a tween. The `MORPH_DELAY_MS = 80` gap after the
+  fade-in guarantees the mask has covered before the snap.
+* **reveal (event-driven, not timed):** `set-mask(0, 400)` fires from
+  `maybeRevealOverview()` only once **both** flags are true — the grid has
+  snapped (`overviewSnapDone`, so an early burst can't expose the snap) and
+  the disperse burst has begun (`disperseSpawned`). So the overview reveal
+  lands exactly as the spawning sprites appear (see *disperse-synced reveal*
+  below).
 
-Total: ~1.3 s symmetric fade-out → morph → fade-in on the project screen.
-Unlike VIEW_2's mask hold (which absorbs the morph asymmetrically — opaque
-at the click moment, reveal at VIEW_3 entry), this one is symmetric
-because there is no in-view hold timer to absorb anything; the mask alone
-bookends the morph.
+#### disperse-synced reveal
+
+The reveal is coordinated with the interface's VIEW_2 disperse spawn so both
+screens come alive together:
+
+1. The embed iframe posts `{ type: 'view0:dispersed' }` to its parent the
+   moment its disperse burst begins (right after `enterDisperse` in
+   `project/src/main.js` — part of the VIEW_2 embed surface, exception #4).
+2. `View2Disperse`'s `onMessage` forwards it to
+   `store.notifyDisperseSpawned()`, which sets `disperseSpawned = true` and
+   calls `maybeRevealOverview()`.
+3. `maybeRevealOverview()` reveals only when `overviewSnapDone &&
+   disperseSpawned` (and clears the fallback timer). If the burst fires
+   before the snap, the reveal waits for the snap; if the snap is done
+   first, the reveal waits for the burst.
+4. `REVEAL_FALLBACK_MS = 1800` marks the burst "spawned" if the signal never
+   arrives (embed disabled, load failure) so the reveal can't hang.
+
+> **The intermittent "jump" fix was project-side.** While the standalone
+> sits in `single` during VIEW_0 / VIEW_1, a demo cycle
+> (`stateManager.tickSingleCycle`) morphs canvas-1 to a random map every few
+> seconds. On *leaving* single, `goTo` restores canvas-1 to its canonical
+> map — originally with a **1 s point morph** (`morphTo(host.mapType,
+> SINGLE_MORPH)`) that started at the state change and outran any mask hold,
+> so points were still flying into place when the mask lifted (intermittent
+> — only when the cycle had drifted canvas-1 off its map at advance). The
+> restore is now **instant** (`morphTo(host.mapType, 0)` in
+> `stateManager.js`) — cleanup, not a designed visual, always behind a mask.
+> Padding the mask schedule never fixed it; only the instant restore did.
 
 EXPLANATION is the phase alias for VIEW_1. No guards on
 `is('EXPLANATION')` outside `enterEntryView` itself.
@@ -930,14 +975,14 @@ no entry-routing branch. The canvas is the only entry surface.
 
 ### Rotating entry caption
 
-VIEW_2 also displays a two-sentence rotating intro `.entry-caption`
-at the upper centre of the viewport (`top: 4vh`), overlaying the
-iframe at `z-index: 12`. Content:
+VIEW_2 also displays a three-sentence rotating intro `.entry-caption`
+at viewport centre, overlaying the iframe at `z-index: 12`. Content:
 
 ```ts
 const ENTRY_PANELS = [
-  "Here's a corpus from scientific and encyclopedic publications (15th–20th century), structured to classify and organize knowledge within Western systems.",
-  'Engage with this corpus through alternative readings and contribute to Proxima.',
+  'This corpus comes from scientific and encyclopedic books published between the 15th and 20th centuries.',
+  'It was structured within a single dominant Western system of vision to classify and organize knowledge.',
+  'Select an image to initiate exploration.',
 ]
 ```
 
@@ -1153,9 +1198,9 @@ overrides at the project layer (see *PER-CANVAS ZOOM*). The wire emits
 (project stays in overview by name).
 
 VIEW_3 also displays a two-sentence rotating intro `.intro-caption` at
-the upper centre — "You selected one image from 4,993 fragments" then
-"Click on the crosses to reveal new related images through different
-modes of proximity". Timing comes from the shared `--rotate-*` CSS
+viewport centre — "One image out of 4,993 has been selected." then
+"Activate the four modes of proximity to reveal relational differences
+between images." Timing comes from the shared `--rotate-*` CSS
 vars and `ROTATE_PANEL_MS`; see *ROTATING-TEXT SYSTEM* for the full
 contract. Like VIEW_2, VIEW_3 uses the JS-gated first-render
 workaround (no Vue `appear`) because its many child elements (corner
@@ -3011,18 +3056,39 @@ function setCanvasText(payload) {
 ## SET-CENTER-CAPTION — viewport-centred overlay text
 
 `set-center-caption` is the wire directive that paints centred overlay
-copy at viewport centre on the project side. It has **two consumers**:
+copy at viewport centre on the project side. It has **three consumers**:
 
+* **VIEW_2 / VIEW_3 rotating-intro mirror** — the rotating intro captions
+  (`ENTRY_PANELS` in `View2Disperse.vue`, `INTRO_PANELS` in
+  `View3Transition.vue`) are mirrored onto project so the feedback screen
+  shows the same intro sentence as the interface AND fades in/out **in sync**.
+  The emissions are driven by the caption's own `<Transition>` **enter/leave
+  hooks** (`@enter` → emit current sentence with `variant: 'rotate'`;
+  `@leave` → emit `''`), so they fire at the exact moment each interface fade
+  begins (including the out-in between sentences). Project's
+  `#center-caption.rotate` uses the matching `--rotate-fade-ms` /
+  `--rotate-fade-easing`, and the `--rotate-empty-beat` enter delay
+  (`.rotate.visible` only — leave has 0 delay, mirroring the interface's
+  enter-active-delay vs leave-active-no-delay split). Project is in `overview`
+  during both views, so the `:not([data-state="single"])` guard is satisfied;
+  VIEW_2 also clears on unmount. The VIEW_3 intro leaves before the crosses
+  are clicked, so it never overlaps the later (default-variant) modes-caption.
+  The long VIEW_2 corpus sentence wraps to ~2 lines via the `pre-wrap` +
+  `max-width` rule (below). VIEW_1's caption is NOT mirrored — project is in
+  `single` there, where the caption guard hides it.
 * **VIEW_3 modes-caption** — a single short sentence, mirroring
   interface_nuxt's `.modes-caption` element (in `View3Transition.vue`),
   revealed by the 1 s timer that fires after the user clicks the fourth
-  VIEW_3 quadrant cross.
+  VIEW_3 quadrant cross. Emitted with **`variant: 'rotate'`** so it carries
+  the same rotate-caption look (size + blue-grey stroke) on both screens; the
+  interface `.modes-caption` matches it (`--rotate-size`, `.caption-text`
+  stroke, shared fade timing).
 * **VIEW_4 image-credit** — the three-line provenance note (the
   `IMAGE_CREDIT_LINES` constant in `view3Interpretations.ts`), mirroring
   interface_nuxt's `.interpret-message`, revealed when the user toggles
   interpretation mode via the VIEW_4 `+`. The three lines are passed over
   the wire as a single `\n`-joined string; the project caption renders
-  them as three lines via `white-space: pre` (see *Project-side rendering
+  them as three lines via `white-space: pre-wrap` (see *Project-side rendering
   contract* below). See *VIEW_4 — INTERPRETATION MODE (REVEAL + BLUR
   VEIL)*.
 
@@ -3034,11 +3100,17 @@ or interaction-logic participation.
 ### Wire vocabulary
 
 ```
-set-center-caption({ text: string })
+set-center-caption({ text: string, variant?: 'default' | 'rotate' })
 ```
 
 * **`text`** — the string to render. Empty string (or missing field)
   clears the caption and hides the element.
+* **`variant`** — `'rotate'` styles `#center-caption` like the interface
+  rotating-intro captions: the organic blue-grey `text-shadow` stroke + a
+  larger size (`2× --label-size` on project; the interface uses
+  `--rotate-size` = 1.7rem — project is intentionally bigger). Omitted /
+  `'default'` keeps the plain center style (the VIEW_4 image-credit).
+  Project toggles a `.rotate` class from it.
 
 Project is content-blind. Both copies live interface-side: the
 `MODES_CAPTION` constant in `View3Transition.vue` and the
@@ -3053,7 +3125,8 @@ reveals so both screens animate in lockstep:
 
 | Moment                                                          | Emission                                                |
 | --------------------------------------------------------------- | -------------------------------------------------------- |
-| 1 s after fourth VIEW_3 quadrant cross click                    | `set-center-caption(MODES_CAPTION)` — fade in.    |
+| VIEW_2 / VIEW_3 rotating intro caption `<Transition>` `@enter` / `@leave` | `@enter` → `set-center-caption(currentSentence, 'rotate')`; `@leave` → `set-center-caption('', 'rotate')` (VIEW_2 also clears on unmount). Fires at the exact interface fade moments so project fades in sync; styled to match. |
+| 1 s after fourth VIEW_3 quadrant cross click                    | `set-center-caption(MODES_CAPTION, 'rotate')` — fade in (rotate style).    |
 | VIEW_3 → VIEW_4 advance (`enterRelationalView`)                 | `set-center-caption('')` — clear before VIEW_4 mounts. |
 | VIEW_4 interpret-control toggle (`toggleView3Interpretation`)   | ON → `set-center-caption(IMAGE_CREDIT_LINES.join('\n'))`; OFF → `set-center-caption('')`. Same beat as the four `set-canvas-text` calls + `set-canvas-veil`. |
 
@@ -3077,11 +3150,13 @@ line height) and pins itself to viewport centre via `position: fixed;
 top/left: 50%; transform: translate(-50%, -50%)`. Fades on opacity only,
 gated by a `.visible` class. `z-index: 1001` sits above `render-mask`
 **and** the interpretation veil (`#render-veil`, z: 5) so the caption is
-never veiled. `white-space: pre` so a `\n`-joined caption (the VIEW_4
-image-credit) breaks into exactly N lines with no wrapping — the block
-auto-grows to the widest line, mirroring the interface's `nowrap` +
-`<br>`; the single-line VIEW_3 modes-caption (no newlines) stays one
-line, unaffected.
+never veiled. `white-space: pre-wrap` + `max-width: min(46em, 88vw)`: a
+`\n`-joined caption (the VIEW_4 image-credit) keeps its explicit line breaks,
+and long single captions (the mirrored VIEW_2 rotating-intro sentence, and the
+VIEW_3 modes-caption now that it's rotate-sized) **wrap** instead of
+overflowing — so on project they may run to ~2 lines even though the interface
+keeps them on one (`nowrap`). The `max-width` is generous enough that the short
+credit lines never wrap.
 
 On wire receipt of `set-center-caption(payload)`:
 
@@ -3090,10 +3165,24 @@ function setCenterCaption(payload) {
   const el = document.getElementById('center-caption')
   if (!el) return
   const text = typeof payload?.text === 'string' ? payload.text : ''
+  const rotate = !!text && payload?.variant === 'rotate'
   el.textContent = text
   el.classList.toggle('visible', !!text)
+  el.classList.toggle('rotate', rotate)  // 'rotate' → interface rotating-intro look
 }
 ```
+
+`#center-caption.rotate` (project `style.css`) sets the size to
+`calc(--label-size * 2)` — intentionally **larger** than the interface
+`--rotate-size` (1.7rem); the user preferred the bigger size on the feedback
+screen. It also adds the organic blue-grey `text-shadow` stroke in
+`--rotate-panel-bg`, and uses the `--rotate-fade-ms` / `--rotate-fade-easing`
+fade timing with the `--rotate-empty-beat` enter delay (all mirrored from
+app.vue's `:root`), matching `.caption-text` + the fade timing in the
+interface views. Plain (non-rotate) captions keep the base `0.95rem` center
+style and its 600ms fade. Note: the handler hides by removing `.visible`
+**only** (it does not clear `textContent`), so the text fades out visibly
+rather than vanishing instantly — the next non-empty caption overwrites it.
 
 ### Invariants
 
@@ -3185,7 +3274,7 @@ on/off beat, three things to the project canvas:
 1. `set-canvas-text(i, title, body)` ×4 — the per-quadrant interpretation
    copy (see *SET-CANVAS-TEXT*).
 2. `set-center-caption(IMAGE_CREDIT_LINES.join('\n'))` — the three-line
-   credit at viewport centre (see *SET-CENTER-CAPTION*; `white-space: pre`
+   credit at viewport centre (see *SET-CENTER-CAPTION*; `white-space: pre-wrap`
    renders the three lines).
 3. `set-canvas-veil(active)` — the beige blur veil (project-side exception
    #14). Project shows `<div id="render-veil">` (`z-index: 5`,
@@ -3361,7 +3450,7 @@ triggers a second download.
 
 ### Label-size sync contract — `--label-size` CSS custom property
 
-Three typographic tiers share a single font-size, locked via the
+Two typographic tiers share a single font-size, locked via the
 `--label-size` custom property defined on `:root` in BOTH
 `app/app.vue` AND `project/src/style.css` (currently `1.15rem`):
 
@@ -3370,24 +3459,36 @@ Three typographic tiers share a single font-size, locked via the
    glow keyframe, but not for typography.
 2. **Quadrant title texts** — `.proximity-panel-title` (interface) +
    `.canvas-text-title` (project).
-3. **Rotating intro text** — `.caption` (VIEW_1), `.entry-caption`
-   (VIEW_2), `.intro-caption` (VIEW_3).
-
-**Two rules govern the relationship:**
 
 * **Full typographic mirror** between `.corner-label` and the
   quadrant titles — same `font-size`, `font-weight: 500`,
   `font-style: italic`, `letter-spacing: 0.015em`. When one
   property changes, all three selectors update in lockstep.
   font-family is inherited (ABC Otto via `html`).
-* **Size-only sync** for rotating intro text — only `font-size`
-  follows `--label-size`. Weight, italic, and tracking are
-  independent per view.
 
 To resize the tier, edit `--label-size` in BOTH `:root` blocks (the
 two apps have separate CSS scopes). Never hardcode a font-size on any
 of those selectors; if a new element joins the tier, point it at
 `--label-size` too.
+
+**Rotating intro text is no longer locked to this tier.** `.caption`
+(VIEW_1), `.entry-caption` (VIEW_2), and `.intro-caption` (VIEW_3) read
+their size from their own `--rotate-size` var (app.vue `:root`) rather than
+`--label-size` directly. `--rotate-size` currently resolves to
+`var(--label-size)` (so the captions render at the same size as the corner
+labels) but stays a separate var so they can be resized independently later
+without touching the corner labels / titles. The captions are **centred**
+(`top: 50%` + `translate(-50%, -50%)`) in all three views and their backing
+**traces the text glyphs themselves** — not a box behind the line. The inner
+inline `.caption-text` span (NOT the block `<p>`) carries a layered
+`text-shadow` in `--rotate-panel-bg` (light blue-grey at **90% opacity**,
+currently `rgba(170, 180, 194, 0.9)`); the stacked shadows build a soft
+organic "stroke" hugging the letterforms (tight inner layers for body, wider
+layers feathering out). No `background` / `border-radius` /
+`box-decoration-break` — those were tried and rejected as too box-like. Each
+view keeps its own text colour and wrap rule (VIEW_1/3 `nowrap`, VIEW_2
+`max-width: 60vw`). Timing is still the shared `--rotate-*` contract (see
+*ROTATING-TEXT SYSTEM*) — unchanged.
 
 ### Text halo system — `--halo` CSS custom property (currently disabled)
 
@@ -3434,7 +3535,7 @@ timing):
 
 | Variable | Meaning | Current value |
 |---|---|---|
-| `--rotate-fade-ms` | Duration used for appear, enter, AND leave fades. | `500ms` |
+| `--rotate-fade-ms` | Duration used for appear, enter, AND leave fades (all three views). | `400ms` |
 | `--rotate-fade-easing` | Easing curve for every fade. | `cubic-bezier(0.25, 0.46, 0.45, 0.94)` |
 | `--rotate-appear-delay` | Hold before the first sentence drifts in (lets the view-level cross-fade settle first). | `1400ms` |
 | `--rotate-empty-beat` | Empty pause between sentences (enter-delay under `mode="out-in"`). | `200ms` |
@@ -3444,8 +3545,8 @@ imported by all three views):
 
 | Constant | Meaning | Current value |
 |---|---|---|
-| `ROTATE_PANEL_MS` | How long each sentence sits at full opacity before the timer ticks. | `4000ms` |
-| `ROTATE_FADE_OUT_MS` | Duration of the leave animation; drives the `setTimeout` that delays the next view advance until the leave completes. **Must equal `--rotate-fade-ms`** numerically (the CSS var and the JS constant are two halves of the same number). | `500ms` |
+| `ROTATE_PANEL_MS` | How long each sentence holds at full opacity before the timer ticks. Used by VIEW_1 + VIEW_3. **VIEW_2 overrides this** with a local `5000ms` hold (denser corpus intro) — see `View2Disperse.vue`'s `setInterval`. | `4000ms` |
+| `ROTATE_FADE_OUT_MS` | Duration of the leave animation; drives the `setTimeout` that delays the next view advance until the leave completes. **Must equal `--rotate-fade-ms`** numerically (the CSS var and the JS constant are two halves of the same number). | `400ms` |
 
 ### Three consumers
 
@@ -3539,6 +3640,27 @@ This avoids the harsh-cut where the view-level cross-fade overlapped
 with the still-visible caption. The setTimeout duration MUST equal
 `--rotate-fade-ms`.
 
+### Interaction gating — disabled until the rotation finishes
+
+VIEW_2 and VIEW_3 gate their primary interaction OFF until the rotating
+intro text has fully finished, so the user reads the intro before the view
+becomes interactive:
+
+* **VIEW_2** — sprite **hover** (preview + `set-highlight`) AND **click**
+  (`selectImage`) are ignored in `onMessage` until `interactionReady` is true.
+  (`view0:dispersed` is NOT gated — the overview-reveal sync must still fire.)
+* **VIEW_3** — the four quadrant **crosses** are `:disabled` + `.pending`
+  (hidden, no glow) until `crossesReady` is true, then they fade in.
+
+Both flags are **linked to the rotation, not a parallel timer**: each is
+flipped true from *inside the same last-sentence branch of the view's
+rotation `setInterval`* that ends the text, delayed by `ROTATE_FADE_OUT_MS`
+so it lands exactly when the last sentence has faded out. Changing
+`ROTATE_PANEL_MS`, `ROTATE_FADE_OUT_MS`, or the panel arrays automatically
+moves the gate — there is no duplicated cadence to keep in sync. The timer
+handles store the gate's `setTimeout` and clear it on unmount alongside the
+rotation timers.
+
 ### Visual continuity with VIEW_0's exit
 
 VIEW_0's title + subtitle fade-out (on click) uses the same
@@ -3601,14 +3723,27 @@ drives `overviewFinalePhase: 'idle' | 'bright' | 'dissolve' | 'fadeout'`:
 
 1. **bright** (`OVERVIEW_BRIGHT_MS`) — the four quadrants' suggestion images
    flash to full opacity and hold.
-2. **dissolve** (`OVERVIEW_DISSOLVE_SWEEP_MS` + `OVERVIEW_DISSOLVE_FADE_MS`)
-   — they fade out one-by-one **clockwise across the whole oval** (per-cell
-   `--dissolve-delay` from the absolute clockwise angle × the sweep window).
-3. **fadeout** (`OVERVIEW_FADEOUT_MS`) — the central image **deck** fades out
-   smoothly (`.center-anchor.deck-fadeout`), a clean cut with no size jump.
+2. **dissolve** — the 16 cells fade out one-by-one **clockwise across the
+   whole oval** (per-cell `--dissolve-delay` from the absolute clockwise angle
+   × `OVERVIEW_DISSOLVE_SWEEP_MS`). `SWEEP = 3900` is the clockwise hand; each
+   cell's own fade is a 200ms tail (CSS only — `.finale-dissolve .cell` opacity
+   200ms, **not** a JS constant). So the visual dissolve spans `bright`
+   .. `bright + SWEEP + 200` = 1200..5300 = **4100ms**.
+3. **fadeout** (`OVERVIEW_FADEOUT_MS`) — fires the instant the clockwise hand
+   completes, at `OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_SWEEP_MS` = **5100ms**
+   (decoupled from the 200ms per-cell fade tail, which runs out just after).
+   The central image **deck**, the **grid cross**, and the **corner labels**
+   all fade out **together** over 700ms: deck via `.center-anchor.deck-fadeout`,
+   cross via `.view-3.finale-fadeout::before`, corner labels via
+   `.rel.finale-fadeout .corner-label`. They leave in lockstep, leaving only
+   the gradient before the circle reveals. (The grid is then unmounted at
+   confirm — `v-if="!overviewConfirmed"` — and the cross `display:none`'d via
+   `.minimal`, both already at opacity 0, so no cut.)
 4. → `confirmOverview()` — `set-state('overview')` + `set-marks(navigation
    History)` (whole path lit, exception #13); the **circle of the 10
-   selected images** clock-reveals (fade-in-place at the oval).
+   selected images** reveals **all at once** — a single chill fade-in (no
+   clock effect): the central `CentralImage` uses `reveal-stagger="0"`, so
+   the per-image fade fires simultaneously after the `reveal-delay` beat.
 5. After `SEE_YOUR_PATH_DELAY_MS` (post-confirm), `overviewControlsReady`
    flips true and the **"See your path"** control appears.
 
@@ -3700,9 +3835,13 @@ Do not modify project, **with fourteen explicit exceptions**:
    applies the `big` highlight preset, sets the gradient backdrop
    inline), and the `enablePicking({ onHover, onClick })` API in `app.js`
    that posts `view0:image-hover` / `view0:image-click` messages back to
-   `window.parent` via `postMessage`. This instance is **detached from
-   the relay** — it neither sends nor receives any wire event. See
-   *VIEW_2 — CANVAS ENTRY PHASE*.
+   `window.parent` via `postMessage`. `main.js` also posts a one-shot
+   `view0:dispersed` message the moment the disperse burst begins, which the
+   parent uses to fire the standalone project's overview reveal in sync with
+   the spawning sprites (see *`enterEntryView()` — hidden snap to overview,
+   disperse-synced reveal*). This instance is **detached from the relay** —
+   it neither sends nor receives any wire event. See *VIEW_2 — CANVAS ENTRY
+   PHASE*.
 5. The transient highlight directive surface inside `project` —
    `set-highlight`, the `actions.setHighlight` handler in `commands.js`,
    and the per-instance eased highlight + state-keyed preset machinery in
