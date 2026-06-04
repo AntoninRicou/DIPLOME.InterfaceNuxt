@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
-import { ROTATE_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
+import { VIEW1_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 const store = useInteractionStore()
 
 const PANELS = [
-  'Proxima is a tool for exploration of a visual corpus through modes of proximity.',
-  'It allows to engage with images for alternative perspectives.',
+  'Proxima is a tool allowing exploration of a visual corpus through modes of proximity.',
+  'It invites exploration through multiple simultaneous perspectives.',
 ]
-// PANEL_MS and FADE_OUT_MS are shared with View3Transition via the
-// `~/utils/rotateText` constants so both rotating-text components
-// always run on the same cadence. See feedback_rotate_text_sync.md.
-const PANEL_MS = ROTATE_PANEL_MS
+// Per-view hold (4s for VIEW_1); the FADE (FADE_OUT_MS) stays shared/locked
+// with the other rotating-text components via `~/utils/rotateText`.
+// See feedback_rotate_text_sync.md.
+const PANEL_MS = VIEW1_PANEL_MS
 const FADE_OUT_MS = ROTATE_FADE_OUT_MS
 
 const index = ref(0)

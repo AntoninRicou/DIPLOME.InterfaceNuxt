@@ -87,6 +87,13 @@ export const useInteractionStore = defineStore('interaction', () => {
   // VIEW_4 with project visually already in split.
   const canvasZoomed = ref<boolean[]>([false, false, false, false])
   const allCanvasesZoomed = computed(() => canvasZoomed.value.every(Boolean))
+  // Set true on the first VIEW_3 quadrant cross click — once the per-quadrant
+  // suggestion-image preview has begun revealing in VIEW_3, the relational
+  // view (VIEW_4) must NOT replay its first-mount clockwise sweep (the images
+  // are already revealed). RelationComponent reads this to suppress its
+  // on-mount entrance + corner-label announce-glow. One-way for the session
+  // (the VIEW_3 → VIEW_4 progression is forward-only).
+  const relationsPreRevealed = ref(false)
 
   // VIEW_4 per-quadrant hover. `null` = no quadrant hovered (mouse on the
   // central image or outside the grid) → all four canvases zoomed on the
@@ -180,6 +187,9 @@ export const useInteractionStore = defineStore('interaction', () => {
     const id = activeCentralImageId.value
     if (!id) return
     canvasZoomed.value = canvasZoomed.value.map((v, i) => i === canvasIndex ? true : v)
+    // The per-quadrant suggestion-image preview has begun — suppress VIEW_4's
+    // first-mount clockwise re-sweep (the images reveal here in VIEW_3 now).
+    relationsPreRevealed.value = true
     projectSocket.setCanvasZoom(canvasIndex, id)
     // Mirror VIEW_3's per-quadrant text fade-in on the corresponding
     // project canvas — same content (title + body from
@@ -189,6 +199,11 @@ export const useInteractionStore = defineStore('interaction', () => {
     const componentId = `component_${canvasIndex + 1}` as View3ComponentId
     const { title, body } = view3Interpretations[componentId]
     projectSocket.setCanvasText(canvasIndex, title, body)
+    // Reveal this quadrant's corner label on project at the same beat the
+    // interface reveals its own (View3Transition gates on canvasZoomed[i]),
+    // so SOURCE / FORM / SEMANTIC / COLLABORATIVE pop per-quadrant on both
+    // screens instead of all four at VIEW_4 entry.
+    projectSocket.setCornerLabel(canvasIndex, true)
   }
 
   const historyHasPrevious = computed(() => historyIndex.value > 0)
@@ -353,13 +368,10 @@ export const useInteractionStore = defineStore('interaction', () => {
     // Also clear the centred modes-caption that faded in 1 s after the
     // fourth cross. Empty string hides project's `#center-caption`.
     projectSocket.setCenterCaption('')
-    // Reveal the four component corner labels on the standalone project
-    // at this moment — the top-cross click is the first beat where the
-    // user has committed to the relational view, so corner labels appear
-    // together with VIEW_4 mounting (which renders its own always-visible
-    // RelationComponent corner labels). Both screens land in
-    // MIRROR/TRACE/SHIFT/REPLAY in lockstep.
-    projectSocket.setCornerLabels(true)
+    // Corner labels were already revealed per-quadrant during VIEW_3 (one
+    // `set-corner-label` per cross click), so they are all visible on project
+    // by now — no all-on re-assert here, which would re-fire the announce-glow
+    // on all four at once (the per-quadrant reveal is the intended announce).
   }
 
   function activateCentral(id: ImageId) {
@@ -422,16 +434,19 @@ export const useInteractionStore = defineStore('interaction', () => {
   // order; only then does confirmOverview fire (→ the circle of 10 reveals).
   // The central image + all interaction are frozen for the duration.
   // The clock-effect dissolve: SWEEP is the clockwise hand (per-cell delay
-  // spread, matched in RelationComponent's `--dissolve-delay`). Each cell's
-  // own fade lives in CSS only (`.finale-dissolve .cell` → opacity 200ms);
-  // it's not a JS timing input. The clockwise hand finishes at bright + SWEEP
-  // (= 5100ms) — THAT is when the `fadeout` phase begins and the central deck,
-  // the grid cross, AND the corner labels all fade out TOGETHER (deck via
-  // `.center-anchor.deck-fadeout`, cross + labels via `.finale-fadeout`
-  // rules). The last cell's 200ms fade tail runs out just after, so the
-  // visual dissolve spans bright..bright+SWEEP+200 (1200..5300 = 4100ms).
+  // spread + ease-out-in, matched in RelationComponent's `--dissolve-delay`).
+  // Each cell's own fade lives in CSS only (`.finale-dissolve .cell` → opacity
+  // 600ms); it's not a JS timing input. The clockwise hand finishes at
+  // bright + SWEEP (= 6200ms) — THAT is when the `fadeout` phase begins and the
+  // central deck, the grid cross, AND the corner labels all fade out TOGETHER
+  // (deck via `.center-anchor.deck-fadeout`, cross + labels via
+  // `.finale-fadeout` rules). The last cell's 600ms fade tail runs out just
+  // after. SWEEP + ease match the VIEW_3 preview dissolve so the two look alike.
   const OVERVIEW_BRIGHT_MS = 1200
-  const OVERVIEW_DISSOLVE_SWEEP_MS = 3900
+  // Matches the VIEW_3 preview dissolve (PREVIEW_DISSOLVE_SWEEP_MS in
+  // RelationComponent) so the two clockwise effects are similar — same 5s
+  // sweep + ease-out-in (the ease is applied in RelationComponent.dissolveDelay).
+  const OVERVIEW_DISSOLVE_SWEEP_MS = 5000
   // After the quadrants have disappeared, the central deck + cross + corner
   // labels fade out together over this window (matches the 700ms CSS fades on
   // `.center-anchor.deck-fadeout`, `.view-3.finale-fadeout::before`, and
@@ -685,6 +700,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     view2ExitReason,
     canvasZoomed,
     allCanvasesZoomed,
+    relationsPreRevealed,
     zoomCanvas,
     view4HoveredQuadrant,
     setQuadrantHover,

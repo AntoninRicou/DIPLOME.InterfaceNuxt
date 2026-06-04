@@ -44,27 +44,27 @@ export const IMAGE_CREDIT_LINES: readonly string[] = [
 
 export const view3Interpretations: Record<View3ComponentId, View3Interpretation> = {
   component_1: {
-    title: 'Historical tracing',
+    title: 'Tracing origins',
     body:
-      'The surrounding image are retracing a lexical subject field based ' +
-      'on historical sources linked to the selected image.',
+      'These images are organized through shared book sources and subject ' +
+      'metadata derived from the centered image.',
   },
   component_2: {
-    title: 'Visual mirroring',
+    title: 'Mirroring structures',
     body:
-      'The surrounding image are reflecting recurring visual structures ' +
-      'such as shapes, and textures to the selected image.',
+      'These images are organized through shared visual structural and ' +
+      'compositional relations derived from the centered image.',
   },
   component_3: {
-    title: 'Semantic shifting',
+    title: 'Shifting descriptions',
     body:
-      'The surrounding image are sharing a semantic embeddings related ' +
-      'to the selected image.',
+      'These images are organized through shared semantic proximity ' +
+      'derived from the centered image.',
   },
   component_4: {
-    title: 'Collective replaying',
+    title: 'Replaying paths',
     body:
-      'The surrounding image are previous user selections including the ' +
-      'selected image. Yours will also contributes to the evolving map.',
+      'These images are organized through previous user selections or ' +
+      'previously unseen images. Your journey contributes to the evolving map.',
   },
 }

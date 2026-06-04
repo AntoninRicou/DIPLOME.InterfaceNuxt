@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, watch, ref } from 'vue'
+import { computed, watch, ref, onBeforeUnmount } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
 import CentralImage from '~/components/CentralImage.vue'
+import AtlasThumb from '~/components/AtlasThumb.vue'
 import { IMAGE_CREDIT_LINES } from '~/view3/view3Interpretations'
+import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 const store = useInteractionStore()
 const { naturalDimsVmin } = useCentralImageDims()
@@ -30,7 +32,129 @@ function onCornerClick(i: number) {
   store.centerReplayCircle(i)
 }
 
-watch(() => store.overviewConfirmed, (v) => { if (v) centerKey.value++ })
+// Clicking the center cross enters the explore-others view AND shows a rotate
+// caption on the interface centre, inviting the user to look at the corner
+// ribbons. Fades in, holds, fades out (interface-only).
+const EXPLORE_TEXT = 'Look for some previous user journey collaboration'
+const EXPLORE_HOLD_MS = 5000
+const exploreCaptionVisible = ref(false)
+function onCenterCrossClick() {
+  store.enterSinglePathView()
+  exploreCaptionVisible.value = true
+  finaleTimers.push(setTimeout(() => { exploreCaptionVisible.value = false }, EXPLORE_HOLD_MS))
+}
+
+// Split a circle's ids into the two arms of the corner L-ribbon. The ribbon is
+// one continuous sequence that bends at the window corner: the first half runs
+// inward along the HORIZONTAL edge toward the corner (so it's reversed —
+// its last image sits at the corner), then the second half runs out along the
+// VERTICAL edge from the corner. So the order reads 0 → corner → N-1.
+function ribbonArms(ids: string[]): { h: string[]; v: string[] } {
+  const mid = Math.ceil(ids.length / 2)
+  return { h: ids.slice(0, mid).slice().reverse(), v: ids.slice(mid) }
+}
+
+// Each ribbon image keeps its NATURAL footprint (aspect ratio + the per-image
+// size variation, same as the deck) scaled by RIBBON_SCALE — NOT a uniform
+// size. Images sit SIDE BY SIDE (touching, no gap, no overlap) along both arms.
+//
+// Each arm is capped at RIBBON_MAX_ARM_VMIN from the corner: if the images'
+// natural touching length would exceed it, the whole arm is scaled down to fit
+// ("reduce size if needed"). This guarantees the two ribbons sharing an edge
+// can't meet — leaving a clear gap in the MIDDLE of every edge (top/bottom AND
+// left/right). On a wide screen the top/bottom edges are long so their mid gap
+// stays generous; the cap mainly governs the shorter (vertical) edges.
+const RIBBON_SCALE = 0.6
+const RIBBON_GAP_H = 0 // gap between images on the horizontal (top/bottom) arms
+const RIBBON_GAP_V = 0 // gap between images on the vertical (left/right) arms
+const RIBBON_MAX_ARM_VMIN = 46 // max reach of each arm from the corner; lower = bigger mid gaps
+type RibbonThumb = { id: string; w: number; h: number; d: number }
+function layoutArm(ids: string[], main: 'w' | 'h', gap: number, startD: number, avail: number): RibbonThumb[] {
+  const base = ids.map((id) => {
+    const dm = naturalDimsVmin(id)
+    return { id, w: dm.width * RIBBON_SCALE, h: dm.height * RIBBON_SCALE }
+  })
+  const total = base.reduce((s, b) => s + (main === 'w' ? b.w : b.h) * (1 + gap), 0)
+  const fit = total > avail && avail > 0 ? avail / total : 1
+  const out: RibbonThumb[] = []
+  let d = startD
+  for (const b of base) {
+    const w = b.w * fit
+    const h = b.h * fit
+    out.push({ id: b.id, w, h, d })
+    d += (main === 'w' ? w : h) * (1 + gap)
+  }
+  return out
+}
+function ribbonLayout(ids: string[]): { hThumbs: RibbonThumb[]; vThumbs: RibbonThumb[] } {
+  const { h, v } = ribbonArms(ids)
+  const hThumbs = layoutArm(h, 'w', RIBBON_GAP_H, 0, RIBBON_MAX_ARM_VMIN)
+  // vertical arm starts just past the (fitted) corner image; its far end is also
+  // capped at RIBBON_MAX_ARM_VMIN so the left/right mid gaps match.
+  const offset = hThumbs[0]?.h ?? 0
+  const vThumbs = layoutArm(v, 'h', RIBBON_GAP_V, offset, RIBBON_MAX_ARM_VMIN - offset)
+  return { hThumbs, vThumbs }
+}
+const ribbonLayouts = computed(() => store.replayCircles.map((c) => ribbonLayout(c.ids)))
+
+// Per-corner absolute placement: thumb sized to its natural footprint, offset
+// `d` along the corner's edge, flush to the two window edges that meet there.
+function ribbonThumbStyle(corner: string, t: RibbonThumb, axis: 'h' | 'v'): Record<string, string> {
+  const s: Record<string, string> = {
+    width: `${t.w.toFixed(2)}vmin`,
+    height: `${t.h.toFixed(2)}vmin`,
+  }
+  const along = `${t.d.toFixed(2)}vmin`
+  const left = corner === 'tl' || corner === 'bl'
+  const top = corner === 'tl' || corner === 'tr'
+  if (axis === 'h') {
+    // run along the horizontal edge; flush to top/bottom
+    s[left ? 'left' : 'right'] = along
+    s[top ? 'top' : 'bottom'] = '0'
+  } else {
+    // run along the vertical edge; flush to left/right
+    s[top ? 'top' : 'bottom'] = along
+    s[left ? 'left' : 'right'] = '0'
+  }
+  return s
+}
+
+watch(() => store.overviewConfirmed, (v) => { if (v) { centerKey.value++; startFinaleNarration() } })
+
+// ── Post-overview finale narration + center cross ──
+// 4s after the circle reveals (overviewConfirmed), a two-beat rotate text
+// plays SEQUENTIALLY: sentence 1 on the INTERFACE (centred, rotate style),
+// then — once it's faded — sentence 2 on the PROJECT (set-center-caption). When
+// both are done, the `+` cross fades in at the centre of the circle, replacing
+// the old "See your path" button (clicking it = enterSinglePathView).
+const FINAL_INTERFACE_TEXT = 'Your journey has produced a unique selection of ten images.'
+const FINAL_PROJECT_TEXT = 'Your images found different neighbors across each proximity mode.'
+const FINAL_TEXT_DELAY_MS = 4000   // wait before sentence 1 appears (after circle reveals)
+const HOLD_INTERFACE_MS = 4000     // sentence 1 (interface) full-opacity dwell
+const HOLD_PROJECT_MS = 4000       // sentence 2 (project) full-opacity dwell
+const CROSS_DELAY_MS = 4000        // wait after sentence 2 fades before the cross
+const finalCaptionVisible = ref(false) // interface sentence 1
+const showCenterCross = ref(false)      // the center `+` (replaces "See your path")
+let finaleTimers: ReturnType<typeof setTimeout>[] = []
+
+function startFinaleNarration() {
+  const t1 = FINAL_TEXT_DELAY_MS                                   // sentence 1 (interface) in
+  const t1out = t1 + HOLD_INTERFACE_MS                             // sentence 1 out
+  const t2 = t1out + ROTATE_FADE_OUT_MS                            // sentence 2 (project) in
+  const t2out = t2 + HOLD_PROJECT_MS                               // sentence 2 out
+  const tCross = t2out + CROSS_DELAY_MS                            // center cross in
+  finaleTimers.push(setTimeout(() => { finalCaptionVisible.value = true }, t1))
+  finaleTimers.push(setTimeout(() => { finalCaptionVisible.value = false }, t1out))
+  finaleTimers.push(setTimeout(() => { store.setCenterCaption(FINAL_PROJECT_TEXT, 'rotate') }, t2))
+  finaleTimers.push(setTimeout(() => { store.setCenterCaption('') }, t2out))
+  finaleTimers.push(setTimeout(() => { showCenterCross.value = true }, tCross))
+}
+
+onBeforeUnmount(() => {
+  for (const t of finaleTimers) clearTimeout(t)
+  finaleTimers = []
+  store.setCenterCaption('') // don't leave the project sentence lingering
+})
 
 // ── Overview finale trigger ──
 // The moment the active branch reaches depth 10 (`overviewEligible`), the
@@ -119,10 +243,10 @@ function onLeave() {
     />
 
     <div v-if="!store.overviewConfirmed" class="grid">
-      <RelationComponent component-id="component_1" label="Trace" position="tl" />
-      <RelationComponent component-id="component_2" label="Mirror" position="tr" />
-      <RelationComponent component-id="component_3" label="Shift" position="bl" />
-      <RelationComponent component-id="component_4" label="Replay" position="br" />
+      <RelationComponent component-id="component_1" label="Source" position="tl" />
+      <RelationComponent component-id="component_2" label="Form" position="tr" />
+      <RelationComponent component-id="component_3" label="Semantic" position="bl" />
+      <RelationComponent component-id="component_4" label="Collaborative" position="br" />
     </div>
 
     <div v-if="!store.overviewConfirmed" class="top-controls">
@@ -166,37 +290,60 @@ function onLeave() {
       aria-hidden="true"
       @mouseenter="store.setQuadrantHover(null)"
     >
-      <div :key="centerKey" class="center-focus">
-        <CentralImage
-          :ids="store.centeredStack"
-          :active-index="store.centeredCircleIds ? 0 : store.centralStackActiveIndex"
-          :expanded="store.overviewConfirmed"
-          :reveal="store.overviewConfirmed"
-          :reveal-key="centerKey"
-          :reveal-stagger="0"
-          :reveal-delay="400"
-          source="original"
-          @update:hovered="store.setCentralHovered"
-          @hover="onCircleHover"
-        />
-      </div>
+      <Transition name="center-fade" mode="out-in" appear>
+        <div :key="centerKey" class="center-focus">
+          <CentralImage
+            :ids="store.centeredStack"
+            :active-index="store.centeredCircleIds ? 0 : store.centralStackActiveIndex"
+            :expanded="store.overviewConfirmed"
+            :reveal="store.overviewConfirmed"
+            :reveal-key="centerKey"
+            :reveal-stagger="0"
+            :reveal-delay="400"
+            :radius-scale="1.45"
+            source="original"
+            @update:hovered="store.setCentralHovered"
+            @hover="onCircleHover"
+          />
+        </div>
+      </Transition>
     </div>
 
     <!-- "Explore others" — four existing Replay-proximity circles, one per
-         quadrant, shown once the single-path view is active. Clicking one
-         promotes it to the centre and redraws the project's single-state
-         path to that circle (store.centerReplayCircle). -->
-    <button
-      v-for="(circle, i) in (store.singlePathViewActive ? store.replayCircles : [])"
-      :key="circle.anchorId"
-      class="corner-circle"
-      :data-corner="CORNERS[i]?.key"
-      :style="{ left: `${CORNERS[i]?.x}%`, top: `${CORNERS[i]?.y}%` }"
-      :aria-label="`focus existing circle ${i + 1}`"
-      @click="onCornerClick(i)"
-    >
-      <CentralImage :ids="circle.ids" expanded :interactive="false" reveal :reveal-stagger="110" source="original" />
-    </button>
+         corner, shown once the single-path view is active. Each is laid out as
+         an L-shaped RIBBON hugging the window's two edges at that corner (90°
+         bend, images touching, in circle order). Clicking one promotes it to
+         the centre and redraws the project's single-state path
+         (store.centerReplayCircle). -->
+    <TransitionGroup name="ribbon" tag="div" class="ribbon-layer" appear>
+      <button
+        v-for="(circle, i) in (store.singlePathViewActive ? store.replayCircles : [])"
+        :key="circle.anchorId"
+        class="corner-ribbon"
+        :data-corner="CORNERS[i]?.key"
+        :aria-label="`focus existing circle ${i + 1}`"
+        @click="onCornerClick(i)"
+      >
+        <!-- horizontal arm — flush to the top/bottom window edge -->
+        <span
+          v-for="t in ribbonLayouts[i]?.hThumbs ?? []"
+          :key="`h-${t.id}`"
+          class="ribbon-thumb"
+          :style="ribbonThumbStyle(CORNERS[i]?.key ?? 'tl', t, 'h')"
+        >
+          <AtlasThumb :id="t.id" fit="contain" source="original" />
+        </span>
+        <!-- vertical arm — flush to the left/right window edge -->
+        <span
+          v-for="t in ribbonLayouts[i]?.vThumbs ?? []"
+          :key="`v-${t.id}`"
+          class="ribbon-thumb"
+          :style="ribbonThumbStyle(CORNERS[i]?.key ?? 'tl', t, 'v')"
+        >
+          <AtlasThumb :id="t.id" fit="contain" source="original" />
+        </span>
+      </button>
+    </TransitionGroup>
 
     <p
       v-if="!store.overviewConfirmed"
@@ -211,16 +358,41 @@ function onLeave() {
     </p>
 
 
-    <div
-      v-if="store.overviewConfirmed && store.overviewControlsReady && !store.singlePathViewActive"
-      class="overview-control"
+    <!-- Post-overview finale: sentence 1 on the interface (centred, rotate
+         style), 4s after the circle reveals. Sentence 2 plays on the project.
+         (Interface-only here; the project sentence is set-center-caption.) -->
+    <p
+      v-if="store.overviewConfirmed && !store.singlePathViewActive"
+      class="final-caption"
+      :class="{ visible: finalCaptionVisible }"
+      aria-live="polite"
     >
-      <button class="contribute" @click="store.enterSinglePathView()">
-        See your path
-      </button>
-    </div>
+      <span class="caption-text">{{ FINAL_INTERFACE_TEXT }}</span>
+    </p>
+
+    <!-- Explore-others prompt — shown (interface centre) when the center cross
+         is clicked, inviting the user to the corner ribbons. -->
+    <p
+      v-if="store.singlePathViewActive"
+      class="final-caption"
+      :class="{ visible: exploreCaptionVisible }"
+      aria-live="polite"
+    >
+      <span class="caption-text">{{ EXPLORE_TEXT }}</span>
+    </p>
+
+    <!-- Center `+` cross — replaces the old "See your path" button. Appears
+         after the finale narration; click = enterSinglePathView + explore prompt. -->
+    <button
+      v-if="store.overviewConfirmed && showCenterCross && !store.singlePathViewActive"
+      class="center-cross"
+      aria-label="see your path"
+      @click="onCenterCrossClick"
+    >
+      +
+    </button>
     <div
-      v-else-if="store.singlePathViewActive"
+      v-if="store.singlePathViewActive"
       class="overview-control finale"
     >
       <button class="contribute" @click="onTryAgain">
@@ -448,34 +620,80 @@ function onLeave() {
   transform-origin: center center;
 }
 
-/* Corner "existing circle" — a scaled-down CentralImage as a single click
-   target. Peripheral by design (centre stays dominant): low base opacity +
-   small scale, with subtle hover amplification only. No glow, no extra
-   visual system. Positioned via inline left/top at the quadrant centre. */
-.corner-circle {
+/* Corner "existing circle" — now an L-shaped RIBBON hugging the window's two
+   edges at the corner (no oval). The button is a 0-size anchor at the window
+   corner; each image is absolutely positioned off it (offset + size computed
+   in `ribbonLayout` / `ribbonThumbStyle`, keeping the image's natural ratio +
+   size variation). Single click target → centerReplayCircle. Tune RIBBON_SCALE
+   (size) and RIBBON_GAP_H / RIBBON_GAP_V (spacing) in <script>. */
+.corner-ribbon {
   position: absolute;
-  /* Box bounds the oval deck (≈ 2×RADIUS_X wide, 2×RADIUS_Y tall, plus
-     image footprint) centred on the inline left/top point, then shrunk.
-     transform-origin centre so the hover scale-up grows in place. */
-  width: 70vmin;
-  height: 46vmin;
+  width: 0;
+  height: 0;
   margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
   cursor: pointer;
-  opacity: 0.85;
   pointer-events: auto;
   z-index: 40;
-  transform-origin: center center;
-  transform: translate(-50%, -50%) scale(0.44);
-  transition: opacity 150ms ease-out, transform 150ms ease-out;
 }
-.corner-circle:hover,
-.corner-circle:focus-visible {
-  opacity: 1;
-  transform: translate(-50%, -50%) scale(0.47);
+.corner-ribbon:focus-visible {
   outline: none;
+}
+.corner-ribbon[data-corner="tl"] { top: 0; left: 0; }
+.corner-ribbon[data-corner="tr"] { top: 0; right: 0; }
+.corner-ribbon[data-corner="bl"] { bottom: 0; left: 0; }
+.corner-ribbon[data-corner="br"] { bottom: 0; right: 0; }
+
+/* TransitionGroup wrapper — no box of its own (the buttons are absolute and
+   anchor to .view-3); it only carries the fade transitions. */
+.ribbon-layer {
+  display: contents;
+}
+
+/* Each thumb is absolutely placed (top/bottom/left/right + width/height set
+   inline by ribbonThumbStyle). The AtlasThumb fills it (contain → the natural
+   aspect matches the inline w/h, so no letterboxing). Low opacity at rest;
+   hovering ANYWHERE on the ribbon lifts the WHOLE group to full (mimics the
+   relation-field reveal) — no per-image hover on the side (that's reserved for
+   the centre circle). */
+.ribbon-thumb {
+  position: absolute;
+  line-height: 0;
+  opacity: 0.4;
+  transition: opacity 240ms ease-out;
+}
+.corner-ribbon:hover .ribbon-thumb,
+.corner-ribbon:focus-visible .ribbon-thumb {
+  opacity: 1;
+}
+.ribbon-thumb :deep(.atlas-thumb) {
+  width: 100%;
+  height: 100%;
+}
+
+/* Fade in/out for the corner ribbons (appear on entering explore-others, and
+   swap on each corner pick) and for the centred circle — so nothing pops. */
+.ribbon-enter-active,
+.ribbon-leave-active,
+.ribbon-appear-active {
+  transition: opacity 450ms ease;
+}
+.ribbon-enter-from,
+.ribbon-leave-to,
+.ribbon-appear-from {
+  opacity: 0;
+}
+.center-fade-enter-active,
+.center-fade-leave-active,
+.center-fade-appear-active {
+  transition: opacity 450ms ease;
+}
+.center-fade-enter-from,
+.center-fade-leave-to,
+.center-fade-appear-from {
+  opacity: 0;
 }
 
 .interpret-message {
@@ -511,6 +729,90 @@ function onLeave() {
   left: 50%;
   transform: translateX(-50%);
   z-index: 12;
+}
+
+/* Post-overview finale interface caption (sentence 1) — centred, rotate style
+   (--rotate-size + the organic blue-grey glyph stroke on .caption-text),
+   fading on the shared rotate timing. Sits in the empty centre of the circle. */
+.final-caption {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  padding: 0 1rem;
+  max-width: min(46em, 88vw);
+  text-align: center;
+  font-size: var(--rotate-size);
+  line-height: 1.4;
+  color: #595b54;
+  pointer-events: none;
+  z-index: 13;
+  opacity: 0;
+  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing);
+}
+.final-caption.visible {
+  opacity: 1;
+}
+.final-caption .caption-text {
+  text-shadow:
+    0 0 4px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 15px var(--rotate-panel-bg),
+    0 0 18px var(--rotate-panel-bg);
+}
+
+/* Center `+` cross — the "see your path" trigger, in the middle of the circle.
+   Same `+` glyph + warm pulsing glow as VIEW_3's quadrant trigger crosses, so
+   it reads as the familiar trigger. Fades in (after the finale narration). */
+.center-cross {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: #595b54;
+  cursor: pointer;
+  z-index: 61; /* above the circle deck (.center-anchor z:60) */
+  animation:
+    center-cross-in var(--rotate-fade-ms) var(--rotate-fade-easing) 1 both,
+    center-cross-glow 1.8s ease-in-out infinite;
+}
+.center-cross:hover {
+  color: #2a2e36;
+}
+@keyframes center-cross-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* Warm pulsing glow — same palette as VIEW_3's `cross-glow`. */
+@keyframes center-cross-glow {
+  0%, 100% {
+    text-shadow: 0 0 0 rgba(255, 240, 200, 0);
+  }
+  50% {
+    text-shadow:
+      0 0 8px rgba(255, 245, 215, 1),
+      0 0 20px rgba(252, 230, 180, 1),
+      0 0 42px rgba(245, 215, 155, 1),
+      0 0 80px rgba(238, 200, 135, 0.95),
+      0 0 140px rgba(230, 188, 120, 0.85),
+      0 0 220px rgba(220, 175, 105, 0.65);
+  }
 }
 /* `finale` — two stacked options shown after `See your path` is clicked.
    Vertical stack keeps each call-to-action on its own line so the warm

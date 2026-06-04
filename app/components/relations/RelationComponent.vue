@@ -8,6 +8,18 @@ const props = defineProps<{
   componentId: string
   label: string
   position?: 'tl' | 'tr' | 'bl' | 'br'
+  // VIEW_3 preview mode: the suggestion images render as a non-interactive
+  // preview, revealed per-quadrant (clockwise) when this quadrant's cross is
+  // clicked (gated on store.canvasZoomed[index]) and STAY visible afterward
+  // (not the latent 0.05). No hover-zoom, no click-to-activate, no ghost path,
+  // no corner label (View3Transition owns the VIEW_3 labels).
+  preview?: boolean
+  // Preview-only, set in sequence on the central-image click:
+  //  - flashing: every cell jumps to full opacity (behind the quadrant texts);
+  //  - dissolving: the flashed cells sweep clockwise back down to latent (0.05)
+  //    while the quadrant texts disappear, before VIEW_4 takes over.
+  flashing?: boolean
+  dissolving?: boolean
 }>()
 const store = useInteractionStore()
 
@@ -23,6 +35,9 @@ const { data, pending, error, refresh } = await useFetch<{
   componentId: string
   centralImageId: string
   related: string[]
+  // Per-id subject string. Present only for components with a subject source
+  // (component_1 / Source today); empty object otherwise.
+  subjects: Record<string, string>
 }>(() => `/api/relations/${props.componentId}`, {
   query: computed(() => ({ centralImageId: centralImageId.value ?? '' })),
   watch: [centralImageId],
@@ -199,11 +214,17 @@ const ENTER_STEP_MS = ENTER_SWEEP_MS / 16
 // quadrant's own 4 cells with all four quadrants running CONCURRENTLY (~¼
 // the time, same per-cell step).
 const isFirstReveal = ref(true)
-watch(centralImageId, () => { isFirstReveal.value = false })
+// VIEW_4 initial mount coming from the VIEW_3 preview: the images were
+// already revealed there, so suppress this component's on-mount clockwise
+// sweep AND the corner-label announce-glow. Only true for the very first
+// mount; the watch below clears it on the first central-image change so
+// later activations reveal normally. Never set in preview mode itself.
+const suppressMountReveal = ref(!props.preview && store.relationsPreRevealed)
+watch(centralImageId, () => { isFirstReveal.value = false; suppressMountReveal.value = false })
 
 function enterDelay(slotIdx: number): string {
   const pos = props.position ?? 'tl'
-  if (isFirstReveal.value) {
+  if (!props.preview && isFirstReveal.value) {
     // Whole-oval sweep: delay = absolute clockwise position from 12 o'clock.
     // CSS-screen angle: 0°=right, 90°=down, 270°=up. Increasing angle is
     // clockwise on screen (y points down).
@@ -222,15 +243,31 @@ function enterDelay(slotIdx: number): string {
 // the whole oval (absolute clockwise position from 12 o'clock) over the
 // store's dissolve-sweep window. Consumed by the `.finale-dissolve`
 // transition-delay so all four quadrants fade out as one clockwise sweep.
+// Whole-oval clockwise sweep duration for the VIEW_3 preview dissolve (the
+// advance-`+` exit). Kept in sync with View3Transition's DISSOLVE_SWEEP_MS so
+// the cells and the quadrant texts wipe clockwise together.
+const PREVIEW_DISSOLVE_SWEEP_MS = 5000
+// Per-cell delay for a cell at clockwise position `f` (0..1) so the sweep HAND
+// moves with smooth ease-in-out motion — slow at the start, accelerating
+// through the middle, decelerating to the end. This is the *inverse* of an
+// ease-in-out applied to the hand position; unlike a plain ease-out-in curve
+// (which has a zero-velocity kink mid-sweep that bunches the cells and reads
+// as choppy), this keeps the hand speed finite throughout, so the wipe is
+// smooth. Shared by the VIEW_3 preview dissolve AND the overview finale.
+function sweepDelayFraction(f: number): number {
+  return f < 0.5 ? Math.cbrt(f / 4) : 1 - Math.cbrt(2 * (1 - f)) / 2
+}
 function dissolveDelay(slotIdx: number): string {
   const pos = props.position ?? 'tl'
   const a = cellArcAnglesByQuadrant.value[pos][slotIdx] ?? 0
   const thetaDeg = QUADRANT_BASE_DEG[pos] + (a * 180) / Math.PI
   const cw = (((thetaDeg - 270) % 360) + 360) % 360
-  return `${Math.round((cw / 360) * store.overviewDissolveSweepMs)}ms`
+  const sweep = props.preview ? PREVIEW_DISSOLVE_SWEEP_MS : store.overviewDissolveSweepMs
+  return `${Math.round(sweepDelayFraction(cw / 360) * sweep)}ms`
 }
 
 function onRelatedClick(id: string) {
+  if (props.preview) return
   store.activateCentral(id)
 }
 
@@ -243,17 +280,37 @@ function onRelatedClick(id: string) {
 // track the centre image holds (set by `focus(id)`) — so the centre keeps
 // glowing while the hovered cell glows too, and hover-out just clears the
 // hover halo, leaving the centre's glow intact.
-function onCellHover(id: string) {
+function onCellHover(id: string, slotIdx: number) {
+  if (props.preview) return
   store.setHighlight(id)
   // Ghost path — dashed translucent line from active central image to
   // this cell's id, drawn on every project canvas. Previews the proximity
   // link before commit. Cleared on cell-leave (fades out ~150ms).
   store.setGhostPath(id)
+  // Track the hovered cell so the subject label can render between this
+  // cell and the centred image (see `hoveredSubject` / `.subject-label`).
+  hoveredCell.value = { id, slotIdx }
 }
 function onCellLeave() {
   store.setHighlight(null)
   store.setGhostPath(null)
+  hoveredCell.value = null
 }
+
+// ── Hover subject label ──
+// The currently-hovered cell (id + slot), and the subject string for it
+// (from the server `subjects` map — only populated for components with a
+// subject source). Rendered as a single-line `.subject-label` anchored at
+// the midpoint of the line between the cell and the centred image.
+const hoveredCell = ref<{ id: string; slotIdx: number } | null>(null)
+const hoveredSubject = computed(() =>
+  hoveredCell.value ? (data.value?.subjects?.[hoveredCell.value.id] ?? null) : null,
+)
+const hoveredOffset = computed(() =>
+  hoveredCell.value
+    ? CELL_OFFSETS.value[props.position ?? 'tl'][hoveredCell.value.slotIdx]
+    : null,
+)
 
 // ── Cascade reveal direction ──
 // Determined on each mouseenter from where the cursor crossed the
@@ -273,7 +330,17 @@ const QUADRANT_INDEX: Record<'tl' | 'tr' | 'bl' | 'br', number> = {
   tl: 0, tr: 1, bl: 2, br: 3,
 }
 
+// In preview mode (VIEW_3) the cells stay hidden until this quadrant's cross
+// is clicked (its canvasZoomed flag flips). Outside preview the cells are
+// always "revealed" (their visibility follows the normal latent/hover
+// grammar). Drives the `.preview-revealed` class → the clockwise reveal.
+const revealed = computed(() =>
+  props.preview ? !!store.canvasZoomed[QUADRANT_INDEX[props.position ?? 'tl']] : true,
+)
+
 function onMouseEnter(e: MouseEvent) {
+  // Preview cells are non-interactive — no hover-zoom, no reveal-direction.
+  if (props.preview) return
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   const x = (e.clientX - rect.left) / rect.width
   const y = (e.clientY - rect.top) / rect.height
@@ -314,12 +381,16 @@ function onMouseEnter(e: MouseEvent) {
       'is-inert': interpretationActive,
       'is-frozen': store.overviewFinaleActive,
       'finale-fadeout': store.overviewFinalePhase === 'fadeout',
+      'is-preview': preview,
+      'no-entrance': suppressMountReveal,
     }"
     :data-position="position ?? 'tl'"
     :data-reveal="revealDirection"
     @mouseenter="onMouseEnter"
   >
-    <span class="corner-label" :data-position="position ?? 'tl'">{{ label }}</span>
+    <!-- VIEW_3 (preview) owns its own corner labels in View3Transition; this
+         component's label is only rendered in the relational view. -->
+    <span v-if="!preview" class="corner-label" :data-position="position ?? 'tl'">{{ label }}</span>
 
     <div v-if="!centralImageId" class="status">no central image</div>
     <!-- Loading is silent — no "querying…" text. The empty branch keeps the
@@ -347,6 +418,11 @@ function onMouseEnter(e: MouseEvent) {
         'finale-bright': store.overviewFinalePhase === 'bright',
         'finale-dissolve':
           store.overviewFinalePhase === 'dissolve' || store.overviewFinalePhase === 'fadeout',
+        'is-preview': preview,
+        'preview-revealed': preview && revealed,
+        'preview-flash': preview && flashing,
+        'preview-dissolve': preview && dissolving,
+        'no-entrance': suppressMountReveal,
       }"
     >
       <button
@@ -361,7 +437,7 @@ function onMouseEnter(e: MouseEvent) {
         }"
         :title="cell.id"
         @click="onRelatedClick(cell.id)"
-        @mouseenter="onCellHover(cell.id)"
+        @mouseenter="onCellHover(cell.id, cell.slotIdx)"
         @mouseleave="onCellLeave"
       >
         <span class="cell-reveal">
@@ -369,6 +445,22 @@ function onMouseEnter(e: MouseEvent) {
         </span>
       </button>
     </TransitionGroup>
+
+    <!-- Hover subject label — the subject string of the hovered cell, shown
+         on the radial line between that cell and the centred image. Its inner
+         edge sits at the midpoint and the text grows OUTWARD (away from the
+         centre) so a long subject overflows toward the viewport edge rather
+         than across the central image. Only rendered when a subject exists
+         for the hovered id (i.e. Source / component_1 today). -->
+    <Transition name="subject-fade">
+      <div
+        v-if="!preview && hoveredSubject"
+        class="subject-label"
+        :data-position="position ?? 'tl'"
+        :style="{ '--cell-x': hoveredOffset?.x, '--cell-y': hoveredOffset?.y }"
+        aria-hidden="true"
+      >{{ hoveredSubject }}</div>
+    </Transition>
 
     <ProximityPanel
       v-if="interpretationActive && interpretation"
@@ -423,19 +515,14 @@ function onMouseEnter(e: MouseEvent) {
 /* Corner label appearance + position come from the global
    `.corner-label` class in app.vue (shared with VIEW_3's corner tags
    so the labels read as continuous through the VIEW_3 → VIEW_4 swap).
-   Locally we only need to bump the z-index above the cells AND fire a
-   one-shot glow pulse on mount — VIEW_4 only mounts once after the
-   top-cross click, so the animation here is the visible companion to
-   project's `body[data-corner-labels="visible"]:not([data-state="single"])
-   .corner-label { animation: corner-label-glow }` pulse (style.css).
-   Both screens swell their warm cream shadow then settle, in lockstep,
-   right as the labels announce themselves. */
+   Locally we only bump the z-index above the cells. (No glow pulse — the
+   labels are already revealed per-quadrant in VIEW_3 and the animated
+   text-shadow swell was removed everywhere for paint cost.) */
 .corner-label {
   /* Above the cells AND above the interpretation veil (.interpret-veil,
-     z: 5) so the Mirror / Trace / Shift / Replay tags stay crisp and visible
-     in interpretation mode rather than being blurred away with the field. */
+     z: 5) so the Source / Form / Semantic / Collaborative tags stay crisp
+     and visible in interpretation mode rather than being blurred away. */
   z-index: 6;
-  animation: corner-label-glow 3.5s ease-out 1 both;
 }
 
 /* Overview finale `fadeout` phase — the corner labels fade out TOGETHER with
@@ -446,32 +533,6 @@ function onMouseEnter(e: MouseEvent) {
 .rel.finale-fadeout .corner-label {
   opacity: 0;
   transition: opacity 700ms ease-out;
-}
-
-@keyframes corner-label-glow {
-  0%   {
-    text-shadow:
-      0 0 8px rgba(255, 252, 230, 1),
-      0 0 20px rgba(255, 248, 220, 0.9),
-      0 0 42px rgba(255, 244, 210, 0.6),
-      0 0 75px rgba(255, 240, 200, 0.3);
-  }
-  28%  {
-    text-shadow:
-      0 0 6px rgba(255, 255, 245, 1),
-      0 0 20px rgba(255, 252, 225, 1),
-      0 0 55px rgba(252, 240, 195, 1),
-      0 0 115px rgba(248, 225, 165, 0.95),
-      0 0 210px rgba(240, 205, 130, 0.8),
-      0 0 340px rgba(230, 188, 100, 0.55);
-  }
-  100% {
-    text-shadow:
-      0 0 8px rgba(255, 252, 230, 1),
-      0 0 20px rgba(255, 248, 220, 0.9),
-      0 0 42px rgba(255, 244, 210, 0.6),
-      0 0 75px rgba(255, 240, 200, 0.3);
-  }
 }
 
 .status {
@@ -528,24 +589,24 @@ function onMouseEnter(e: MouseEvent) {
 /* ── overview finale ──
    When the 10th image is reached, every cell flashes to full opacity (a
    brief bright hold), then fades out one-by-one CLOCKWISE across the whole
-   oval (per-cell `--dissolve-delay`). The sweep is kept short
-   (OVERVIEW_DISSOLVE_SWEEP_MS = 400ms in interaction.ts) so it reads as a
-   quick clockwise wipe that ends with everything gone, leaving only the
-   gradient; the deck then fades and the contributed circle reveals.
-   Overrides the latent/hover opacity; interaction
-   is frozen via `.rel.is-frozen`. Pure appearance — these only touch
-   opacity, the cells' geometry/transform is untouched. */
+   oval (per-cell `--dissolve-delay`, ease-out-in over OVERVIEW_DISSOLVE_SWEEP_MS
+   = 5000ms in interaction.ts) — the SAME clockwise duration + ease as the
+   VIEW_3 preview dissolve, so the two effects match. Ends with everything
+   gone; the deck then fades and the contributed circle reveals. Overrides the
+   latent/hover opacity; interaction is frozen via `.rel.is-frozen`. Pure
+   appearance — these only touch opacity, the cells' geometry/transform is
+   untouched. */
 .constellation.finale-bright .cell {
   opacity: 1;
   transition: opacity 250ms ease-out;
 }
 .constellation.finale-dissolve .cell {
   opacity: 0;
-  /* Per-cell fade tail (200ms). The clockwise hand (per-cell `--dissolve-delay`
-     spread) is SWEEP = 3900ms in interaction.ts; the `fadeout` phase fires at
-     bright + SWEEP, so this 200ms tail overlaps the start of the deck/cross/
-     label fade. Visual dissolve = SWEEP (3900) + 200 = 4100ms total. */
-  transition: opacity 200ms ease-out var(--dissolve-delay, 0ms);
+  /* Per-cell fade tail (600ms) + ease-out-in --dissolve-delay spread over
+     SWEEP = 5000ms (interaction.ts), matching the VIEW_3 preview dissolve so
+     the two clockwise effects are similar. The only difference: here the cells
+     fade fully to 0 (everything goes), whereas the preview settles to latent. */
+  transition: opacity 600ms ease-out var(--dissolve-delay, 0ms);
 }
 
 .cell {
@@ -629,6 +690,56 @@ function onMouseEnter(e: MouseEvent) {
   to   { opacity: 1; transform: scale(1); }
 }
 
+/* ── VIEW_3 preview mode ──
+   Non-interactive suggestion preview. Cells stay hidden until this quadrant's
+   cross is clicked (`.preview-revealed`, gated on store.canvasZoomed), then
+   clock in per-quadrant (clockwise) and SETTLE to the latent resting opacity
+   (0.05 — the `.cell` default, i.e. how they sit in VIEW_4 until hover). The
+   bright moment comes later, on the central-image click (preview-flash). The
+   on-mount keyframe is disabled here; the reveal is a transition driven by the
+   `.preview-revealed` class so it fires on the cross click, not on mount. */
+.rel.is-preview { pointer-events: none; }
+.rel.is-preview .cell {
+  pointer-events: none;
+}
+.constellation.is-preview .cell-reveal {
+  animation: none;
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity 280ms ease-out var(--enter-delay, 0ms),
+    transform 280ms ease-out var(--enter-delay, 0ms);
+}
+.constellation.is-preview.preview-revealed .cell-reveal {
+  opacity: 1;
+  transform: scale(1);
+}
+/* Central-image click, step 1 — FLASH: every cell jumps to full opacity
+   (behind the quadrant texts), all together. */
+.constellation.is-preview.preview-flash .cell {
+  opacity: 1;
+  transition: opacity 350ms ease-out;
+}
+/* Central-image click, step 2 — clockwise REDUCE: the flashed cells sweep
+   clockwise (per-cell --dissolve-delay, from 12 o'clock) back DOWN to the
+   latent resting opacity (0.05 = their VIEW_4 state), so the hand-off is
+   seamless. They do NOT disappear. (Only the quadrant texts fully fade to 0 —
+   see View3Transition.) Declared after preview-flash so it wins once both
+   classes are present. */
+.constellation.is-preview.preview-dissolve .cell {
+  opacity: 0.05;
+  transition: opacity 600ms ease-out var(--dissolve-delay, 0ms);
+}
+
+/* ── VIEW_4 initial mount from the preview ──
+   The images were already revealed in VIEW_3, so suppress this mount's
+   clockwise sweep — cells appear at their resting latent state immediately;
+   the VIEW_3 → VIEW_4 cross-fade blends the visible preview into the latent
+   field. Cleared on the first central-image change, so later activations
+   reveal normally. (Corner labels carry no glow anymore, so nothing to
+   suppress there.) */
+.constellation.no-entrance .cell-reveal { animation: none; }
+
 /* component hover → arc reveals with per-cell stagger.
    Direction depends on where the cursor crossed the quadrant border
    (set by onMouseEnter): forward = innermost (cell-1) first, reverse =
@@ -701,6 +812,55 @@ function onMouseEnter(e: MouseEvent) {
   left: 0;
   --center-shift-x: -50%;
   --center-shift-y: -50%;
+}
+
+/* ── hover subject label ──
+   Single-line subject string for the hovered cell, sitting on the radial
+   line between the cell and the centred image. The label is anchored at the
+   same inner corner of `.rel` as the cells (the viewport-centre
+   intersection) and translated outward by `--subject-fraction` of the
+   hovered cell's offset, so its inner edge lands at the midpoint of the
+   cell→centre line. NO centre-shift on the radial axis: the box's anchored
+   (inner) corner is the midpoint, so the text grows OUTWARD, away from the
+   centre — a long subject overflows toward the viewport edge instead of
+   over the central image. `--label-vshift` recentres the line vertically on
+   the midpoint (the box otherwise extends up/down from its anchored corner).
+   z-index 7 keeps it above the cells (1–5) and the corner label (6). */
+.subject-label {
+  position: absolute;
+  z-index: 7;
+  --subject-fraction: 0.5;
+  --label-vshift: 0%;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-style: italic;
+  letter-spacing: 0.015em;
+  line-height: 1.1;
+  color: #595b54;
+  pointer-events: none;
+  /* Soft halo so the text stays legible over the suggestion images. */
+  text-shadow:
+    0 0 4px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 8px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9));
+  transform:
+    translate(
+      calc(var(--cell-x, 0) * var(--subject-fraction)),
+      calc(var(--cell-y, 0) * var(--subject-fraction))
+    )
+    translate(0, var(--label-vshift));
+}
+.rel[data-position="tl"] .subject-label { bottom: 0; right: 0; text-align: right; --label-vshift: 50%; }
+.rel[data-position="tr"] .subject-label { bottom: 0; left: 0;  text-align: left;  --label-vshift: 50%; }
+.rel[data-position="bl"] .subject-label { top: 0;    right: 0; text-align: right; --label-vshift: -50%; }
+.rel[data-position="br"] .subject-label { top: 0;    left: 0;  text-align: left;  --label-vshift: -50%; }
+
+.subject-fade-enter-active,
+.subject-fade-leave-active {
+  transition: opacity 150ms ease-out;
+}
+.subject-fade-enter-from,
+.subject-fade-leave-to {
+  opacity: 0;
 }
 
 /* ── interpretation overlay ──

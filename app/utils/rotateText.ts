@@ -14,10 +14,17 @@
  * instead. See feedback_rotate_text_sync.md for the contract.
  */
 
-/** How long each sentence sits at full opacity before the timer
- *  advances to the next index (and the leave→empty→enter sequence
- *  begins). Currently 4000ms. */
-export const ROTATE_PANEL_MS = 4000
+/** How long each sentence sits at full opacity before the timer advances
+ *  to the next index (and the leave→empty→enter sequence begins). The HOLD
+ *  is now per-view (the views wanted different paces); only the FADE
+ *  (ROTATE_FADE_OUT_MS / --rotate-fade-ms) stays shared/locked.
+ *    VIEW_1 explanation        → 4s
+ *    VIEW_2 entry + project     → 6s  (interface narration AND the project-
+ *                                      only centred narration)
+ *    VIEW_3 intro + modes line  → 6s */
+export const VIEW1_PANEL_MS = 4000
+export const VIEW2_PANEL_MS = 6000
+export const VIEW3_PANEL_MS = 6000
 
 /** How long the leave animation takes before the script triggers the
  *  next view advance. MUST equal `--rotate-fade-ms` in app.vue's `:root`

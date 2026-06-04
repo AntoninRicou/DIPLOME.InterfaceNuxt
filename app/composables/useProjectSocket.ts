@@ -198,6 +198,20 @@ export function useProjectSocket() {
     return true
   }
 
+  // Per-quadrant corner-label reveal — the granular sibling of the
+  // all-or-nothing `set-corner-labels`. VIEW_3 emits one of these per
+  // quadrant cross click so each project corner label pops in lockstep
+  // with the matching interface label, instead of all four at once.
+  function setCornerLabel(canvasIndex: number, visible: boolean): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-corner-label', canvasIndex)
+      return false
+    }
+    socket.emit('message', { type: 'set-corner-label', payload: { canvasIndex, visible } })
+    return true
+  }
+
   function setCanvasText(canvasIndex: number, title: string, body: string): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
@@ -225,5 +239,5 @@ export function useProjectSocket() {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCanvasText, setCenterCaption, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCanvasText, setCenterCaption, isConnected }
 }

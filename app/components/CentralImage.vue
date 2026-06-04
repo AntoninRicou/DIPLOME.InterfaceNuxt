@@ -24,6 +24,11 @@ const props = withDefaults(defineProps<{
   // when its (clockwise) turn comes — same staggered order, no fade. Used
   // by the centred overview circle.
   revealDrift?: boolean
+  // Multiplies the ellipse radius (NOT the per-image size) so a circle can
+  // spread wider across the screen without enlarging the images. Default 1;
+  // the centred overview circle passes a larger value, the corner replay
+  // circles keep 1.
+  radiusScale?: number
 }>(), {
   activeIndex: -1,
   expanded: false,
@@ -34,6 +39,7 @@ const props = withDefaults(defineProps<{
   revealDelay: 0,
   revealKey: 0,
   revealDrift: false,
+  radiusScale: 1,
 })
 
 const emit = defineEmits<{
@@ -166,8 +172,8 @@ function layerStyle(i: number) {
   // existing larger scale; the rest sit at the base scale.
   const isHovered = i === hoveredIdx.value
   const angle = -Math.PI / 2 + (i / n) * Math.PI * 2
-  const x = Math.cos(angle) * RADIUS_X_VMIN
-  const y = Math.sin(angle) * RADIUS_Y_VMIN
+  const x = Math.cos(angle) * RADIUS_X_VMIN * props.radiusScale
+  const y = Math.sin(angle) * RADIUS_Y_VMIN * props.radiusScale
   const scale = isHovered ? SCALE_HOVER : isActive ? SCALE_ACTIVE : SCALE_OTHER
   const z = isHovered ? n + 2 : isActive ? n + 1 : i + 1
   // Drift reveal: a layer that hasn't had its turn yet sits stacked at the

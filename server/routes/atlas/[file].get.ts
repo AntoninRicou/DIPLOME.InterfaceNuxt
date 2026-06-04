@@ -1,9 +1,14 @@
 import { defineEventHandler, createError, setHeader, sendStream } from 'h3'
-import { createReadStream } from 'node:fs'
+import { createReadStream, existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { resolve, relative, basename, extname } from 'node:path'
 
-const ATLAS_DIR = resolve(process.cwd(), '..', 'process', 'cache')
+// The atlas lives in the sibling "process" repo. On a fresh clone that folder
+// may carry its GitHub name (DIPLOME.PROCESSDATA) instead — accept either.
+const ATLAS_DIR =
+  ['process/cache', 'DIPLOME.PROCESSDATA/cache']
+    .map((p) => resolve(process.cwd(), '..', p))
+    .find((p) => existsSync(p)) ?? resolve(process.cwd(), '..', 'process', 'cache')
 
 const CONTENT_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',

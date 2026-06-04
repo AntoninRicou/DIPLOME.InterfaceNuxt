@@ -1,9 +1,16 @@
 import { defineEventHandler, createError, setHeader, sendStream } from 'h3'
-import { createReadStream } from 'node:fs'
+import { createReadStream, existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { resolve, relative, basename, extname } from 'node:path'
 
-const IMAGES_DIR = resolve(process.cwd(), '..', 'project', 'datas', 'images')
+// The originals live in the sibling "project" repo's datas/images. On a fresh
+// clone that folder may carry its GitHub name (feedback-three-map) instead —
+// accept either. NOTE: datas/ is git-ignored, so the images must be copied
+// to the machine manually; they are not part of the clone.
+const IMAGES_DIR =
+  ['project/datas/images', 'feedback-three-map/datas/images']
+    .map((p) => resolve(process.cwd(), '..', p))
+    .find((p) => existsSync(p)) ?? resolve(process.cwd(), '..', 'project', 'datas', 'images')
 
 const CONTENT_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',

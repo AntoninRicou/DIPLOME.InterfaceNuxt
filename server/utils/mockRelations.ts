@@ -25,6 +25,45 @@ const COMPONENT_DATASET_FILES: Record<string, string> = {
   component_4: 'umap_replay.json',
 }
 
+// Per-component "subject" metadata source. The proximity dataset for a
+// component carries only (id, x, y); the human-readable subject string for
+// each image lives in a separate file (same id population). Only components
+// listed here expose subjects — others return an empty map. component_1
+// (Source) draws its proximity from the book/subject metadata, so the
+// subject is what the hover label surfaces in VIEW_4.
+const COMPONENT_SUBJECT_FILES: Record<string, string> = {
+  component_1: 'umap_subjects_embeddings2.json',
+}
+
+interface SubjectPoint {
+  id?: string
+  subject?: string
+}
+
+const subjectCache = new Map<string, Map<string, string>>()
+
+// Load an id → subject lookup for a component, or null if the component has
+// no subject source. Cached by componentId, mirroring loadUmapDataset.
+export async function loadSubjectMap(componentId: string): Promise<Map<string, string> | null> {
+  if (subjectCache.has(componentId)) return subjectCache.get(componentId)!
+  const filename = COMPONENT_SUBJECT_FILES[componentId]
+  if (!filename) return null
+  const path = resolve(process.cwd(), 'assets/mock', filename)
+  try {
+    const raw = await readFile(path, 'utf8')
+    const parsed = JSON.parse(raw) as SubjectPoint[] | { points?: SubjectPoint[] }
+    const points: SubjectPoint[] = Array.isArray(parsed) ? parsed : (parsed.points ?? [])
+    const map = new Map<string, string>()
+    for (const p of points) {
+      if (typeof p?.id === 'string' && typeof p.subject === 'string') map.set(p.id, p.subject)
+    }
+    subjectCache.set(componentId, map)
+    return map
+  } catch {
+    return null
+  }
+}
+
 interface UmapFileWrapper {
   count?: number
   method?: string

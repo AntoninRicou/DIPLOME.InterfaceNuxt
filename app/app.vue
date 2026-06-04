@@ -23,6 +23,14 @@
        url('/fonts/ABC%20Otto/ABCOtto-MediumItalic-Trial.woff') format('woff');
 }
 @font-face {
+  font-family: 'ABC Otto';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/ABC%20Otto/ABCOtto-Medium-Trial.woff2') format('woff2'),
+       url('/fonts/ABC%20Otto/ABCOtto-Medium-Trial.woff') format('woff');
+}
+@font-face {
   font-family: 'Neue Kabel';
   font-style: normal;
   font-weight: 500;
@@ -214,13 +222,30 @@ html {
      onto more lines). A fixed width + the existing translate(-50%, -50%)
      centring makes VIEW_3's quadrant-text and VIEW_4's interpretation-panel
      pixel-identical and keeps the body on two lines. Single knob: nudge this
-     value if a longer body spills to three lines. */
-  width: 30em;
+     value if a longer body spills to three lines. Widened from 30em when
+     the body grew to --label-size (Otto Medium) so it still wraps to ~2
+     lines; keep in lockstep with `.canvas-text` width in project. */
+  width: 38em;
   padding: 0 1rem;
   text-align: center;
   color: #595b54;
   pointer-events: none;
   box-sizing: border-box;
+  /* Organic blue-grey glyph stroke — same layered text-shadow the rotating
+     captions (.caption-text) use, in --rotate-panel-bg. text-shadow is
+     inherited, so declaring it here covers BOTH the title (subtitle) and the
+     body. Traces the letterforms (not a box). Mirrored on project's
+     `.canvas-text`. */
+  text-shadow:
+    0 0 4px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 15px var(--rotate-panel-bg),
+    0 0 18px var(--rotate-panel-bg);
 }
 .proximity-panel-title {
   margin: 0 0 0.4rem;
@@ -236,10 +261,14 @@ html {
 }
 .proximity-panel-body {
   margin: 0;
-  font-family: 'Neue Kabel', sans-serif;
-  font-size: 0.9rem;
+  /* ABC Otto Medium (upright), sized to match the tier-2 title
+     (--label-size). Mirrors `.canvas-text-body` in project/src/style.css —
+     keep family/size/weight/line-height in lockstep. */
+  font-family: 'ABC Otto', serif;
+  font-size: var(--label-size);
   font-weight: 500;
-  line-height: 1.3;
+  font-style: normal;
+  line-height: 1.15;
 }
 
 .bg-gradient {

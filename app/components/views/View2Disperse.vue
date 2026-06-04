@@ -2,12 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import AtlasThumb from '~/components/AtlasThumb.vue'
+import ActionPrompt from '~/components/ActionPrompt.vue'
 import type { ImageId } from '~/types/interaction'
-import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
+import { VIEW2_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 // Rotating intro caption — same Vue <Transition> + shared --rotate-*
 // timing as View1Explanation `.caption` and View3Transition
-// `.intro-caption`. Two sentences cycle every ENTRY_PANEL_MS (5000ms); on the
+// `.intro-caption`. Two sentences cycle every ENTRY_PANEL_MS (6000ms); on the
 // last sentence the timer stops and the caption sits visible until
 // the user clicks a sprite in the iframe. The click triggers a
 // smooth fade-out (entryCaptionVisible → false) before viewState
@@ -24,13 +25,35 @@ import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 // the same `--rotate-*` vars) handle the fade. The setTimeout duration
 // is read from `--rotate-appear-delay` minus `--rotate-empty-beat` at
 // runtime, so any CSS-var tweak in :root automatically propagates here.
+// Interface NARRATION — rotates in the middle. NOT mirrored to project
+// anymore: project shows its OWN centred narration (PROJECT_PANELS) later.
 const ENTRY_PANELS = [
   'This corpus comes from scientific and encyclopedic books published between the 15th and 20th centuries.',
-  'It was structured within a single dominant Western system of vision to classify and organize knowledge.',
-  'Select an image to initiate exploration.',
+  'It was structured within a single dominant Western system of vision to produce and classify knowledge.',
 ]
+// Project-ONLY centred narration, played (2s after the user's first hover) via
+// set-center-caption with the same rotate params. Each sentence fades in,
+// holds ENTRY_PANEL_MS, fades out — sequenced by playProjectNarration().
+const PROJECT_PANELS = [
+  'This same corpus is organized here in four distinct configurations.',
+  'Each one determines how proximity and relations are established between images .',
+]
+// Two bottom prompts (interface-only). HOVER_ACTION appears once the interface
+// narration clears and hover unlocks (but NOT click); after the project
+// narration finishes it swaps to CLICK_ACTION and click unlocks.
+const HOVER_ACTION = 'Explore images of the corpus and look up'
+const CLICK_ACTION = 'Select an image to initiate exploration.'
+const showHoverAction = ref(false)
+const showClickAction = ref(false)
 const entryIndex = ref(0)
 const entryCaptionVisible = ref(false) // gated by setTimeout below — see comment block
+// Iframe handle — used to post `view0:enable-hover` when phase 2 begins so the
+// embedded canvas un-hides its cursor and enables picking.
+const frameEl = ref<HTMLIFrameElement | null>(null)
+// Per-sentence hold for both the interface and the project narration.
+const ENTRY_PANEL_MS = VIEW2_PANEL_MS
+// Delay between the user's first hover and the project narration starting.
+const HOVER_TO_PROJECT_DELAY_MS = 4000
 // On image click, the disperse field (iframe sprites) fades out smoothly
 // BEFORE the view advances to VIEW_3, so the swap happens from a calm
 // gradient instead of cross-fading busy moving sprites into VIEW_3's layout
@@ -39,17 +62,23 @@ const entryCaptionVisible = ref(false) // gated by setTimeout below — see comm
 // faded here — it stays as a visual anchor through the swap.
 const entryExiting = ref(false)
 const ENTRY_EXIT_MS = 500
-// Sprite interaction (hover preview/highlight + click-to-select) is gated
-// OFF until the rotating intro text has fully finished — so the user reads
-// the corpus intro before the canvas becomes interactive. This is LINKED to
-// the rotation, not a parallel timer: it flips true from inside the same
-// last-sentence branch of `entryTimer` (below), delayed by the shared
-// ROTATE_FADE_OUT_MS so it lands exactly when the last sentence has faded
-// out. Change the 5000ms hold / ENTRY_PANELS and this moves with them.
-const interactionReady = ref(false)
+// Interaction is gated in TWO stages (the intro narration must finish first):
+//  - hoverEnabled: true once the interface narration clears (HOVER_ACTION
+//    appears) — hover preview/highlight only, NO selection.
+//  - clickEnabled: true only after the project narration finishes — selection
+//    unlocks and CLICK_ACTION replaces HOVER_ACTION.
+const hoverEnabled = ref(false)
+const clickEnabled = ref(false)
+// First hover starts a 4s timer → playProjectNarration(). Guarded so only the
+// first hover schedules it.
+let projectNarrationStarted = false
 let entryTimer: ReturnType<typeof setInterval> | null = null
 let entryFirstShowTimer: ReturnType<typeof setTimeout> | null = null
-let interactionReadyTimer: ReturnType<typeof setTimeout> | null = null
+let hoverRevealTimer: ReturnType<typeof setTimeout> | null = null
+let firstHoverTimer: ReturnType<typeof setTimeout> | null = null
+// Every setTimeout spawned by the project-narration sequencer, so unmount can
+// cancel a sequence mid-flight.
+let projectNarrationTimers: ReturnType<typeof setTimeout>[] = []
 
 function clearEntryTimer() {
   if (entryTimer) {
@@ -60,10 +89,43 @@ function clearEntryTimer() {
     clearTimeout(entryFirstShowTimer)
     entryFirstShowTimer = null
   }
-  if (interactionReadyTimer) {
-    clearTimeout(interactionReadyTimer)
-    interactionReadyTimer = null
+  if (hoverRevealTimer) {
+    clearTimeout(hoverRevealTimer)
+    hoverRevealTimer = null
   }
+  if (firstHoverTimer) {
+    clearTimeout(firstHoverTimer)
+    firstHoverTimer = null
+  }
+  for (const t of projectNarrationTimers) clearTimeout(t)
+  projectNarrationTimers = []
+}
+
+// Sequences the project-only centred narration: each PROJECT_PANELS sentence
+// fades in (set-center-caption rotate), holds ENTRY_PANEL_MS, fades out — then
+// after the last one, swaps the bottom prompt (HOVER→CLICK) and unlocks click.
+function playProjectNarration() {
+  let i = 0
+  const showSentence = () => {
+    store.setCenterCaption(PROJECT_PANELS[i] ?? '', 'rotate')
+    projectNarrationTimers.push(setTimeout(() => {
+      store.setCenterCaption('') // fade current sentence out
+      i++
+      if (i < PROJECT_PANELS.length) {
+        projectNarrationTimers.push(setTimeout(showSentence, ROTATE_FADE_OUT_MS))
+      } else {
+        // Narration done: fade the hover prompt out, then fade the click
+        // prompt in (sequenced so the two never overlap at the bottom) and
+        // unlock selection.
+        showHoverAction.value = false
+        projectNarrationTimers.push(setTimeout(() => {
+          showClickAction.value = true
+          clickEnabled.value = true
+        }, ROTATE_FADE_OUT_MS))
+      }
+    }, ENTRY_PANEL_MS))
+  }
+  showSentence()
 }
 
 // Reads a CSS custom property as milliseconds. Falls back to 0 if the
@@ -99,15 +161,10 @@ const expectedOrigin = computed(() => {
   }
 })
 
-// Pinned-then-demoted preview lifecycle. The currently-hovered sprite
-// gets a "pinned" preview that fades in then HOLDS INDEFINITELY (no
-// fade-out while pinned). Moving to a new sprite, or leaving the canvas,
-// demotes the current pin: at that moment its current opacity is
-// captured and it fades out over FADE_OUT_MS from there, then evicts.
-// Multiple expiring previews can overlap with the pinned one at
-// different stages of their own fade-out.
-const FADE_IN_MS = 150
-const FADE_OUT_MS = 900
+// Classical hover preview: the currently-hovered sprite shows its image at
+// full opacity instantly; moving to a new sprite or off the field removes it
+// immediately. No fade-in, no fade-out, no hold/timers — purely tied to
+// whether a sprite is hovered.
 
 const MARGIN_VMIN = 2
 
@@ -147,55 +204,11 @@ function clampedTopLeft(cursorX: number, cursorY: number, widthVmin: number, hei
   }
 }
 
-let rafHandle: number | null = null
-function tickLifecycle() {
-  rafHandle = null
-  const now = performance.now()
-  let anyAnimating = false
-  const list = previews.value
-  for (let i = list.length - 1; i >= 0; i--) {
-    const p = list[i]!
-    if (p.pinned) {
-      // Fade-in then hold at 1 indefinitely. No eviction while pinned.
-      const age = now - p.startTime
-      if (age < FADE_IN_MS) {
-        p.opacity = age / FADE_IN_MS
-        anyAnimating = true
-      } else {
-        p.opacity = 1
-        // No need to keep ticking just to hold at 1; the loop will be
-        // re-kicked on demotion or new spawn.
-      }
-    } else {
-      // Expiring — linear fade from the captured demotion opacity to 0.
-      const elapsed = now - p.expireStartTime
-      if (elapsed >= FADE_OUT_MS) {
-        list.splice(i, 1)
-        continue
-      }
-      p.opacity = p.expireStartOpacity * (1 - elapsed / FADE_OUT_MS)
-      anyAnimating = true
-    }
-  }
-  if (anyAnimating) rafHandle = requestAnimationFrame(tickLifecycle)
-}
-
-function kickLoop() {
-  if (rafHandle == null) rafHandle = requestAnimationFrame(tickLifecycle)
-}
-
 function demoteAllPinned() {
-  const now = performance.now()
-  let changed = false
-  for (const p of previews.value) {
-    if (p.pinned) {
-      p.pinned = false
-      p.expireStartTime = now
-      p.expireStartOpacity = p.opacity
-      changed = true
-    }
-  }
-  if (changed) kickLoop()
+  // Classical hover — the preview exists only while a sprite is hovered, so
+  // clearing it (on hover-out, or before showing a new one) removes it
+  // immediately: no hold, no fade, no animation loop.
+  if (previews.value.length) previews.value = []
 }
 
 function spawnPreview(id: ImageId, cursorX: number, cursorY: number) {
@@ -215,9 +228,8 @@ function spawnPreview(id: ImageId, cursorX: number, cursorY: number) {
     pinned: true,
     expireStartTime: 0,
     expireStartOpacity: 0,
-    opacity: 0,
+    opacity: 1, // instant appear — no fade-in, no animation
   })
-  kickLoop()
 }
 
 function onMessage(event: MessageEvent) {
@@ -235,36 +247,55 @@ function onMessage(event: MessageEvent) {
     return
   }
   if (data.type === 'view0:image-hover') {
-    // Hover preview/highlight is inert until the intro text has finished.
-    if (!interactionReady.value) return
+    // Phase 1 (narration): no hover at all — the iframe's picking isn't even
+    // armed yet, so this won't fire; the guard is belt-and-braces.
+    if (!hoverEnabled.value) return
     const next = typeof data.imageId === 'string' ? data.imageId : null
+    // Phase 2+ ("Explore…"): hover lights the CORRESPONDING IMAGE on the
+    // standalone project (the iframe lights its own sprite locally).
     store.setHighlight(next)
-    if (next != null && next !== lastHoverId) {
-      // Fresh sprite entered — spawn a preview at the spot the cursor hit it.
-      const x = typeof data.x === 'number' ? data.x : window.innerWidth / 2
-      const y = typeof data.y === 'number' ? data.y : window.innerHeight / 2
-      spawnPreview(next, x, y)
-    } else if (next == null && lastHoverId != null) {
-      // Cursor left all sprites (off canvas or onto empty area) — demote
-      // the current pin so it fades out gracefully. Re-entering will
-      // spawn fresh.
-      demoteAllPinned()
+    // First hover → after a 4s beat, play the project-only centred narration.
+    // Guarded so only the first hover schedules it.
+    if (next != null && !projectNarrationStarted) {
+      projectNarrationStarted = true
+      firstHoverTimer = setTimeout(() => {
+        firstHoverTimer = null
+        playProjectNarration()
+      }, HOVER_TO_PROJECT_DELAY_MS)
+    }
+    // The big preview at the cursor (the "image view") is PHASE 3 only — it
+    // appears once "Select an image…" shows (clickEnabled), alongside the
+    // ability to select. In phase 2 hover only lights the image, no preview.
+    if (clickEnabled.value) {
+      if (next != null && next !== lastHoverId) {
+        // Fresh sprite entered — spawn a preview at the spot the cursor hit it.
+        const x = typeof data.x === 'number' ? data.x : window.innerWidth / 2
+        const y = typeof data.y === 'number' ? data.y : window.innerHeight / 2
+        spawnPreview(next, x, y)
+      } else if (next == null && lastHoverId != null) {
+        // Cursor left all sprites — demote the current pin so it fades out.
+        demoteAllPinned()
+      }
     }
     lastHoverId = next
     return
   }
   if (data.type === 'view0:image-click') {
-    // Selecting an image is inert until the intro text has finished.
-    if (!interactionReady.value) return
+    // Selecting is inert until the project narration has finished (clickEnabled).
+    if (!clickEnabled.value) return
     if (typeof data.imageId !== 'string') return
     if (entryExiting.value) return // ignore further clicks once the exit began
     const id = data.imageId
     // Stop any running rotation timer regardless of caption state.
     clearEntryTimer()
-    // Fade the caption (if still up) and the disperse field out together,
-    // then advance once the field has calmed. The clicked image's pinned
-    // preview stays visible as an anchor through the fade + view swap.
+    // Fade the caption (if still up), the bottom prompts, and the disperse
+    // field out together, then advance once the field has calmed. The clicked
+    // image's pinned preview stays visible as an anchor through the swap.
     entryCaptionVisible.value = false
+    showHoverAction.value = false
+    showClickAction.value = false
+    // Clear any project caption still mirrored on the feedback screen.
+    store.setCenterCaption('')
     entryExiting.value = true
     setTimeout(() => store.selectImage(id), ENTRY_EXIT_MS)
   }
@@ -299,48 +330,42 @@ onMounted(() => {
         entryTimer = null
       }
       entryCaptionVisible.value = false
-      // Open sprite interaction once the last sentence has fully faded out
-      // (ROTATE_FADE_OUT_MS = the leave-fade duration). Linked to the same
-      // branch that ends the text — no separate cadence to keep in sync.
-      interactionReadyTimer = setTimeout(() => {
-        interactionReady.value = true
-        interactionReadyTimer = null
+      // Once the last narration sentence has fully faded out
+      // (ROTATE_FADE_OUT_MS = the leave-fade duration): reveal the bottom
+      // HOVER_ACTION prompt AND unlock HOVER (not click) at the same moment.
+      // Click stays gated until the project narration finishes.
+      hoverRevealTimer = setTimeout(() => {
+        hoverEnabled.value = true
+        showHoverAction.value = true
+        // Arm the embedded canvas: un-hide its cursor + enable picking so hover
+        // lights the corresponding image (no big preview yet — that's phase 3).
+        frameEl.value?.contentWindow?.postMessage(
+          { type: 'view0:enable-hover' },
+          expectedOrigin.value || '*',
+        )
+        hoverRevealTimer = null
       }, ROTATE_FADE_OUT_MS)
       return
     }
     entryIndex.value += 1
-  }, 5000) /* VIEW_2 hold: 5000ms (longer than VIEW_1/3 shared 4000ms); fade stays shared --rotate-fade-ms */
+  }, ENTRY_PANEL_MS) /* VIEW_2 hold per sentence; fade stays shared --rotate-fade-ms */
 })
-// Mirror the rotating entry caption onto the project canvas (the feedback
-// screen) so both screens show the same intro sentence — and fade in/out
-// SIMULTANEOUSLY. The emissions are driven by the caption's own <Transition>
-// enter/leave hooks (not a watch), so they fire at the exact moment the
-// interface caption begins each fade; project's `#center-caption.rotate` uses
-// the same `--rotate-*` duration/easing/empty-beat, so the two fades match.
-// `variant: 'rotate'` styles the project caption like the interface.
-// Project is in `overview` during VIEW_2, so its caption guard is satisfied.
-function onCaptionEnter() {
-  store.setCenterCaption(ENTRY_PANELS[entryIndex.value] ?? '', 'rotate')
-}
-function onCaptionLeave() {
-  store.setCenterCaption('', 'rotate')
-}
+// NOTE: the interface narration is no longer mirrored to project. The project
+// shows its OWN centred narration (PROJECT_PANELS), played by
+// playProjectNarration() 2s after the first hover — see above.
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', onMessage)
   clearEntryTimer()
   // Clear the mirrored caption so it doesn't linger on project into VIEW_3.
   store.setCenterCaption('')
-  if (rafHandle != null) {
-    cancelAnimationFrame(rafHandle)
-    rafHandle = null
-  }
 })
 </script>
 
 <template>
-  <section class="view view-0 bg-gradient" :class="{ 'is-exiting': entryExiting }">
+  <section class="view view-0 bg-gradient" :class="{ 'is-exiting': entryExiting, 'hover-armed': hoverEnabled }">
     <iframe
+      ref="frameEl"
       class="project-frame"
       :src="projectUrl"
       title="project disperse canvas"
@@ -353,7 +378,7 @@ onBeforeUnmount(() => {
          comment block for why VIEW_2 needs this workaround. The
          enter-* classes still handle the actual fade timing via
          `--rotate-empty-beat` + `--rotate-fade-ms`. -->
-    <Transition name="entry" mode="out-in" @enter="onCaptionEnter" @leave="onCaptionLeave">
+    <Transition name="entry" mode="out-in">
       <p
         v-if="entryCaptionVisible"
         :key="entryIndex"
@@ -362,6 +387,13 @@ onBeforeUnmount(() => {
         <span class="caption-text">{{ ENTRY_PANELS[entryIndex] }}</span>
       </p>
     </Transition>
+
+    <!-- Bottom prompts (interface-only). HOVER_ACTION appears once the
+         narration clears (hover unlocks here, click does NOT); after the
+         project narration finishes it swaps to CLICK_ACTION and click unlocks.
+         Only one is ever visible at a time. -->
+    <ActionPrompt :visible="showHoverAction" :text="HOVER_ACTION" />
+    <ActionPrompt :visible="showClickAction" :text="CLICK_ACTION" />
     <!-- Spawn-and-fade hover previews. Each preview is anchored to the
          viewport position where the cursor first entered its sprite and
          runs its own fade-in → hold → fade-out lifecycle. Multiple can
@@ -392,6 +424,11 @@ onBeforeUnmount(() => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  /* Phase 1 (before the "Explore…" prompt): no cursor at all. The iframe hides
+     its own cursor too (see project main.js embed) since it covers the
+     viewport; this covers the brief pre-load moment + any parent-level area.
+     `.hover-armed` (set when hoverEnabled flips at phase 2) restores it. */
+  cursor: none;
   /* Background paints via the global .bg-gradient class (app.vue) — the
      same day-gradient as VIEW-1, so the cross-fade no longer reveals a
      dark backdrop while project's iframe is still loading. Setting
@@ -444,6 +481,10 @@ onBeforeUnmount(() => {
 .view-0.is-exiting .project-frame {
   opacity: 0;
   pointer-events: none;
+}
+/* Phase 2+ — cursor restored once hover is armed. */
+.view-0.hover-armed {
+  cursor: auto;
 }
 .preview {
   position: absolute;
