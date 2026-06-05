@@ -4,6 +4,7 @@ import { useInteractionStore } from '~/stores/interaction'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
 import CentralImage from '~/components/CentralImage.vue'
 import AtlasThumb from '~/components/AtlasThumb.vue'
+import ActionPrompt from '~/components/ActionPrompt.vue'
 import { IMAGE_CREDIT_LINES } from '~/view3/view3Interpretations'
 import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
@@ -35,13 +36,26 @@ function onCornerClick(i: number) {
 // Clicking the center cross enters the explore-others view AND shows a rotate
 // caption on the interface centre, inviting the user to look at the corner
 // ribbons. Fades in, holds, fades out (interface-only).
-const EXPLORE_TEXT = 'Look for some previous user journey collaboration'
+const EXPLORE_TEXT = 'See how you move across proximity maps and other particpants journeys.'
+const EXPLORE_DELAY_MS = 1000 // beat after the cross click before the prompt appears
 const EXPLORE_HOLD_MS = 5000
 const exploreCaptionVisible = ref(false)
 function onCenterCrossClick() {
+  showZoomPathAction.value = false   // CTA done — fade the prompt out
   store.enterSinglePathView()
-  exploreCaptionVisible.value = true
-  finaleTimers.push(setTimeout(() => { exploreCaptionVisible.value = false }, EXPLORE_HOLD_MS))
+  // Wait a beat after the click before the prompt appears (lets the
+  // overview → single morph settle). Both screens reveal together.
+  finaleTimers.push(setTimeout(() => {
+    exploreCaptionVisible.value = true
+    // Mirror the prompt on the project centre too. Project is in `single` here
+    // (enterSinglePathView morphs overview → single), where #center-caption is
+    // normally gated off — `allowSingle` opts this one caption past that guard.
+    store.setCenterCaption(EXPLORE_TEXT, 'rotate', true)
+    finaleTimers.push(setTimeout(() => {
+      exploreCaptionVisible.value = false
+      store.setCenterCaption('')
+    }, EXPLORE_HOLD_MS))
+  }, EXPLORE_DELAY_MS))
 }
 
 // Split a circle's ids into the two arms of the corner L-ribbon. The ribbon is
@@ -127,14 +141,20 @@ watch(() => store.overviewConfirmed, (v) => { if (v) { centerKey.value++; startF
 // then — once it's faded — sentence 2 on the PROJECT (set-center-caption). When
 // both are done, the `+` cross fades in at the centre of the circle, replacing
 // the old "See your path" button (clicking it = enterSinglePathView).
-const FINAL_INTERFACE_TEXT = 'Your journey has produced a unique selection of ten images.'
+const FINAL_INTERFACE_TEXT = 'Your produced a unique journey through your selection.'
 const FINAL_PROJECT_TEXT = 'Your images found different neighbors across each proximity mode.'
-const FINAL_TEXT_DELAY_MS = 4000   // wait before sentence 1 appears (after circle reveals)
-const HOLD_INTERFACE_MS = 4000     // sentence 1 (interface) full-opacity dwell
-const HOLD_PROJECT_MS = 4000       // sentence 2 (project) full-opacity dwell
-const CROSS_DELAY_MS = 4000        // wait after sentence 2 fades before the cross
+const FINAL_TEXT_DELAY_MS = 1000   // wait before sentence 1 appears (after circle reveals)
+const HOLD_INTERFACE_MS = 5000     // sentence 1 (interface) full-opacity dwell
+const HOLD_PROJECT_MS = 5000       // sentence 2 (project) full-opacity dwell
+const CROSS_DELAY_MS = 2000        // wait after sentence 2 fades before the cross
 const finalCaptionVisible = ref(false) // interface sentence 1
 const showCenterCross = ref(false)      // the center `+` (replaces "See your path")
+// Call-to-action prompt for the center cross — same `ActionPrompt` component +
+// styling as VIEW_2's "Select an image…" / VIEW_3's prompts (interface-only,
+// pinned near the top). Appears WITH the cross, once the finale narration
+// (interface sentence + project sentence) has finished, and hides on click.
+const ZOOM_PATH_ACTION = "Zoom into your journey and other participants'."
+const showZoomPathAction = ref(false)
 let finaleTimers: ReturnType<typeof setTimeout>[] = []
 
 function startFinaleNarration() {
@@ -147,7 +167,10 @@ function startFinaleNarration() {
   finaleTimers.push(setTimeout(() => { finalCaptionVisible.value = false }, t1out))
   finaleTimers.push(setTimeout(() => { store.setCenterCaption(FINAL_PROJECT_TEXT, 'rotate') }, t2))
   finaleTimers.push(setTimeout(() => { store.setCenterCaption('') }, t2out))
-  finaleTimers.push(setTimeout(() => { showCenterCross.value = true }, tCross))
+  finaleTimers.push(setTimeout(() => {
+    showCenterCross.value = true
+    showZoomPathAction.value = true   // CTA prompt appears with the cross
+  }, tCross))
 }
 
 onBeforeUnmount(() => {
@@ -391,6 +414,11 @@ function onLeave() {
     >
       +
     </button>
+
+    <!-- CTA for the center cross — same ActionPrompt component/styling as
+         VIEW_2's "Select an image…" (interface-only, near the top). Appears with
+         the cross, hides on click. -->
+    <ActionPrompt :visible="showZoomPathAction" :text="ZOOM_PATH_ACTION" />
     <div
       v-if="store.singlePathViewActive"
       class="overview-control finale"
@@ -747,7 +775,10 @@ function onLeave() {
   line-height: 1.4;
   color: #595b54;
   pointer-events: none;
-  z-index: 13;
+  /* Above the centred circle deck (.center-anchor z:60) so the finale
+     narration AND the explore-others prompt read on TOP of the circle of
+     ten, not behind its side images. */
+  z-index: 70;
   opacity: 0;
   transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing);
 }

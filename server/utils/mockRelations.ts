@@ -22,7 +22,7 @@ const COMPONENT_DATASET_FILES: Record<string, string> = {
   component_1: 'umap_book2.json',
   component_2: 'mirror.json',
   component_3: 'umap_semantic_llm.json',
-  component_4: 'umap_replay.json',
+  component_4: 'umap_spiral.json',
 }
 
 // Per-component "subject" metadata source. The proximity dataset for a
@@ -64,16 +64,109 @@ export async function loadSubjectMap(componentId: string): Promise<Map<string, s
   }
 }
 
+// Per-component "tags" metadata source. Like subjects, the tag list for each
+// image lives in a file (here the same UMAP the component renders, which
+// carries a `tags` array of 5 visual descriptors per point). Only components
+// listed here expose tags — component_3 (Semantic) today.
+const COMPONENT_TAG_FILES: Record<string, string> = {
+  component_3: 'umap_semantic_llm.json',
+}
+
+interface TagPoint {
+  id?: string
+  tags?: string[]
+}
+
+export interface TagData {
+  // id → its candidate tags (in dataset order)
+  byId: Map<string, string[]>
+  // tag → global occurrence count across the whole dataset (for "less
+  // dominant" ranking on the client)
+  freq: Map<string, number>
+}
+
+const tagCache = new Map<string, TagData>()
+
+// Load an id → tags lookup (plus global tag frequencies) for a component, or
+// null if the component has no tag source. Cached by componentId.
+export async function loadTagData(componentId: string): Promise<TagData | null> {
+  if (tagCache.has(componentId)) return tagCache.get(componentId)!
+  const filename = COMPONENT_TAG_FILES[componentId]
+  if (!filename) return null
+  const path = resolve(process.cwd(), 'assets/mock', filename)
+  try {
+    const raw = await readFile(path, 'utf8')
+    const parsed = JSON.parse(raw) as TagPoint[] | { points?: TagPoint[] }
+    const points: TagPoint[] = Array.isArray(parsed) ? parsed : (parsed.points ?? [])
+    const byId = new Map<string, string[]>()
+    const freq = new Map<string, number>()
+    for (const p of points) {
+      if (typeof p?.id !== 'string' || !Array.isArray(p.tags)) continue
+      const tags = p.tags.filter((t): t is string => typeof t === 'string')
+      byId.set(p.id, tags)
+      for (const t of tags) freq.set(t, (freq.get(t) ?? 0) + 1)
+    }
+    const data: TagData = { byId, freq }
+    tagCache.set(componentId, data)
+    return data
+  } catch {
+    return null
+  }
+}
+
+// Per-component "year" metadata source. component_4 (Collaborative) now draws
+// its proximity from a year-based spiral embedding whose points carry a `year`
+// field; the hover label surfaces the (shared) year. Same id population as the
+// proximity dataset.
+const COMPONENT_YEAR_FILES: Record<string, string> = {
+  component_4: 'umap_spiral.json',
+}
+
+interface YearPoint {
+  id?: string
+  year?: number | string
+}
+
+const yearCache = new Map<string, Map<string, string>>()
+
+// Load an id → year (as a display string) lookup for a component, or null if
+// the component has no year source. Cached by componentId.
+export async function loadYearMap(componentId: string): Promise<Map<string, string> | null> {
+  if (yearCache.has(componentId)) return yearCache.get(componentId)!
+  const filename = COMPONENT_YEAR_FILES[componentId]
+  if (!filename) return null
+  const path = resolve(process.cwd(), 'assets/mock', filename)
+  try {
+    const raw = await readFile(path, 'utf8')
+    const parsed = JSON.parse(raw) as YearPoint[] | { points?: YearPoint[] }
+    const points: YearPoint[] = Array.isArray(parsed) ? parsed : (parsed.points ?? [])
+    const map = new Map<string, string>()
+    for (const p of points) {
+      if (typeof p?.id !== 'string') continue
+      if (typeof p.year === 'number' && Number.isFinite(p.year)) map.set(p.id, String(p.year))
+      else if (typeof p.year === 'string' && p.year) map.set(p.id, p.year)
+    }
+    yearCache.set(componentId, map)
+    return map
+  } catch {
+    return null
+  }
+}
+
 interface UmapFileWrapper {
   count?: number
   method?: string
   points?: UmapPoint[]
 }
 
-export async function loadUmapDataset(componentId: string): Promise<UmapDataset | null> {
-  if (cache.has(componentId)) return cache.get(componentId)!
-  const filename = COMPONENT_DATASET_FILES[componentId]
-  if (!filename) return null
+// Load + cache a UMAP dataset by its raw filename in assets/mock. Keyed by
+// filename so consumers that don't map 1:1 to a relation component (e.g. the
+// explore-others replay circles, which read umap_replay.json while canvas-4
+// renders umap_spiral.json) can share the same parse + cache path.
+const fileCache = new Map<string, UmapDataset>()
+
+export async function loadUmapByFile(filename: string): Promise<UmapDataset | null> {
+  if (fileCache.has(filename)) return fileCache.get(filename)!
   const path = resolve(process.cwd(), 'assets/mock', filename)
   try {
     const raw = await readFile(path, 'utf8')
@@ -83,12 +176,24 @@ export async function loadUmapDataset(componentId: string): Promise<UmapDataset 
     for (const p of points) {
       if (typeof p?.id === 'string') byId.set(p.id, p)
     }
-    const dataset: UmapDataset = { componentId, points, byId }
-    cache.set(componentId, dataset)
+    const dataset: UmapDataset = { componentId: filename, points, byId }
+    fileCache.set(filename, dataset)
     return dataset
   } catch {
     return null
   }
+}
+
+// Load the UMAP a relation component renders, resolved through
+// COMPONENT_DATASET_FILES. Thin wrapper over loadUmapByFile, cached by
+// componentId so an unmapped component still short-circuits to null.
+export async function loadUmapDataset(componentId: string): Promise<UmapDataset | null> {
+  if (cache.has(componentId)) return cache.get(componentId)!
+  const filename = COMPONENT_DATASET_FILES[componentId]
+  if (!filename) return null
+  const dataset = await loadUmapByFile(filename)
+  if (dataset) cache.set(componentId, dataset)
+  return dataset
 }
 
 // Euclidean k-nearest-neighbor on (x, y), per-dataset. Ordering is invariant

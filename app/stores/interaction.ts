@@ -206,6 +206,15 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCornerLabel(canvasIndex, true)
   }
 
+  // Clear the four per-quadrant interpretation texts on the project canvases
+  // (fades them out — `.canvas-text` is opacity-gated). Used by the VIEW_3
+  // central-image click so the project quadrant texts fade out at the SAME
+  // moment as the interface ones (`.quadrant-text.dissolving`), before the
+  // view advances to VIEW_4. enterRelationalView also clears them defensively.
+  function clearCanvasTexts() {
+    for (let i = 0; i < 4; i++) projectSocket.setCanvasText(i, '', '')
+  }
+
   const historyHasPrevious = computed(() => historyIndex.value > 0)
   const historyHasForward = computed(
     () => historyIndex.value >= 0 && historyIndex.value < navigationHistory.value.length - 1,
@@ -368,10 +377,13 @@ export const useInteractionStore = defineStore('interaction', () => {
     // Also clear the centred modes-caption that faded in 1 s after the
     // fourth cross. Empty string hides project's `#center-caption`.
     projectSocket.setCenterCaption('')
-    // Corner labels were already revealed per-quadrant during VIEW_3 (one
-    // `set-corner-label` per cross click), so they are all visible on project
-    // by now — no all-on re-assert here, which would re-fire the announce-glow
-    // on all four at once (the per-quadrant reveal is the intended announce).
+    // Reveal all four corner labels on project. In the normal flow they were
+    // already revealed per-quadrant during VIEW_3 (one `set-corner-label` per
+    // cross click), so this all-on re-assert is an idempotent no-op; but when
+    // VIEW_3 is SKIPPED (the "Next" button) the crosses were never clicked, so
+    // this is what reveals them. Safe to re-assert now that the one-shot
+    // announce-glow was removed (the reveal is opacity-only).
+    projectSocket.setCornerLabels(true)
   }
 
   function activateCentral(id: ImageId) {
@@ -430,23 +442,20 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   // ── Overview finale sequence (replaces the old tick-ring loader) ──
   // When the 10th image is reached, the four quadrants' suggestion images
-  // flash to full opacity, hold, then fade out one-by-one in clockwise
-  // order; only then does confirmOverview fire (→ the circle of 10 reveals).
-  // The central image + all interaction are frozen for the duration.
-  // The clock-effect dissolve: SWEEP is the clockwise hand (per-cell delay
-  // spread + ease-out-in, matched in RelationComponent's `--dissolve-delay`).
-  // Each cell's own fade lives in CSS only (`.finale-dissolve .cell` → opacity
-  // 600ms); it's not a JS timing input. The clockwise hand finishes at
-  // bright + SWEEP (= 6200ms) — THAT is when the `fadeout` phase begins and the
-  // central deck, the grid cross, AND the corner labels all fade out TOGETHER
-  // (deck via `.center-anchor.deck-fadeout`, cross + labels via
-  // `.finale-fadeout` rules). The last cell's 600ms fade tail runs out just
-  // after. SWEEP + ease match the VIEW_3 preview dissolve so the two look alike.
+  // flash to full opacity, hold, then fade out — ALL CELLS TOGETHER (the old
+  // clockwise sweep was removed) — only then does confirmOverview fire (→ the
+  // circle of 10 reveals). The central image + all interaction are frozen for
+  // the duration. The cells' fade lives in CSS (`.finale-dissolve .cell` →
+  // opacity 600ms, uniform), matched here by OVERVIEW_DISSOLVE_MS. The cells
+  // finish fading at bright + dissolve (= 1800ms) — THAT is when the `fadeout`
+  // phase begins and the central deck, the grid cross, AND the corner labels
+  // all fade out TOGETHER (deck via `.center-anchor.deck-fadeout`, cross +
+  // labels via `.finale-fadeout` rules).
   const OVERVIEW_BRIGHT_MS = 1200
-  // Matches the VIEW_3 preview dissolve (PREVIEW_DISSOLVE_SWEEP_MS in
-  // RelationComponent) so the two clockwise effects are similar — same 5s
-  // sweep + ease-out-in (the ease is applied in RelationComponent.dissolveDelay).
-  const OVERVIEW_DISSOLVE_SWEEP_MS = 5000
+  // Uniform fade-out duration for the finale cells (the clockwise sweep was
+  // removed). All cells fade to 0 together over this window — matches the
+  // `.finale-dissolve .cell` CSS in RelationComponent (600ms).
+  const OVERVIEW_DISSOLVE_MS = 600
   // After the quadrants have disappeared, the central deck + cross + corner
   // labels fade out together over this window (matches the 700ms CSS fades on
   // `.center-anchor.deck-fadeout`, `.view-3.finale-fadeout::before`, and
@@ -463,10 +472,9 @@ export const useInteractionStore = defineStore('interaction', () => {
   function startOverviewFinale() {
     if (!overviewEligible.value) return
     if (overviewFinalePhase.value !== 'idle') return
-    // Fadeout begins when the clockwise hand completes (bright + SWEEP), NOT
-    // when the last cell's fade tail ends — so the deck/cross/labels start
-    // leaving exactly as the sweep reaches the final cell.
-    const fadeoutStart = OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_SWEEP_MS
+    // Fadeout begins once the cells have fully faded (bright + dissolve), so
+    // the deck/cross/labels start leaving right as the cells finish.
+    const fadeoutStart = OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_MS
     overviewFinalePhase.value = 'bright'
     finaleTimers.push(setTimeout(() => {
       overviewFinalePhase.value = 'dissolve'
@@ -659,8 +667,16 @@ export const useInteractionStore = defineStore('interaction', () => {
   // `variant` is forwarded to project: 'rotate' styles the caption like the
   // interface rotating intro (VIEW_2/VIEW_3 mirror); 'default' (modes-caption,
   // image-credit) keeps project's plain center-caption style.
-  function setCenterCaption(text: string, variant: 'default' | 'rotate' = 'default') {
-    projectSocket.setCenterCaption(text, variant)
+  // `allowSingle` opts the caption past project's single-state guard
+  // (`body:not([data-state="single"]) #center-caption`). Only the
+  // explore-others prompt needs it — that view is in `single` and still wants
+  // a centred caption; every other caption fires in overview/split.
+  function setCenterCaption(
+    text: string,
+    variant: 'default' | 'rotate' = 'default',
+    allowSingle = false,
+  ) {
+    projectSocket.setCenterCaption(text, variant, allowSingle)
   }
 
   // Transient perception primitive. Highlights an id on the project canvas
@@ -702,6 +718,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     allCanvasesZoomed,
     relationsPreRevealed,
     zoomCanvas,
+    clearCanvasTexts,
     view4HoveredQuadrant,
     setQuadrantHover,
     historyHasPrevious,
@@ -716,7 +733,6 @@ export const useInteractionStore = defineStore('interaction', () => {
     overviewFinaleActive,
     overviewControlsReady,
     startOverviewFinale,
-    overviewDissolveSweepMs: OVERVIEW_DISSOLVE_SWEEP_MS,
     singlePathViewActive,
     enterSinglePathView,
     replayCircles,

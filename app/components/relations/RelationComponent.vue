@@ -14,12 +14,6 @@ const props = defineProps<{
   // (not the latent 0.05). No hover-zoom, no click-to-activate, no ghost path,
   // no corner label (View3Transition owns the VIEW_3 labels).
   preview?: boolean
-  // Preview-only, set in sequence on the central-image click:
-  //  - flashing: every cell jumps to full opacity (behind the quadrant texts);
-  //  - dissolving: the flashed cells sweep clockwise back down to latent (0.05)
-  //    while the quadrant texts disappear, before VIEW_4 takes over.
-  flashing?: boolean
-  dissolving?: boolean
 }>()
 const store = useInteractionStore()
 
@@ -35,9 +29,21 @@ const { data, pending, error, refresh } = await useFetch<{
   componentId: string
   centralImageId: string
   related: string[]
-  // Per-id subject string. Present only for components with a subject source
-  // (component_1 / Source today); empty object otherwise.
+  // Per-id subject string + the central image's own subject. Present only for
+  // components with a subject source (component_1 / Source today).
   subjects: Record<string, string>
+  centralSubject: string
+  // Per-id candidate tags (5 each), the central image's own tags, and global
+  // tag frequency. Present only for components with a tag source (component_3
+  // / Semantic today). The client surfaces the tags SHARED between a hovered
+  // neighbor and the centre (see `hoveredTags`).
+  tags: Record<string, string[]>
+  tagFreq: Record<string, number>
+  centralTags: string[]
+  // Per-id year + the central image's year. Present only for components with a
+  // year source (component_4 / Collaborative today — year-based proximity).
+  years: Record<string, string>
+  centralYear: string
 }>(() => `/api/relations/${props.componentId}`, {
   query: computed(() => ({ centralImageId: centralImageId.value ?? '' })),
   watch: [centralImageId],
@@ -239,32 +245,11 @@ function enterDelay(slotIdx: number): string {
   return `${Math.round(slotIdx * ENTER_STEP_MS)}ms`
 }
 
-// Overview finale: per-cell delay for the clockwise FADE-OUT, spread across
-// the whole oval (absolute clockwise position from 12 o'clock) over the
-// store's dissolve-sweep window. Consumed by the `.finale-dissolve`
-// transition-delay so all four quadrants fade out as one clockwise sweep.
-// Whole-oval clockwise sweep duration for the VIEW_3 preview dissolve (the
-// advance-`+` exit). Kept in sync with View3Transition's DISSOLVE_SWEEP_MS so
-// the cells and the quadrant texts wipe clockwise together.
-const PREVIEW_DISSOLVE_SWEEP_MS = 5000
-// Per-cell delay for a cell at clockwise position `f` (0..1) so the sweep HAND
-// moves with smooth ease-in-out motion — slow at the start, accelerating
-// through the middle, decelerating to the end. This is the *inverse* of an
-// ease-in-out applied to the hand position; unlike a plain ease-out-in curve
-// (which has a zero-velocity kink mid-sweep that bunches the cells and reads
-// as choppy), this keeps the hand speed finite throughout, so the wipe is
-// smooth. Shared by the VIEW_3 preview dissolve AND the overview finale.
-function sweepDelayFraction(f: number): number {
-  return f < 0.5 ? Math.cbrt(f / 4) : 1 - Math.cbrt(2 * (1 - f)) / 2
-}
-function dissolveDelay(slotIdx: number): string {
-  const pos = props.position ?? 'tl'
-  const a = cellArcAnglesByQuadrant.value[pos][slotIdx] ?? 0
-  const thetaDeg = QUADRANT_BASE_DEG[pos] + (a * 180) / Math.PI
-  const cw = (((thetaDeg - 270) % 360) + 360) % 360
-  const sweep = props.preview ? PREVIEW_DISSOLVE_SWEEP_MS : store.overviewDissolveSweepMs
-  return `${Math.round(sweepDelayFraction(cw / 360) * sweep)}ms`
-}
+// The overview finale dissolve fades EVERY cell out together — the per-cell
+// clockwise `--dissolve-delay` sweep was removed, so there's no longer a
+// `dissolveDelay()` helper. The fade is a plain CSS opacity transition (see
+// `.finale-dissolve .cell`). (The VIEW_3 central-image click no longer touches
+// the cells at all — only the quadrant texts fade.)
 
 function onRelatedClick(id: string) {
   if (props.preview) return
@@ -280,15 +265,24 @@ function onRelatedClick(id: string) {
 // track the centre image holds (set by `focus(id)`) — so the centre keeps
 // glowing while the hovered cell glows too, and hover-out just clears the
 // hover halo, leaving the centre's glow intact.
+// Hover sound — fires on every relation-view image hover. This handler
+// early-returns in VIEW_3 preview mode, so the sound is scoped to the
+// relational view (VIEW_4). The composable is generic (any view can reuse it
+// for any /sounds/*.wav); only this hover plays a clip today.
+const HOVER_SOUND = '/sounds/hover.wav'
+const { load: loadSound, play: playSound } = useSound()
+onMounted(() => { if (!props.preview) loadSound(HOVER_SOUND) })
+
 function onCellHover(id: string, slotIdx: number) {
   if (props.preview) return
+  playSound(HOVER_SOUND)
   store.setHighlight(id)
   // Ghost path — dashed translucent line from active central image to
   // this cell's id, drawn on every project canvas. Previews the proximity
   // link before commit. Cleared on cell-leave (fades out ~150ms).
   store.setGhostPath(id)
-  // Track the hovered cell so the subject label can render between this
-  // cell and the centred image (see `hoveredSubject` / `.subject-label`).
+  // Track the hovered cell so the radial words can render along the line
+  // between this cell and the centred image (see `radialWords`).
   hoveredCell.value = { id, slotIdx }
 }
 function onCellLeave() {
@@ -297,11 +291,9 @@ function onCellLeave() {
   hoveredCell.value = null
 }
 
-// ── Hover subject label ──
-// The currently-hovered cell (id + slot), and the subject string for it
-// (from the server `subjects` map — only populated for components with a
-// subject source). Rendered as a single-line `.subject-label` anchored at
-// the midpoint of the line between the cell and the centred image.
+// ── Hover state ──
+// The currently-hovered cell (id + slot), its subject (Source), and its radial
+// offset. These feed the radial word layout below (see `radialWords`).
 const hoveredCell = ref<{ id: string; slotIdx: number } | null>(null)
 const hoveredSubject = computed(() =>
   hoveredCell.value ? (data.value?.subjects?.[hoveredCell.value.id] ?? null) : null,
@@ -311,6 +303,132 @@ const hoveredOffset = computed(() =>
     ? CELL_OFFSETS.value[props.position ?? 'tl'][hoveredCell.value.slotIdx]
     : null,
 )
+
+// ── 3-tag selection: 2 own + 1 rotating shared (Semantic) ──
+// Each image shows 2 of its OWN distinctive tags (not shared with the centre)
+// for diversity, plus 1 SHARED tag (the proximity link). The shared slot
+// rotates across the 4 images and avoids the most-shared / dominant tag, so
+// the four labels don't all repeat e.g. `linear`. Both groups are ordered by
+// a diversity score so the quadrant collides as little as possible:
+//   picked : how many sibling cells already use this tag → rotate / avoid repeats
+//   batch  : how many of the 4 neighbors carry it        → rare-in-quadrant
+//            (this is what pushes the *most-shared* tag to the back)
+//   freq   : global frequency                            → less dominant
+//   idx    : original order                              → stable tiebreak
+// Availability fallbacks keep the total at 3: a shared-heavy image (≤1 own)
+// borrows extra shared tags; an image with no shared tag (~9%) shows 3 own.
+// The shared tag sits on the MIDDLE line, owns above and below (own · shared · own).
+// Computed for all 4 cells together (deterministic, hover-independent); the
+// hovered cell just reads its slice.
+const OWN_TARGET = 2
+const TOTAL_TAGS = 3
+const tagSelection = computed<Record<string, string[]>>(() => {
+  const tagsMap = data.value?.tags
+  const central = data.value?.centralTags
+  if (!tagsMap || !central) return {}
+  const centralSet = new Set(central)
+  const freq = data.value?.tagFreq ?? {}
+  const batchIds = cells.value.map((c) => c.id).filter((id) => tagsMap[id]?.length)
+  if (batchIds.length === 0) return {}
+
+  // How many of the displayed neighbors carry each tag (quadrant frequency).
+  const batchCount: Record<string, number> = {}
+  for (const id of batchIds) {
+    for (const t of tagsMap[id]!) batchCount[t] = (batchCount[t] ?? 0) + 1
+  }
+
+  const picked: Record<string, number> = {}
+  type Tagged = { t: string; idx: number }
+  const score = (a: Tagged, b: Tagged) =>
+    (picked[a.t] ?? 0) - (picked[b.t] ?? 0) ||
+    (batchCount[a.t] ?? 0) - (batchCount[b.t] ?? 0) ||
+    (freq[a.t] ?? 0) - (freq[b.t] ?? 0) ||
+    a.idx - b.idx
+
+  const out: Record<string, string[]> = {}
+  for (const id of batchIds) {
+    const tagged: Tagged[] = tagsMap[id]!.map((t, idx) => ({ t, idx }))
+    const own = tagged.filter((x) => !centralSet.has(x.t)).sort(score)
+    const shared = tagged.filter((x) => centralSet.has(x.t)).sort(score)
+
+    const chosen: string[] = []
+    const take = (list: Tagged[], n: number) => {
+      for (const x of list) {
+        if (chosen.length >= n) break
+        if (!chosen.includes(x.t)) chosen.push(x.t)
+      }
+    }
+    take(own, OWN_TARGET) // 2 own (distinctive traits) first
+    take(shared, OWN_TARGET + 1) // then 1 rotating, non-dominant shared
+    take(shared, TOTAL_TAGS) // fallbacks if a group ran short:
+    take(own, TOTAL_TAGS) //   borrow extra shared, then extra own
+
+    // Centre the shared tag on the middle line — owns split around the shared
+    // block (e.g. own · shared · own).
+    const finalTags = chosen.slice(0, TOTAL_TAGS)
+    const sharedSel = finalTags.filter((t) => centralSet.has(t))
+    const ownSel = finalTags.filter((t) => !centralSet.has(t))
+    const before = Math.ceil(ownSel.length / 2)
+    const ordered = [...ownSel.slice(0, before), ...sharedSel, ...ownSel.slice(before)]
+    out[id] = ordered
+    for (const t of ordered) picked[t] = (picked[t] ?? 0) + 1
+  }
+  return out
+})
+const hoveredTags = computed(() =>
+  hoveredCell.value ? (tagSelection.value[hoveredCell.value.id] ?? null) : null,
+)
+
+// ── Radial word layout (Source + Semantic) ──
+// The hover words are spread ALONG the radial line from the centred image out
+// to the hovered cell (same angle the cell sits at) and rotated to follow that
+// line — a "beads on the radius" effect. `--frac` is each word's distance along
+// the centre→cell vector (0 = centre, 1 = cell).
+//   Semantic     → own (inner) · shared (middle) · own (outer)
+//   Source       → central image's subject (inner) · hovered subject (outer)
+//   Collaborative → the common (shared) year, single value at the middle
+const RADIAL_FRACTIONS_3 = [0.32, 0.5, 0.68] // own · shared · own
+const RADIAL_FRACTIONS_2 = [0.4, 0.6] // central subject · hovered subject
+
+// On-screen angle of the centre→cell line, in degrees, computed from the real
+// pixel vector (the ellipse semi-axes scale x by vw and y by vh, so the screen
+// angle isn't the raw polar angle). Flipped into [-90, 90] so glyphs stay
+// upright (a line and its 180° opposite are the same line).
+const hoveredAngleDeg = computed(() => {
+  if (!hoveredCell.value) return 0
+  const pos = props.position ?? 'tl'
+  const a = cellArcAnglesByQuadrant.value[pos][hoveredCell.value.slotIdx] ?? 0
+  const theta = (QUADRANT_BASE_DEG[pos] * Math.PI) / 180 + a
+  const px = RX * Math.cos(theta) * viewportSize.value.w
+  const py = RY * Math.sin(theta) * viewportSize.value.h
+  let deg = (Math.atan2(py, px) * 180) / Math.PI
+  if (deg > 90) deg -= 180
+  else if (deg < -90) deg += 180
+  return deg
+})
+
+// The ordered words for the hovered cell + their radial fraction. Tags take
+// priority (Semantic); otherwise the subject pair (Source). Empty → nothing
+// renders.
+const radialWords = computed<{ key: string; text: string; frac: number }[]>(() => {
+  if (!hoveredCell.value) return []
+  const tags = hoveredTags.value
+  if (tags?.length) {
+    const fr = tags.length === 3 ? RADIAL_FRACTIONS_3 : tags.map((_, i) => (i + 1) / (tags.length + 1))
+    return tags.map((t, i) => ({ key: `tag-${i}-${t}`, text: t, frac: fr[i] ?? 0.5 }))
+  }
+  const hov = hoveredSubject.value
+  if (hov) {
+    const central = data.value?.centralSubject
+    const words = central ? [central, hov] : [hov]
+    const fr = words.length === 2 ? RADIAL_FRACTIONS_2 : [0.5]
+    return words.map((t, i) => ({ key: `subj-${i}`, text: t, frac: fr[i] ?? 0.5 }))
+  }
+  // Collaborative: the common year (single value, centred on the line).
+  const year = data.value?.years?.[hoveredCell.value.id]
+  if (year) return [{ key: `year-${year}`, text: year, frac: 0.5 }]
+  return []
+})
 
 // ── Cascade reveal direction ──
 // Determined on each mouseenter from where the cursor crossed the
@@ -420,8 +538,6 @@ function onMouseEnter(e: MouseEvent) {
           store.overviewFinalePhase === 'dissolve' || store.overviewFinalePhase === 'fadeout',
         'is-preview': preview,
         'preview-revealed': preview && revealed,
-        'preview-flash': preview && flashing,
-        'preview-dissolve': preview && dissolving,
         'no-entrance': suppressMountReveal,
       }"
     >
@@ -433,7 +549,6 @@ function onMouseEnter(e: MouseEvent) {
           '--cell-x': CELL_OFFSETS[position ?? 'tl'][cell.slotIdx]?.x,
           '--cell-y': CELL_OFFSETS[position ?? 'tl'][cell.slotIdx]?.y,
           '--enter-delay': enterDelay(cell.slotIdx),
-          '--dissolve-delay': dissolveDelay(cell.slotIdx),
         }"
         :title="cell.id"
         @click="onRelatedClick(cell.id)"
@@ -446,21 +561,34 @@ function onMouseEnter(e: MouseEvent) {
       </button>
     </TransitionGroup>
 
-    <!-- Hover subject label — the subject string of the hovered cell, shown
-         on the radial line between that cell and the centred image. Its inner
-         edge sits at the midpoint and the text grows OUTWARD (away from the
-         centre) so a long subject overflows toward the viewport edge rather
-         than across the central image. Only rendered when a subject exists
-         for the hovered id (i.e. Source / component_1 today). -->
-    <Transition name="subject-fade">
-      <div
-        v-if="!preview && hoveredSubject"
-        class="subject-label"
-        :data-position="position ?? 'tl'"
-        :style="{ '--cell-x': hoveredOffset?.x, '--cell-y': hoveredOffset?.y }"
-        aria-hidden="true"
-      >{{ hoveredSubject }}</div>
-    </Transition>
+    <!-- Hover radial words — the hover words spread ALONG the centre→cell line
+         and rotated to follow it (Source: centre subject · hovered subject;
+         Semantic: own · shared · own). Teleported to a top-level fixed overlay
+         so they're never clipped by `.rel`'s overflow and always paint above
+         the central image deck. Anchored at the viewport centre; each word is
+         placed at its `--frac` along the centre→cell vector (`--cell-x/y`) and
+         the inner span rotates by the line's `--angle`. -->
+    <Teleport to="body">
+      <Transition name="subject-fade">
+        <div
+          v-if="!preview && radialWords.length"
+          class="radial-words"
+          :style="{
+            '--cell-x': hoveredOffset?.x,
+            '--cell-y': hoveredOffset?.y,
+            '--angle': `${hoveredAngleDeg}deg`,
+          }"
+          aria-hidden="true"
+        >
+          <span
+            v-for="w in radialWords"
+            :key="w.key"
+            class="radial-word"
+            :style="{ '--frac': w.frac }"
+          ><span class="radial-word-inner">{{ w.text }}</span></span>
+        </div>
+      </Transition>
+    </Teleport>
 
     <ProximityPanel
       v-if="interpretationActive && interpretation"
@@ -588,25 +716,22 @@ function onMouseEnter(e: MouseEvent) {
 
 /* ── overview finale ──
    When the 10th image is reached, every cell flashes to full opacity (a
-   brief bright hold), then fades out one-by-one CLOCKWISE across the whole
-   oval (per-cell `--dissolve-delay`, ease-out-in over OVERVIEW_DISSOLVE_SWEEP_MS
-   = 5000ms in interaction.ts) — the SAME clockwise duration + ease as the
-   VIEW_3 preview dissolve, so the two effects match. Ends with everything
-   gone; the deck then fades and the contributed circle reveals. Overrides the
-   latent/hover opacity; interaction is frozen via `.rel.is-frozen`. Pure
-   appearance — these only touch opacity, the cells' geometry/transform is
-   untouched. */
+   brief bright hold), then fades out — ALL CELLS TOGETHER (the clockwise
+   sweep was removed) over OVERVIEW_DISSOLVE_MS (= 600ms in interaction.ts).
+   Ends with everything gone; the deck then fades and the contributed circle
+   reveals. Overrides the latent/hover opacity; interaction is frozen via
+   `.rel.is-frozen`. Pure appearance — these only touch opacity, the cells'
+   geometry/transform is untouched. */
 .constellation.finale-bright .cell {
   opacity: 1;
   transition: opacity 250ms ease-out;
 }
 .constellation.finale-dissolve .cell {
   opacity: 0;
-  /* Per-cell fade tail (600ms) + ease-out-in --dissolve-delay spread over
-     SWEEP = 5000ms (interaction.ts), matching the VIEW_3 preview dissolve so
-     the two clockwise effects are similar. The only difference: here the cells
-     fade fully to 0 (everything goes), whereas the preview settles to latent. */
-  transition: opacity 600ms ease-out var(--dissolve-delay, 0ms);
+  /* Uniform fade to 0 (no per-cell delay). Duration matches
+     OVERVIEW_DISSOLVE_MS in interaction.ts so the cells are fully gone when
+     the deck/cross/labels fadeout begins. */
+  transition: opacity 600ms ease-out;
 }
 
 .cell {
@@ -694,10 +819,11 @@ function onMouseEnter(e: MouseEvent) {
    Non-interactive suggestion preview. Cells stay hidden until this quadrant's
    cross is clicked (`.preview-revealed`, gated on store.canvasZoomed), then
    clock in per-quadrant (clockwise) and SETTLE to the latent resting opacity
-   (0.05 — the `.cell` default, i.e. how they sit in VIEW_4 until hover). The
-   bright moment comes later, on the central-image click (preview-flash). The
-   on-mount keyframe is disabled here; the reveal is a transition driven by the
-   `.preview-revealed` class so it fires on the cross click, not on mount. */
+   (0.05 — the `.cell` default, i.e. how they sit in VIEW_4 until hover). They
+   stay at that latent opacity on the central-image click (no flash/dissolve)
+   and carry into VIEW_4. The on-mount keyframe is disabled here; the reveal is
+   a transition driven by the `.preview-revealed` class so it fires on the cross
+   click, not on mount. */
 .rel.is-preview { pointer-events: none; }
 .rel.is-preview .cell {
   pointer-events: none;
@@ -714,22 +840,11 @@ function onMouseEnter(e: MouseEvent) {
   opacity: 1;
   transform: scale(1);
 }
-/* Central-image click, step 1 — FLASH: every cell jumps to full opacity
-   (behind the quadrant texts), all together. */
-.constellation.is-preview.preview-flash .cell {
-  opacity: 1;
-  transition: opacity 350ms ease-out;
-}
-/* Central-image click, step 2 — clockwise REDUCE: the flashed cells sweep
-   clockwise (per-cell --dissolve-delay, from 12 o'clock) back DOWN to the
-   latent resting opacity (0.05 = their VIEW_4 state), so the hand-off is
-   seamless. They do NOT disappear. (Only the quadrant texts fully fade to 0 —
-   see View3Transition.) Declared after preview-flash so it wins once both
-   classes are present. */
-.constellation.is-preview.preview-dissolve .cell {
-  opacity: 0.05;
-  transition: opacity 600ms ease-out var(--dissolve-delay, 0ms);
-}
+/* On the central-image click the preview cells no longer flash or dissolve —
+   they stay at their latent resting opacity (0.05) and carry into VIEW_4. Only
+   the quadrant texts fade out (see View3Transition `.quadrant-text.dissolving`
+   + `clearCanvasTexts()`). The former `.preview-flash` / `.preview-dissolve`
+   rules were removed. */
 
 /* ── VIEW_4 initial mount from the preview ──
    The images were already revealed in VIEW_3, so suppress this mount's
@@ -814,45 +929,57 @@ function onMouseEnter(e: MouseEvent) {
   --center-shift-y: -50%;
 }
 
-/* ── hover subject label ──
-   Single-line subject string for the hovered cell, sitting on the radial
-   line between the cell and the centred image. The label is anchored at the
-   same inner corner of `.rel` as the cells (the viewport-centre
-   intersection) and translated outward by `--subject-fraction` of the
-   hovered cell's offset, so its inner edge lands at the midpoint of the
-   cell→centre line. NO centre-shift on the radial axis: the box's anchored
-   (inner) corner is the midpoint, so the text grows OUTWARD, away from the
-   centre — a long subject overflows toward the viewport edge instead of
-   over the central image. `--label-vshift` recentres the line vertically on
-   the midpoint (the box otherwise extends up/down from its anchored corner).
-   z-index 7 keeps it above the cells (1–5) and the corner label (6). */
-.subject-label {
+/* ── hover radial words ──
+   Hover words spread ALONG the centre→cell line and rotated to follow it
+   (Source: centre subject · hovered subject; Semantic: own · shared · own).
+   Teleported to <body>: `.radial-words` is a full-viewport fixed overlay
+   (high z-index → always on top, never clipped by `.rel`'s overflow). Each
+   `.radial-word` is anchored at the viewport centre and pushed to its `--frac`
+   along the centre→cell vector (`--cell-x/y`, already signed per quadrant),
+   recentred on that point; the inner span rotates by `--angle` so the words
+   read along the radius (positioning stays in screen space, separate from the
+   rotation). The dense blue text-shadow matches the rotate captions. */
+.radial-words {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+.radial-word {
   position: absolute;
-  z-index: 7;
-  --subject-fraction: 0.5;
-  --label-vshift: 0%;
+  top: 50%;
+  left: 50%;
+  --frac: 0.5;
+  transform:
+    translate(
+      calc(var(--cell-x, 0) * var(--frac)),
+      calc(var(--cell-y, 0) * var(--frac))
+    )
+    translate(-50%, -50%);
+}
+.radial-word-inner {
+  display: inline-block;
   white-space: nowrap;
   font-size: 0.8rem;
   font-style: italic;
   letter-spacing: 0.015em;
   line-height: 1.1;
   color: #595b54;
-  pointer-events: none;
-  /* Soft halo so the text stays legible over the suggestion images. */
+  transform: rotate(var(--angle, 0deg));
+  transform-origin: center center;
+  /* Opaque blue backing hugging the glyphs — same layered stroke as the
+     rotate captions (.final-caption .caption-text in View4Relational). */
   text-shadow:
     0 0 4px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 8px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9));
-  transform:
-    translate(
-      calc(var(--cell-x, 0) * var(--subject-fraction)),
-      calc(var(--cell-y, 0) * var(--subject-fraction))
-    )
-    translate(0, var(--label-vshift));
+    0 0 6px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 6px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 9px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 9px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 12px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 12px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 15px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 18px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9));
 }
-.rel[data-position="tl"] .subject-label { bottom: 0; right: 0; text-align: right; --label-vshift: 50%; }
-.rel[data-position="tr"] .subject-label { bottom: 0; left: 0;  text-align: left;  --label-vshift: 50%; }
-.rel[data-position="bl"] .subject-label { top: 0;    right: 0; text-align: right; --label-vshift: -50%; }
-.rel[data-position="br"] .subject-label { top: 0;    left: 0;  text-align: left;  --label-vshift: -50%; }
 
 .subject-fade-enter-active,
 .subject-fade-leave-active {

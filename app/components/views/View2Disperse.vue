@@ -28,7 +28,7 @@ import { VIEW2_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 // Interface NARRATION — rotates in the middle. NOT mirrored to project
 // anymore: project shows its OWN centred narration (PROJECT_PANELS) later.
 const ENTRY_PANELS = [
-  'This corpus comes from scientific and encyclopedic books published between the 15th and 20th centuries.',
+  'This corpus comes from scientific and encyclopedic books published between the 18th and 20th centuries.',
   'It was structured within a single dominant Western system of vision to produce and classify knowledge.',
 ]
 // Project-ONLY centred narration, played (2s after the user's first hover) via
@@ -105,6 +105,10 @@ function clearEntryTimer() {
 // fades in (set-center-caption rotate), holds ENTRY_PANEL_MS, fades out — then
 // after the last one, swaps the bottom prompt (HOVER→CLICK) and unlocks click.
 function playProjectNarration() {
+  // The HOVER_ACTION prompt ("Explore images…") disappears the moment the
+  // project rotate text appears — not at the end of the narration. So hide it
+  // right as the first project sentence is about to show.
+  showHoverAction.value = false
   let i = 0
   const showSentence = () => {
     store.setCenterCaption(PROJECT_PANELS[i] ?? '', 'rotate')
@@ -114,10 +118,8 @@ function playProjectNarration() {
       if (i < PROJECT_PANELS.length) {
         projectNarrationTimers.push(setTimeout(showSentence, ROTATE_FADE_OUT_MS))
       } else {
-        // Narration done: fade the hover prompt out, then fade the click
-        // prompt in (sequenced so the two never overlap at the bottom) and
-        // unlock selection.
-        showHoverAction.value = false
+        // Narration done: fade the click prompt in (the hover prompt was
+        // already hidden when the narration started) and unlock selection.
         projectNarrationTimers.push(setTimeout(() => {
           showClickAction.value = true
           clickEnabled.value = true
@@ -263,19 +265,19 @@ function onMessage(event: MessageEvent) {
         playProjectNarration()
       }, HOVER_TO_PROJECT_DELAY_MS)
     }
-    // The big preview at the cursor (the "image view") is PHASE 3 only — it
-    // appears once "Select an image…" shows (clickEnabled), alongside the
-    // ability to select. In phase 2 hover only lights the image, no preview.
-    if (clickEnabled.value) {
-      if (next != null && next !== lastHoverId) {
-        // Fresh sprite entered — spawn a preview at the spot the cursor hit it.
-        const x = typeof data.x === 'number' ? data.x : window.innerWidth / 2
-        const y = typeof data.y === 'number' ? data.y : window.innerHeight / 2
-        spawnPreview(next, x, y)
-      } else if (next == null && lastHoverId != null) {
-        // Cursor left all sprites — demote the current pin so it fades out.
-        demoteAllPinned()
-      }
+    // The big preview at the cursor (the "image view") now appears as soon as
+    // hover is unlocked (PHASE 2 — the "Explore…" prompt), so the user sees the
+    // hovered image at full size immediately rather than waiting for the
+    // project narration to finish. (We're already past the hoverEnabled guard
+    // above, so no further gate is needed here.)
+    if (next != null && next !== lastHoverId) {
+      // Fresh sprite entered — spawn a preview at the spot the cursor hit it.
+      const x = typeof data.x === 'number' ? data.x : window.innerWidth / 2
+      const y = typeof data.y === 'number' ? data.y : window.innerHeight / 2
+      spawnPreview(next, x, y)
+    } else if (next == null && lastHoverId != null) {
+      // Cursor left all sprites — demote the current pin so it fades out.
+      demoteAllPinned()
     }
     lastHoverId = next
     return
@@ -299,6 +301,29 @@ function onMessage(event: MessageEvent) {
     entryExiting.value = true
     setTimeout(() => store.selectImage(id), ENTRY_EXIT_MS)
   }
+}
+
+// "Next" skip button — jumps straight to the pickable state (phase 3),
+// bypassing the interface intro + project narrations. Picking is armed, the
+// hover preview works, and the "Select an image…" prompt is shown; the user
+// then picks an image to advance to VIEW_3 as normal (the button does NOT
+// auto-advance — it just unlocks selection early).
+function skipToPick() {
+  if (clickEnabled.value || entryExiting.value) return
+  clearEntryTimer()
+  projectNarrationStarted = true        // never schedule the project narration
+  entryCaptionVisible.value = false     // drop the intro caption if still up
+  showHoverAction.value = false
+  store.setCenterCaption('')            // clear any in-flight project narration
+  hoverEnabled.value = true
+  clickEnabled.value = true             // unlock selection
+  showClickAction.value = true          // "Select an image to initiate exploration."
+  // Arm the embedded canvas (normally posted at phase 2): un-hide its cursor +
+  // enable picking. Safe to post now even though the earlier phases were skipped.
+  frameEl.value?.contentWindow?.postMessage(
+    { type: 'view0:enable-hover' },
+    expectedOrigin.value || '*',
+  )
 }
 
 onMounted(() => {
@@ -363,7 +388,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="view view-0 bg-gradient" :class="{ 'is-exiting': entryExiting, 'hover-armed': hoverEnabled }">
+  <section class="view view-0 bg-gradient" :class="{ 'is-exiting': entryExiting }">
     <iframe
       ref="frameEl"
       class="project-frame"
@@ -394,6 +419,20 @@ onBeforeUnmount(() => {
          Only one is ever visible at a time. -->
     <ActionPrompt :visible="showHoverAction" :text="HOVER_ACTION" />
     <ActionPrompt :visible="showClickAction" :text="CLICK_ACTION" />
+
+    <!-- Skip-to-pick button: jumps past the narrations straight to the
+         pickable state (clickEnabled), leaving the "Select an image…" prompt
+         showing. Hidden once selection is unlocked (whether via this button or
+         the natural phase progression) and during the exit. -->
+    <button
+      v-if="!clickEnabled && !entryExiting"
+      class="next-button"
+      type="button"
+      aria-label="skip to image selection"
+      @click="skipToPick"
+    >
+      Next ›
+    </button>
     <!-- Spawn-and-fade hover previews. Each preview is anchored to the
          viewport position where the cursor first entered its sprite and
          runs its own fade-in → hold → fade-out lifecycle. Multiple can
@@ -424,11 +463,9 @@ onBeforeUnmount(() => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  /* Phase 1 (before the "Explore…" prompt): no cursor at all. The iframe hides
-     its own cursor too (see project main.js embed) since it covers the
-     viewport; this covers the brief pre-load moment + any parent-level area.
-     `.hover-armed` (set when hoverEnabled flips at phase 2) restores it. */
-  cursor: none;
+  /* The cursor stays visible the whole time in VIEW_2 (it used to be hidden
+     until the "Explore…" prompt; the iframe also no longer hides its own —
+     see project main.js embed). */
   /* Background paints via the global .bg-gradient class (app.vue) — the
      same day-gradient as VIEW-1, so the cross-fade no longer reveals a
      dark backdrop while project's iframe is still loading. Setting
@@ -482,9 +519,30 @@ onBeforeUnmount(() => {
   opacity: 0;
   pointer-events: none;
 }
-/* Phase 2+ — cursor restored once hover is armed. */
-.view-0.hover-armed {
-  cursor: auto;
+
+/* Skip-to-pick "Next" button — bottom-centred, muted like VIEW_1's skip
+   chevron. */
+.next-button {
+  position: absolute;
+  bottom: 2.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: transparent;
+  border: none;
+  color: #595b54;
+  font-family: inherit;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 150ms ease;
+  z-index: 13;
+  pointer-events: auto;
+}
+.next-button:hover {
+  opacity: 1;
 }
 .preview {
   position: absolute;

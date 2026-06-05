@@ -32,13 +32,13 @@ const QUADRANTS: Quadrant[] = [
 // modes caption (middle narration) fades in 1s later, then the bottom
 // "start exploring" action prompt + the pulsing advance `+` button appear.
 // No auto-advance to VIEW_4 — the transition out is driven by the `+`.
-const CAPTION_DELAY_MS = 1000
+const CAPTION_DELAY_MS = 2000
 // Middle NARRATION shown after zooming (mirrored to project). Uses the shared
 // rotate-text params (--rotate-size + fade timing + blue-grey stroke), same as
 // the rotating intro narration — see `.modes-caption` styles.
 const MODES_CAPTION = 'Four modes of proximity each suggesting new images relationing differently with the center image'
 // Bottom CALL-TO-ACTION prompts (interface-only, via ActionPrompt). The zoom
-// prompt appears once the intro narration clears (crosses appear at that same
+// prompt appears after the initial settle beat (crosses appear at that same
 // moment) and hides when all four are zoomed; the start prompt appears with
 // the modes caption and hides when the user clicks the advance `+` ("top
 // cross") into the relational view.
@@ -50,43 +50,36 @@ const showStartAction = ref(false)
 // ── Central-image click (VIEW_3 → VIEW_4 trigger) ──
 // The advance `+` is gone from VIEW_3 (the top cross only lives in VIEW_4 now).
 // Once the start prompt shows, the central image is the click target (it
-// pulses blue). Clicking it: (1) FLASHES every suggestion cell to full opacity
-// behind the quadrant texts, then (2) sweeps them clockwise back DOWN to latent
-// (preview-dissolve) while the four quadrant texts blink out clockwise — then
-// enterRelationalView fires. The central image + corner labels are untouched
-// and carry into VIEW_4.
-const flashing = ref(false)
+// pulses blue). Clicking it simply fades the four quadrant texts out —
+// SIMULTANEOUSLY on the interface (`.quadrant-text.dissolving`) and on the
+// project canvases (`clearCanvasTexts()` → `set-canvas-text(i, '', '')`) — then
+// enterRelationalView fires. There is NO cell flash/dissolve anymore: the
+// suggestion images stay at their latent opacity and carry into VIEW_4. The
+// central image + corner labels are untouched and carry over too.
 const dissolving = ref(false)
-let flashTimer: ReturnType<typeof setTimeout> | null = null
 let dissolveTimer: ReturnType<typeof setTimeout> | null = null
-const FLASH_MS = 400                 // cells jump to full opacity
-const FLASH_HOLD_MS = 250            // brief hold at full before the clockwise reduce
-const DISSOLVE_SWEEP_MS = 5000       // matches RelationComponent PREVIEW_DISSOLVE_SWEEP_MS
-const DISSOLVE_TAIL_MS = 700         // per-element fade tail + small buffer (last cell finishes ~sweep + 600ms fade)
-// Clockwise position (from 12 o'clock) of each quadrant centre → fraction of
-// the sweep, so quadrant texts blink out clockwise tr → br → bl → tl, aligned
-// with the cell sweep. Keyed by QUADRANTS index (0=tl,1=tr,2=bl,3=br).
-const QUADRANT_CW_FRACTION: Record<number, number> = { 0: 0.875, 1: 0.125, 2: 0.625, 3: 0.375 }
-// Same smooth ease-in-out HAND motion as the cell sweep (RelationComponent's
-// sweepDelayFraction) so both accelerate through the middle and decelerate to
-// the end in lockstep — inverse of an ease-in-out, no mid-sweep bunching.
-function sweepDelayFraction(f: number): number {
-  return f < 0.5 ? Math.cbrt(f / 4) : 1 - Math.cbrt(2 * (1 - f)) / 2
-}
-function quadrantDissolveDelay(index: number): string {
-  return `${Math.round(sweepDelayFraction(QUADRANT_CW_FRACTION[index] ?? 0) * DISSOLVE_SWEEP_MS)}ms`
-}
+// Quadrant-text fade window before advancing — the gentle 500ms `ease` fade on
+// both `.quadrant-text.dissolving` (interface) and `.canvas-text` (project),
+// plus a small buffer so the fade fully completes before VIEW_4 mounts.
+const TEXT_FADE_MS = 600
 function onCenterClick() {
   // Armed only while the start prompt is up; ignore re-clicks once it begins.
-  if (!showStartAction.value || flashing.value) return
+  if (!showStartAction.value || dissolving.value) return
   showStartAction.value = false      // hide prompt + stop the central pulse + disarm
-  flashing.value = true              // cells flash to full opacity
-  flashTimer = setTimeout(() => {
-    dissolving.value = true          // clockwise reduce back to latent + quadrant texts blink out
-    dissolveTimer = setTimeout(() => {
-      store.enterRelationalView('skip')
-    }, DISSOLVE_SWEEP_MS + DISSOLVE_TAIL_MS)
-  }, FLASH_MS + FLASH_HOLD_MS)
+  dissolving.value = true            // fade out the interface quadrant texts
+  store.clearCanvasTexts()           // fade out the project quadrant texts at the same beat
+  dissolveTimer = setTimeout(() => {
+    store.enterRelationalView('skip')
+  }, TEXT_FADE_MS)
+}
+
+// "Next" skip button — jumps straight to the relational view (VIEW_4),
+// bypassing the four quadrant-cross zooms + the modes-caption. No
+// flash/dissolve animation: it advances immediately via enterRelationalView,
+// which flips project to `split` and reveals the corner labels (see the
+// all-on re-assert inside enterRelationalView).
+function skipToRelational() {
+  store.enterRelationalView('skip')
 }
 
 // Corner labels appear at the four viewport corners at the same screen
@@ -103,40 +96,15 @@ const CORNERS = [
   { position: 'br', name: 'Collaborative', index: 3 },
 ] as const
 
-// Intro sentences shown at VIEW_3 entry — same styling as VIEW_1's
-// explanation panels (the hold differs per view now: VIEW3_PANEL_MS).
-// Each sentence cycles every INTRO_PANEL_MS; after the last sentence's display time the caption
-// auto-fades out (mirrors VIEW_1's last-sentence behaviour) so the
-// viewport clears the way for the cross clicks. The view itself
-// doesn't auto-advance — that's user-driven via the 4 quadrant
-// crosses.
-//
-// VIEW_3 uses the same JS-gated first-render workaround as VIEW_2 for
-// the initial appear delay: Vue's `<Transition appear>` was firing
-// before `--rotate-appear-delay` could register (the many child
-// elements mounting simultaneously — corner labels, quadrant crosses,
-// proximity panels, central image — caused a similar reflow race as
-// VIEW_2's iframe load). `introVisible` is gated by a setTimeout in
-// onMounted; the leave path is shared between the timer-driven
-// last-sentence fade-out AND the cross-click trigger.
-// Narration only — rotates in the middle (mirrored to project). The closing
-// "Zoom in the four modes…" line is no longer a rotating panel: it is the
-// persistent bottom ZOOM_ACTION prompt shown once this narration clears.
-const INTRO_PANELS = [
-  'This image has been selected.',
-]
-const INTRO_PANEL_MS = VIEW3_PANEL_MS
-const introIndex = ref(0)
-const introVisible = ref(false) // gated by setTimeout — see comment block
-let introTimer: ReturnType<typeof setInterval> | null = null
-let introFirstShowTimer: ReturnType<typeof setTimeout> | null = null
+// The VIEW_3 entry intro caption ("This image has been selected.") was REMOVED
+// — VIEW_3 no longer shows a rotating intro sentence after the VIEW_2
+// selection. The four quadrant crosses + the ZOOM_ACTION prompt now appear
+// directly after a short settle beat (see onMounted), without an intro to read
+// first.
 
-// The 4 quadrant crosses are NOT clickable until the rotating intro text has
-// fully finished — so the user reads the intro before zooming. LINKED to the
-// rotation, not a parallel timer: flips true from inside the same
-// last-sentence branch of `introTimer` (below), delayed by the shared
-// ROTATE_FADE_OUT_MS so it lands exactly when the last sentence has faded
-// out. Change VIEW3_PANEL_MS / INTRO_PANELS and this moves with them.
+// The 4 quadrant crosses are NOT clickable until a short settle beat after
+// mount (the shared `--rotate-appear-delay`), so the view doesn't snap the
+// crosses in abruptly. Flipped true by `crossesReadyTimer` in onMounted.
 const crossesReady = ref(false)
 let crossesReadyTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -152,10 +120,7 @@ function clearTimers() {
   if (captionTimer) { clearTimeout(captionTimer); captionTimer = null }
   if (modesHoldTimer) { clearTimeout(modesHoldTimer); modesHoldTimer = null }
   if (modesAfterTimer) { clearTimeout(modesAfterTimer); modesAfterTimer = null }
-  if (flashTimer) { clearTimeout(flashTimer); flashTimer = null }
   if (dissolveTimer) { clearTimeout(dissolveTimer); dissolveTimer = null }
-  if (introTimer) { clearInterval(introTimer); introTimer = null }
-  if (introFirstShowTimer) { clearTimeout(introFirstShowTimer); introFirstShowTimer = null }
   if (crossesReadyTimer) { clearTimeout(crossesReadyTimer); crossesReadyTimer = null }
 }
 
@@ -169,50 +134,23 @@ function readMsVar(name: string): number {
 }
 
 onMounted(() => {
-  // First-render delay (replaces Vue Transition's `appear` for this
-  // view — see top-of-file comment block). Once introVisible flips
-  // true, Vue Transition's enter-active class adds its own
-  // `--rotate-empty-beat` delay before the 500ms fade. Subtract that
-  // from the appear-delay target so the total elapsed time from mount
-  // to first sentence visible matches VIEW_1 exactly.
+  // No intro caption anymore — after a short settle beat (the shared
+  // `--rotate-appear-delay`, so the crosses don't snap in the instant the
+  // view mounts) reveal the four quadrant crosses + the ZOOM_ACTION prompt
+  // together. The view doesn't auto-advance — progress is user-driven via
+  // the crosses.
   const appearDelayMs = readMsVar('--rotate-appear-delay')
-  const emptyBeatMs = readMsVar('--rotate-empty-beat')
-  const firstShowWait = Math.max(0, appearDelayMs - emptyBeatMs)
-  introFirstShowTimer = setTimeout(() => {
-    introVisible.value = true
-    introFirstShowTimer = null
-  }, firstShowWait)
-  introTimer = setInterval(() => {
-    if (introIndex.value >= INTRO_PANELS.length - 1) {
-      // Last sentence reached — fire its fade-out at this tick so it
-      // displays for one full PANEL_MS at the tip then leaves, same
-      // tick-rhythm as VIEW_1's advance(). View doesn't advance with
-      // it; introVisible just hides the caption, the user still
-      // clicks the 4 quadrant crosses to progress.
-      if (introTimer) { clearInterval(introTimer); introTimer = null }
-      introVisible.value = false
-      // Once the narration has fully faded out (ROTATE_FADE_OUT_MS = the
-      // leave-fade duration): reveal the bottom ZOOM_ACTION prompt AND open
-      // the quadrant crosses at the SAME moment — the crosses appear exactly
-      // when "Zoom in the four modes…" appears.
-      crossesReadyTimer = setTimeout(() => {
-        crossesReady.value = true
-        showZoomAction.value = true
-        crossesReadyTimer = null
-      }, ROTATE_FADE_OUT_MS)
-      return
-    }
-    introIndex.value += 1
-  }, INTRO_PANEL_MS)
+  crossesReadyTimer = setTimeout(() => {
+    crossesReady.value = true
+    showZoomAction.value = true
+    crossesReadyTimer = null
+  }, appearDelayMs)
 })
 
 watch(() => store.allCanvasesZoomed, (zoomed) => {
   if (!zoomed) return
   // User clicked all 4 crosses — the zoom action is done: hide its bottom
-  // prompt (and the intro, if somehow still showing), then schedule the
-  // modes-caption reveal.
-  if (introTimer) { clearInterval(introTimer); introTimer = null }
-  introVisible.value = false
+  // prompt, then schedule the modes-caption reveal.
   showZoomAction.value = false
   captionTimer = setTimeout(() => {
     showModesCaption.value = true
@@ -235,20 +173,6 @@ watch(() => store.allCanvasesZoomed, (zoomed) => {
   }, CAPTION_DELAY_MS)
 })
 
-// Mirror the rotating intro caption onto the project canvas (the feedback
-// screen) so both screens fade in/out SIMULTANEOUSLY. Driven by the caption's
-// own <Transition> enter/leave hooks (not a watch), so the project emission
-// fires at the exact moment the interface caption begins each fade; project's
-// `#center-caption.rotate` uses the matching `--rotate-*` timing. The intro
-// clears (leave) before the crosses are clicked, so it never overlaps the
-// later modes-caption (default variant). Project is in `overview` here.
-function onCaptionEnter() {
-  store.setCenterCaption(INTRO_PANELS[introIndex.value] ?? '', 'rotate')
-}
-function onCaptionLeave() {
-  store.setCenterCaption('', 'rotate')
-}
-
 onBeforeUnmount(clearTimers)
 </script>
 
@@ -261,10 +185,10 @@ onBeforeUnmount(clearTimers)
          quadrant text (z below .quadrant-text). The VIEW_3 → VIEW_4 cross-fade
          blends these into VIEW_4's (latent) cells with no re-sweep. -->
     <div class="grid">
-      <RelationComponent component-id="component_1" label="Source" position="tl" preview :flashing="flashing" :dissolving="dissolving" />
-      <RelationComponent component-id="component_2" label="Form" position="tr" preview :flashing="flashing" :dissolving="dissolving" />
-      <RelationComponent component-id="component_3" label="Semantic" position="bl" preview :flashing="flashing" :dissolving="dissolving" />
-      <RelationComponent component-id="component_4" label="Collaborative" position="br" preview :flashing="flashing" :dissolving="dissolving" />
+      <RelationComponent component-id="component_1" label="Source" position="tl" preview />
+      <RelationComponent component-id="component_2" label="Form" position="tr" preview />
+      <RelationComponent component-id="component_3" label="Semantic" position="bl" preview />
+      <RelationComponent component-id="component_4" label="Collaborative" position="br" preview />
     </div>
 
     <span
@@ -291,7 +215,7 @@ onBeforeUnmount(clearTimers)
       <ProximityPanel
         class="quadrant-text"
         :class="{ visible: store.canvasZoomed[q.index], dissolving }"
-        :style="{ left: q.x, top: q.y, '--dissolve-delay': quadrantDissolveDelay(q.index) }"
+        :style="{ left: q.x, top: q.y }"
         :component-id="q.componentId"
       />
     </template>
@@ -304,35 +228,31 @@ onBeforeUnmount(clearTimers)
       <CentralImage :ids="store.centralStack" :active-index="store.centralStackActiveIndex" source="original" />
     </div>
 
-    <!-- Same shared `--rotate-*` vars and Vue <Transition> shape as
-         View1Explanation / View2Disperse, with no `appear`: the first
-         render is gated by `introVisible` (flipped true by the
-         appear-delay setTimeout in onMounted). The leave fires from
-         either path: timer-driven (introVisible flipped false after
-         the last sentence's display time) OR cross-click-driven
-         (watch on store.allCanvasesZoomed also sets introVisible
-         false). See top-of-file comment block. -->
-    <Transition name="intro" mode="out-in" @enter="onCaptionEnter" @leave="onCaptionLeave">
-      <p
-        v-if="introVisible"
-        :key="introIndex"
-        class="intro-caption"
-      >
-        <span class="caption-text">{{ INTRO_PANELS[introIndex] }}</span>
-      </p>
-    </Transition>
+    <!-- (The VIEW_3 entry intro caption "This image has been selected." was
+         removed — VIEW_3 no longer shows a rotating intro after VIEW_2.) -->
 
     <p class="modes-caption" :class="{ visible: showModesCaption }">
       <span class="caption-text">{{ MODES_CAPTION }}</span>
     </p>
 
     <!-- Bottom call-to-action prompts (interface-only, not mirrored). The zoom
-         prompt appears when the intro narration clears (crosses appear with
+         prompt appears after the initial settle beat (crosses appear with
          it) and hides when all four are zoomed; the start prompt appears just
          after the modes caption and persists until the advance `+` is clicked
          (VIEW_3 then unmounts). Only one is ever visible at a time. -->
     <ActionPrompt :visible="showZoomAction" :text="ZOOM_ACTION" />
     <ActionPrompt :visible="showStartAction" :text="START_ACTION" />
+
+    <!-- Skip-to-relational button: jumps straight to VIEW_4, bypassing the
+         four quadrant-cross zooms + the modes-caption. -->
+    <button
+      class="next-button"
+      type="button"
+      aria-label="skip to relational view"
+      @click="skipToRelational"
+    >
+      Next ›
+    </button>
   </section>
 </template>
 
@@ -346,6 +266,31 @@ onBeforeUnmount(clearTimers)
   inset: 0;
   color: #595b54;
   z-index: 100;
+}
+
+/* Skip-to-relational "Next" button — bottom-centred, muted like VIEW_1's
+   skip chevron. Sits above the grid + cells. */
+.next-button {
+  position: absolute;
+  bottom: 2.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: transparent;
+  border: none;
+  color: #595b54;
+  font-family: inherit;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 150ms ease;
+  z-index: 20;
+  pointer-events: auto;
+}
+.next-button:hover {
+  opacity: 1;
 }
 
 /* Grid cross — same shape as VIEW-1 / VIEW-2 / VIEW-4 so the structural
@@ -437,7 +382,7 @@ onBeforeUnmount(clearTimers)
 .cross-button:hover {
   color: #2a2e36;
 }
-/* Inert until the intro text finishes (crossesReady false): hidden,
+/* Inert until the settle beat elapses (crossesReady false): hidden,
    non-interactive, and no attention glow. When crossesReady flips true the
    class drops and the crosses fade in via the base opacity transition. The
    `:disabled` attr is the belt-and-braces that actually blocks the click. */
@@ -475,12 +420,17 @@ onBeforeUnmount(clearTimers)
 .quadrant-text.visible {
   opacity: 1;
 }
-/* Advance-`+` dissolve: each quadrant text blinks out with a per-quadrant
-   --dissolve-delay (clockwise tr → br → bl → tl), in step with the cell
-   sweep. Wins over `.visible` by source order (both 0,2,0 specificity). */
+/* Central-image-click dissolve: all four quadrant texts fade out TOGETHER on
+   click (no cell flash anymore), using the same gentle `ease` fade as the
+   view-level transitions (the cross-fade on the Next button / image-select —
+   `350ms ease` in pages/index.vue — and the 500ms `ease` disperse exit in
+   View2Disperse). Soft tail, not the sharper `--rotate-fade-easing`. Identical
+   to the project canvas text (`.canvas-text`, cleared simultaneously via
+   `clearCanvasTexts()`) so both screens lose the text at the same beat with the
+   same curve. Wins over `.visible` by source order (both 0,2,0 specificity). */
 .quadrant-text.dissolving {
   opacity: 0;
-  transition: opacity 220ms ease-out var(--dissolve-delay, 0ms);
+  transition: opacity 500ms ease;
 }
 
 /* Image anchored at true viewport centre so it sits exactly where VIEW-4's
@@ -517,39 +467,9 @@ onBeforeUnmount(clearTimers)
   }
 }
 
-/* Intro sentences — same typography + upper-centre placement as
-   VIEW_1's `.caption`. Animation is driven by the Vue <Transition
-   name="intro" mode="out-in" appear> wrapper in the template; the
-   keyframe-based fade-in was replaced with the .intro-appear/-enter/
-   -leave classes below for parity with View1Explanation's pattern. */
-.intro-caption {
-  position: absolute;
-  /* Centred in the viewport (was top: 4vh). Sits above the central image
-     deck (z: 12 > center-anchor z: 10) for the brief intro overlay. */
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  /* One line per sentence: no wrap, width grows to the text (centred by
-     the left:50% + translate). */
-  max-width: none;
-  white-space: nowrap;
-  margin: 0;
-  padding: 0;
-  font-size: var(--rotate-size);
-  line-height: 1.5;
-  text-align: center;
-  color: #595b54;
-  z-index: 12;
-  pointer-events: none;
-}
-
-/* Organic backing that traces the text glyphs (not a box) — layered
-   text-shadow in the blue-grey panel colour hugs the letterforms, reading as
-   a soft text-shaped stroke rather than a rectangle. Matches VIEW_1
-   `.caption-text` / VIEW_2 `.entry-caption .caption-text`. */
-/* Organic blue-grey stroke shared by the intro-caption AND the modes-caption
-   (both wrap their text in `.caption-text`), so the modes line reads in the
-   same rotate-caption style. */
+/* Organic blue-grey stroke worn by the modes-caption (`.caption-text` span),
+   so the modes line reads in the rotate-caption style. (The intro-caption that
+   also used this was removed.) */
 .caption-text {
   text-shadow:
     0 0 4px var(--rotate-panel-bg),
@@ -561,25 +481,6 @@ onBeforeUnmount(clearTimers)
     0 0 12px var(--rotate-panel-bg),
     0 0 15px var(--rotate-panel-bg),
     0 0 18px var(--rotate-panel-bg);
-}
-
-/* Vue <Transition name="intro"> CSS hooks — opacity-only fades using
-   the shared --rotate-* custom properties in app.vue's :root so this
-   caption animates identically to View1's `.caption` and View2's
-   `.entry-caption`. No `appear-*` rules: VIEW_3 gates its first
-   render via JS (setTimeout in onMounted) for the same reason as
-   VIEW_2 — see the comment block at the top of <script setup>. */
-.intro-enter-active {
-  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing) var(--rotate-empty-beat);
-}
-.intro-enter-from {
-  opacity: 0;
-}
-.intro-leave-active {
-  transition: opacity var(--rotate-fade-ms) var(--rotate-fade-easing);
-}
-.intro-leave-to {
-  opacity: 0;
 }
 
 /* Modes caption — anchored at the viewport centre (50%/50%) and centred

@@ -554,7 +554,7 @@ reconnect.
 | `currentName`, layout, `cameraZ`, drift | `set-state('single')` → `stateManager.goTo('single')` |
 | `targetX` / `targetY` / `panProgress` / highlight | `set-state('single')` → `single`-state focus reset (inside `goTo`) |
 | `body[data-corner-labels]` | `set-corner-labels(false)` → attribute cleared |
-| Each `.canvas-text` `.visible` + textContent | `set-canvas-text(i, '', '')` × 4 → class removed + text emptied |
+| Each `.canvas-text` `.visible` | `set-canvas-text(i, '', '')` × 4 → `.visible` removed (textContent left as-is so the text can fade out; hidden either way) |
 | `#center-caption` `.visible` + textContent | `set-center-caption('')` → class removed + text emptied |
 
 Together they leave `project` indistinguishable from a cold boot: empty
@@ -977,7 +977,9 @@ no entry-routing branch. The canvas is the only entry surface.
 
 VIEW_2 gates interaction in **three phases** so the user reads the intro
 before touching the canvas, and reads a second (project-side) narration
-before selecting. The embed boots with cursor hidden and picking disarmed.
+before selecting. The embed boots with picking disarmed (the **cursor stays
+visible the whole time** — both the parent `.view-0` and the iframe embed used
+to hide it until armed; that hide was removed).
 
 * **Phase 1 — interface intro narration.** A two-sentence rotating
   `.entry-caption` (`ENTRY_PANELS`) plays at viewport centre — the corpus
@@ -993,19 +995,24 @@ before selecting. The embed boots with cursor hidden and picking disarmed.
   (`ROTATE_FADE_OUT_MS` after the last sentence), `hoverEnabled` flips true,
   the `HOVER_ACTION` prompt ("Explore images of the corpus and look
   up") appears via an `ActionPrompt`, and the parent posts
-  `view0:enable-hover` to the iframe (un-hides its cursor + arms picking).
-  Hovering a sprite lights the **corresponding image on the standalone
-  project** (`store.setHighlight(id)`) — but does NOT spawn the big DOM
-  preview yet, and click is still inert.
+  `view0:enable-hover` to the iframe (arms picking; the cursor was already
+  visible). Hovering a sprite **both** lights the corresponding image on the standalone
+  project (`store.setHighlight(id)`) **and spawns the big DOM preview (the
+  "image view") at the cursor** — the preview is now gated on `hoverEnabled`,
+  not `clickEnabled`, so the user sees the hovered image at full size
+  immediately in phase 2 (it no longer waits for the project narration to
+  finish). Click is still inert.
 * **Phase 3 — project narration → click unlocks.** The user's **first
   hover** schedules `playProjectNarration()` (after
   `HOVER_TO_PROJECT_DELAY_MS = 4000`). That plays a **project-only** centred
   narration (`PROJECT_PANELS`, two sentences) on the standalone via
-  `set-center-caption(text, 'rotate')` (see *SET-CENTER-CAPTION*). When it
-  finishes, `HOVER_ACTION` is swapped for `CLICK_ACTION` ("Select an image
-  to initiate exploration."), `clickEnabled` flips true, and **only now**
-  does hovering spawn the big DOM preview (the "image view") and clicking a
-  sprite select.
+  `set-center-caption(text, 'rotate')` (see *SET-CENTER-CAPTION*). The
+  `HOVER_ACTION` prompt is hidden **the moment the first project sentence
+  appears** (`showHoverAction = false` at the top of `playProjectNarration`),
+  not at the end of the narration. When the narration finishes, `CLICK_ACTION`
+  ("Select an image to initiate exploration.") fades in, `clickEnabled` flips
+  true, and clicking a sprite selects. (The big preview is already showing
+  from phase 2 — phase 3 only adds the ability to *select*.)
 
 `.entry-caption` is centred (`top/left: 50%`), wraps via `max-width:
 min(46em, 88vw)`, and wears the organic blue-grey `.caption-text` stroke
@@ -1013,9 +1020,28 @@ like VIEW_1 / VIEW_3. Timing is the shared `--rotate-*` params (VIEW_2's
 per-sentence hold is `VIEW2_PANEL_MS`) — see *ROTATING-TEXT SYSTEM*; VIEW_2
 uses the JS-gated first-render workaround (no Vue `appear`). The two action
 prompts are a reusable `ActionPrompt` component pinned near the **top** of the
-viewport (`top: 2.5rem`, rotate styling + blue-grey stroke at a reduced Neue
-Kabel size; one-shot glow on appear) — only one visible at a time. (The same
-component carries VIEW_3's `ZOOM_ACTION` / `START_ACTION`.)
+viewport (`top: 2.5rem`, rotate styling at a reduced Neue Kabel size). Instead
+of the captions' dense blue-grey glyph stroke it has an actual **soft radial
+blue glow behind the text** (`.action-prompt::before`, a blurred radial-gradient
+pseudo-element with transparent edges — a real light, not a text-shadow, which
+washed out to grey fog on the light gradient) that **breathes in/out + scales**
+continuously (`action-prompt-pulse`, infinite ease-in-out — loading-style) to
+draw the eye — only one visible at a time. (The same component carries VIEW_3's
+`ZOOM_ACTION` / `START_ACTION` and VIEW_4's `ZOOM_PATH_ACTION`.)
+
+### Skip-to-pick "Next" button
+
+A bottom-centred **`Next ›` button** (`.next-button`, shown while
+`!clickEnabled && !entryExiting`) lets the user **skip the narrations and jump
+straight to the pickable state**. `skipToPick()` clears the phase timers,
+hides the intro caption + `HOVER_ACTION`, clears any in-flight project
+narration, flips `hoverEnabled` + `clickEnabled` true, shows `CLICK_ACTION`
+("Select an image to initiate exploration."), guards the project narration
+(`projectNarrationStarted = true`), and posts `view0:enable-hover` to the
+iframe (arming picking, normally done at phase 2). It does **not** auto-advance
+— the user still picks a sprite to reach VIEW_3. The button hides itself once
+`clickEnabled` is true (whether reached via the button or the natural phase
+progression).
 
 On image click (phase 3): the caption, both prompts, and the disperse
 iframe **fade out smoothly first** (`.is-exiting` → `.project-frame {
@@ -1076,8 +1102,11 @@ does **not** talk to the relay.
 
 `enablePicking` uses **screen-space proximity** hit testing instead of
 pixel-exact raycasting: it picks the nearest sprite within
-`hoverRadiusPx` (default 36 px) of the cursor. Two consequences relevant
-to the contract:
+`hoverRadiusPx` of the cursor (the API default is 36 px; the VIEW_2 embed
+in `main.js` passes **`hoverRadiusPx: 18`** — forgiving enough that images
+are easy to catch on the moving disperse field, but still under the default
+so it doesn't sweep in clearly-unrelated neighbours; it was 9 px earlier,
+which felt too twitchy). Two consequences relevant to the contract:
 
 * hover stays usable on fast-moving disperse sprites — the radius is
   generous enough that small wandering targets remain grabbable,
@@ -1122,9 +1151,11 @@ VIEW-0 → VIEW-2 transition anyway.
 
 ### Hover preview (DOM overlay)
 
-> **Current implementation.** The preview is **gated to phase 3**
-> (`clickEnabled` — see *Three-phase gated flow*): in phase 2 hover only
-> lights the standalone sprite, no preview. When active, `View2Disperse`
+> **Current implementation.** The preview is **gated to phase 2**
+> (`hoverEnabled` — see *Three-phase gated flow*): it appears as soon as hover
+> unlocks (when the "Explore…" prompt shows), so the hovered image is visible
+> at full size immediately rather than waiting for the project narration. (It
+> was previously gated to phase 3 / `clickEnabled`.) When active, `View2Disperse`
 > renders the currently-hovered sprite as an `AtlasThumb` **at the cursor
 > position** (`clampedTopLeft`, anchored up-and-right of the cursor — not at
 > viewport centre) at its natural vmin footprint. **Classical hover, no
@@ -1233,9 +1264,11 @@ reveals that quadrant's **suggestion-image preview** + corner label + text.
 > top-centre advance `+` is **removed**. After the four quadrants are
 > zoomed and the modes-caption has played, the **central image itself
 > becomes the VIEW_3 → VIEW_4 trigger** (it pulses blue while
-> `showStartAction` is up). Clicking it runs a flash → clockwise-dissolve
-> animation, then calls `enterRelationalView('skip')` (see *Central-image
-> click* below).
+> `showStartAction` is up). Clicking it simply **fades the four quadrant texts
+> out** — simultaneously on the interface and the project canvases — then calls
+> `enterRelationalView('skip')`. (The suggestion cells no longer flash or
+> dissolve; they stay at their latent opacity and carry into VIEW_4. See
+> *Central-image click* below.)
 
 VIEW_3 is **not** a project render state — see *VIEW ≠ STATE*. The
 canvas-by-canvas visual change is achieved by per-canvas cameraZ
@@ -1244,16 +1277,17 @@ overrides at the project layer (see *PER-CANVAS ZOOM*). The wire emits
 once per cross click; no `set-state` during VIEW_3 (project stays in
 overview by name).
 
-VIEW_3 displays a **single-sentence** rotating intro `.intro-caption` at
-viewport centre — `INTRO_PANELS = ['One image has been selected.']` —
-mirrored onto the project center-caption (`variant: 'rotate'`, via the
-`<Transition>` `@enter`/`@leave` hooks; see *SET-CENTER-CAPTION*). Timing
-is the shared `--rotate-*` vars (hold = `VIEW3_PANEL_MS`). Like VIEW_2 it
-uses the JS-gated first-render workaround (no Vue `appear`). The closing
-"zoom in the four modes…" line is no longer a rotating panel — it is the
-persistent `ZOOM_ACTION` prompt (an `ActionPrompt`, top of viewport) shown the moment
-the intro clears, at which point the four quadrant crosses become clickable
-(`crossesReady`).
+VIEW_3 **no longer shows an intro caption.** The earlier single-sentence
+rotating intro (`.intro-caption`, "This image has been selected.") was
+**removed entirely** — `INTRO_PANELS`, `introVisible`, `introIndex`, the intro
+`<Transition>` block, the rotation `setInterval`, and the `.intro-*` CSS are
+all gone from `View3Transition.vue`. Instead, after a short settle beat (the
+shared `--rotate-appear-delay`), `onMounted` flips `crossesReady` +
+`showZoomAction` true together, so the four quadrant crosses and the
+persistent `ZOOM_ACTION` prompt (an `ActionPrompt`, top of viewport) appear
+directly — no sentence to read first. (It was previously mirrored to the
+project center-caption; that mirror was also removed before the caption itself
+was dropped.)
 
 ### Predecessor (pre-rename)
 
@@ -1307,7 +1341,7 @@ pattern as VIEW_1, no draw animation — static). Foreground elements:
 ### Timeline (`canvasZoomed[]` and `allCanvasesZoomed` are reactive store state)
 
 ```
-intro plays (1 sentence, mirrored to project) → fades out
+(no intro caption — removed) settle beat (--rotate-appear-delay)
   → crossesReady = true + ZOOM_ACTION prompt appears (crosses now clickable)
 t = 0          click a cross i         →  zoomCanvas(i):
                                           setCanvasZoom(i, activeId)
@@ -1365,40 +1399,66 @@ No state-machine reinterpretation.
 The advance `+` is gone. Once `showStartAction` is up, the `.central-slot`
 is `.clickable` (pulses a blue drop-shadow) and `onCenterClick` runs:
 
-1. `flashing = true` — every suggestion cell flashes to full opacity (held
-   `FLASH_MS + FLASH_HOLD_MS`), behind the quadrant texts.
-2. `dissolving = true` — cells sweep **clockwise** back down to latent
-   (preview-dissolve) while the four quadrant texts blink out clockwise
-   (per-quadrant `--dissolve-delay`, `QUADRANT_CW_FRACTION` × the sweep,
-   eased by `sweepDelayFraction`). The central image + corner labels are
-   untouched and carry into VIEW_4.
-3. After `DISSOLVE_SWEEP_MS + DISSOLVE_TAIL_MS`, `enterRelationalView('skip')`
-   fires.
+1. `dissolving = true` — the four **interface** quadrant texts
+   (`.quadrant-text.dissolving`) fade out over **`500ms ease`** — the same
+   gentle `ease` curve as the view-level transitions (the Next-button /
+   image-select cross-fade, and the disperse exit in View2Disperse), softer than
+   the sharper `--rotate-fade-easing`.
+2. `store.clearCanvasTexts()` — emits `set-canvas-text(i, '', '')` for all four
+   so the **project** quadrant texts (`.canvas-text`, whose transition is the
+   **identical** `500ms ease`) fade out **at the same beat with the same curve**.
+   The quadrant texts disappear simultaneously on both screens.
+3. After `TEXT_FADE_MS` (`ROTATE_FADE_OUT_MS + 100`), `enterRelationalView('skip')` fires.
 
-The `flashing` / `dissolving` flags are passed as props to the four
-`RelationComponent`s (which react via `.constellation.finale-*`-style
-classes in preview mode).
+The suggestion **cells do not animate** — no flash, no dissolve. They stay at
+their latent opacity (0.05) and carry into VIEW_4, as do the central image and
+corner labels.
+
+> **History:** earlier this click ran a clockwise dissolve sweep, then a
+> uniform flash → fade-down of the cells. Both were removed in turn — the cells
+> are now untouched on the click; only the quadrant texts fade. The
+> `flashing`/`dissolving` props on `RelationComponent` and the
+> `.preview-flash` / `.preview-dissolve` CSS are gone; `dissolving` is now a
+> View3Transition-local flag for the `.quadrant-text` fade only.
 
 ### `store.enterRelationalView(reason)`
 
 The reason param (`'auto'` | `'skip'`) is stored in `view2ExitReason` and
-consumed by VIEW_4's reveal-overlay animation. Today only the `'skip'`
-path is reachable (the central-image click); the `'auto'` path is
+consumed by VIEW_4's reveal-overlay animation. The `'skip'` path is reached
+two ways — the central-image click (after the four crosses) **and** the
+**skip-to-relational "Next" button** (see below); the `'auto'` path is
 reserved for any future timed advance.
 
 The function emits:
 
-* `set-state('split', 0)` — instant state-name flip. Project's per-canvas
-  overrides already match `split`'s cameraZ (0.2), so flipping the name
-  with duration 0 produces no visible change while releasing the
-  overrides (cleared on every `goTo`) and unlocking the pan-on-focus
-  behaviour for VIEW_4's history nav and relational clicks.
+* `set-state('split', 0)` — instant state-name flip. In the normal flow
+  project's per-canvas overrides already match `split`'s cameraZ (0.2), so
+  flipping the name with duration 0 produces no visible change while releasing
+  the overrides (cleared on every `goTo`) and unlocking the pan-on-focus
+  behaviour for VIEW_4's history nav and relational clicks. (When VIEW_3 was
+  **skipped** without zooming any canvas, there are no overrides and this snaps
+  all four from overview's cameraZ to split's — an instant jump, acceptable for
+  a skip.)
 * `focus(activeCentralImageId)` — idempotent re-assertion of the camera
   target, in case the future per-canvas zoom paths drifted from each
   other.
+* `set-corner-labels(true)` — reveal all four corner labels on project. In the
+  normal flow they were already revealed per-quadrant during VIEW_3, so this
+  all-on re-assert is idempotent; on the **skip** path (crosses never clicked)
+  it's what reveals them. Safe now that the one-shot announce-glow was removed
+  (opacity-only fade).
 
 It also resets `canvasZoomed = [false, false, false, false]` so that
 re-entering VIEW_3 (no path today, but defensive) starts clean.
+
+### Skip-to-relational "Next" button
+
+A bottom-centred **`Next ›` button** (`.next-button`, always shown in VIEW_3)
+calls `skipToRelational()` → `store.enterRelationalView('skip')` immediately —
+**no flash/dissolve animation** — bypassing the four quadrant-cross zooms and
+the modes-caption. The `set-corner-labels(true)` re-assert inside
+`enterRelationalView` is what makes the skipped entry still land VIEW_4 with
+its project corner labels showing.
 
 ---
 
@@ -1516,7 +1576,25 @@ and `canvas_N` share a coordinate space). The **current canonical mapping**
 | `component_1` | tl       | **Source**        | Tracing origins      | `umap_book2.json`        | `trace`  |
 | `component_2` | tr       | **Form**          | Mirroring structures | `mirror.json`            | `mirror` |
 | `component_3` | bl       | **Semantic**      | Shifting descriptions| `umap_semantic_llm.json` | `shift`  |
-| `component_4` | br       | **Collaborative** | Replaying paths      | `umap_replay.json`       | `replay` |
+| `component_4` | br       | **Collaborative** | Replaying paths      | `umap_spiral.json` | `replay` |
+
+> **Component_4 dataset — `umap_spiral.json`.** `component_4`'s quadrant
+> suggestions AND canvas-4 both render `umap_spiral.json` (its
+> `COMPONENT_DATASET_FILES` entry in `mockRelations.ts` AND the `replay`
+> mapType in `project/src/mapData.js` `sources` — **both** must agree or the
+> proximity is computed on a different coordinate space than the one rendered,
+> and the on-screen map won't reflect a `mockRelations.ts`-only change). This
+> dataset was swapped through `umap_replay.json` → `umap_spiral_archipel.json`
+> → `umap_spiral.json`; the spiral embedding also carries a `year` field, so
+> `COMPONENT_YEAR_FILES.component_4` points at the same file (the hover label
+> surfaces the year — see `loadYearMap`).
+
+> **Component_4 vs. explore-others ribbons — two different UMAPs.** The VIEW_4
+> **explore-others corner ribbons** are decoupled from canvas-4's map: they
+> read `umap_replay.json` directly via `loadUmapByFile`, because they represent
+> past *collaborative paths* rather than the canvas-4 map. That decoupling is
+> deliberate and was **not** changed by the spiral swap. See *VIEW_4 — OVERVIEW
+> FINALE & EXPLORE-OTHERS*.
 
 > **Label rename.** The four modes were renamed from
 > **Mirror / Trace / Shift / Replay** to **Source / Form / Semantic /
@@ -1536,11 +1614,13 @@ canvasIndex 0..3 directly to `component_1..4` (`` `component_${i+1}` ``);
 at the matching corner; project's `createApp` mapTypes (`trace` / `mirror`
 / `shift` / `replay` → the dataset files via `mapData.js` `sources`) agree.
 
-The dataset loader caches each parsed dataset by componentId. The
-JSON may be either a bare `UmapPoint[]` or a `{ count, method, points }`
-wrapper; both are accepted. The explore-others endpoint
-(`server/api/replay-circles.get.ts`) reuses `loadUmapDataset` +
-`pickRelations` on `component_4`.
+The dataset loader caches each parsed dataset by componentId
+(`loadUmapDataset`), delegating to a filename-keyed `loadUmapByFile` that owns
+the parse + cache. The JSON may be either a bare `UmapPoint[]` or a
+`{ count, method, points }` wrapper; both are accepted. The explore-others
+endpoint (`server/api/replay-circles.get.ts`) calls `loadUmapByFile('umap_replay.json')`
+directly (NOT `loadUmapDataset('component_4')`) so its proximity is decoupled
+from canvas-4's `umap_spiral.json`.
 
 The current `view3Interpretations` bodies (interface-side single source of
 truth, mirrored to project via `set-canvas-text`):
@@ -2462,6 +2542,19 @@ ready app and calls `app.object.highlight(id)`, which delegates to
 * keeps the glow anchored at `lastPrimaryIndex` during fade-out so the
   halo eases out in place rather than cutting.
 
+> **Instant hover-out (no fade-out lag).** The eased smoothing above governs
+> fade-**in** and the focus/mark tracks. For the transient **hover** track,
+> the fade-**out** is **instant**: `pointsManager.applyLit` snaps the
+> just-released hover index's scale + glow to 0 immediately (writes
+> `highlightT = highlightTargetT = 0`, drops it from `activeHighlights`,
+> re-writes the instance) instead of letting `tickHighlights` ease it down.
+> This fires when the hover sprite is released (cursor leaves all sprites) OR
+> the cursor jumps to another sprite — but **only** when that index isn't
+> still held lit by the focus track or the mark set (those still ease, so
+> VIEW_4 nav, the central focus glow, and overview marks are unaffected). The
+> change was made because the VIEW_2 disperse hover halo felt laggy lingering
+> on the standalone project as the cursor moved off an image.
+
 The visual magnitude is **state-dependent**: `stateManager.goTo`
 chooses a preset per render state (`big` for `single` / `overview` /
 `disperse`, `default` for `split`) and broadcasts the preset to every
@@ -3138,11 +3231,27 @@ function setCanvasText(payload) {
   if (!el) return
   const title = typeof payload.title === 'string' ? payload.title : ''
   const body = typeof payload.body === 'string' ? payload.body : ''
-  el.querySelector('.canvas-text-title').textContent = title
-  el.querySelector('.canvas-text-body').textContent = body
-  el.classList.toggle('visible', !!(title || body))
+  if (title || body) {
+    // reveal / replace: write content, then fade in
+    el.querySelector('.canvas-text-title').textContent = title
+    el.querySelector('.canvas-text-body').textContent = body
+    el.classList.add('visible')
+  } else {
+    // clear: drop `.visible` ONLY — do NOT wipe textContent, or the glyphs
+    // hard-cut while the empty box fades ("speed cut"). The text fades out via
+    // opacity; stale content stays hidden until the next reveal overwrites it.
+    el.classList.remove('visible')
+  }
 }
 ```
+
+> **Why not clear `textContent` on hide.** Wiping the text the instant `.visible`
+> is removed makes the glyphs vanish immediately while only the empty container
+> animates its opacity — the text never visibly fades (it "speed-cuts"). Hiding
+> by `.visible`-removal only (same as `setCenterCaption`) lets the existing text
+> fade out through the `.canvas-text` opacity transition. Safe because `.visible`
+> is only ever re-added together with fresh content, so stale hidden text can
+> never reappear on its own.
 
 ### Invariants
 
@@ -3169,7 +3278,8 @@ function setCanvasText(payload) {
 ## SET-CENTER-CAPTION — viewport-centred overlay text
 
 `set-center-caption` is the wire directive that paints centred overlay
-copy at viewport centre on the project side. It has **four consumers**:
+copy at viewport centre on the project side. It has **three consumers**
+(the VIEW_3 rotating-intro mirror was removed — see below):
 
 * **VIEW_2 project-only narration** — `View2Disperse.vue` does **not** mirror
   its interface narration (`ENTRY_PANELS`) anymore. Instead the project shows
@@ -3184,13 +3294,13 @@ copy at viewport centre on the project side. It has **four consumers**:
   **click selection unlocks** (see *VIEW_2 — CANVAS ENTRY PHASE*). Project is
   in `overview` here, so the `:not([data-state="single"])` guard passes; the
   caption is cleared on image-click and on unmount.
-* **VIEW_3 rotating-intro mirror** — `INTRO_PANELS` ("One image has been
-  selected.") IS mirrored onto project, driven by the caption's `<Transition>`
-  **enter/leave hooks** (`@enter` → `set-center-caption(sentence, 'rotate')`;
-  `@leave` → `set-center-caption('', 'rotate')`), so it fades in/out in sync
-  with the interface. The intro leaves before the crosses are clicked, so it
-  never overlaps the later modes-caption. VIEW_1's caption is NOT mirrored —
-  project is in `single` there, where the caption guard hides it.
+* **VIEW_3 rotating-intro mirror — REMOVED (and the caption itself deleted).**
+  The VIEW_3 entry intro ("This image has been selected.") no longer exists:
+  first its project mirror was dropped (the `<Transition>` `@enter`/`@leave`
+  hooks emitting `set-center-caption(…, 'rotate')`), then the whole caption was
+  removed from `View3Transition.vue`. No `set-center-caption` is emitted for it
+  and nothing is shown on the interface either. The VIEW_3 **modes-caption**
+  below is still mirrored.
 * **VIEW_3 modes-caption** — a single sentence (`MODES_CAPTION`, "Four modes
   of proximity each suggesting new images relationing differently with the
   center image"), revealed `CAPTION_DELAY_MS` (1 s) after the fourth quadrant
@@ -3240,7 +3350,7 @@ reveals so both screens animate in lockstep:
 | Moment                                                          | Emission                                                |
 | --------------------------------------------------------------- | -------------------------------------------------------- |
 | VIEW_2 project narration (`playProjectNarration`, 4 s after first hover) | per sentence: `set-center-caption(PROJECT_PANELS[i], 'rotate')`, hold `VIEW2_PANEL_MS`, then `set-center-caption('')`; cleared on image-click + unmount. |
-| VIEW_3 rotating intro caption `<Transition>` `@enter` / `@leave` | `@enter` → `set-center-caption(INTRO_PANELS[i], 'rotate')`; `@leave` → `set-center-caption('', 'rotate')`. Fires at the exact interface fade moments so project fades in sync. |
+| ~~VIEW_3 rotating intro caption `<Transition>` `@enter` / `@leave`~~ | **REMOVED** — the VIEW_3 intro ("This image has been selected.") is now interface-only; no `set-center-caption` is emitted for it. |
 | 1 s after fourth VIEW_3 quadrant cross click                    | `set-center-caption(MODES_CAPTION, 'rotate')` — fade in (rotate style); cleared after one `VIEW3_PANEL_MS` hold.   |
 | VIEW_3 → VIEW_4 advance (`enterRelationalView`)                 | `set-center-caption('')` — clear before VIEW_4 mounts. |
 | VIEW_4 interpret-control toggle (`toggleView3Interpretation`)   | ON → `set-center-caption(IMAGE_CREDIT_LINES.join('\n'))`; OFF → `set-center-caption('')`. Same beat as the four `set-canvas-text` calls + `set-canvas-veil`. |
@@ -3595,13 +3705,14 @@ of those selectors; if a new element joins the tier, point it at
 `--label-size` too.
 
 **Rotating intro text is no longer locked to this tier.** `.caption`
-(VIEW_1), `.entry-caption` (VIEW_2), and `.intro-caption` (VIEW_3) read
-their size from their own `--rotate-size` var (app.vue `:root`) rather than
-`--label-size` directly. `--rotate-size` currently resolves to
-`var(--label-size)` (so the captions render at the same size as the corner
-labels) but stays a separate var so they can be resized independently later
-without touching the corner labels / titles. The captions are **centred**
-(`top: 50%` + `translate(-50%, -50%)`) in all three views and their backing
+(VIEW_1) and `.entry-caption` (VIEW_2) read their size from their own
+`--rotate-size` var (app.vue `:root`) rather than `--label-size` directly.
+(VIEW_3's `.intro-caption` used the same var but the intro caption was removed;
+VIEW_3's surviving `.modes-caption` still uses `--rotate-size`.) `--rotate-size`
+currently resolves to `var(--label-size)` (so the captions render at the same
+size as the corner labels) but stays a separate var so they can be resized
+independently later without touching the corner labels / titles. The captions
+are **centred** (`top: 50%` + `translate(-50%, -50%)`) and their backing
 **traces the text glyphs themselves** — not a box behind the line. The inner
 inline `.caption-text` span (NOT the block `<p>`) carries a layered
 `text-shadow` in `--rotate-panel-bg` (light blue-grey at **90% opacity**,
@@ -3609,9 +3720,9 @@ currently `rgba(170, 180, 194, 0.9)`); the stacked shadows build a soft
 organic "stroke" hugging the letterforms (tight inner layers for body, wider
 layers feathering out). No `background` / `border-radius` /
 `box-decoration-break` — those were tried and rejected as too box-like. Each
-view keeps its own text colour and wrap rule (VIEW_1/3 `nowrap`, VIEW_2
-`max-width: 60vw`). Timing is still the shared `--rotate-*` contract (see
-*ROTATING-TEXT SYSTEM*) — unchanged.
+view keeps its own text colour and wrap rule (VIEW_1 `nowrap`, VIEW_2
+`max-width: 60vw`; VIEW_3's `.modes-caption` is `nowrap`). Timing is still the
+shared `--rotate-*` contract (see *ROTATING-TEXT SYSTEM*) — unchanged.
 
 ### Text halo system — `--halo` CSS custom property (currently disabled)
 
@@ -3645,11 +3756,13 @@ both also currently disabled).
 
 ## ROTATING-TEXT SYSTEM
 
-Three views (`VIEW_1`, `VIEW_2`, `VIEW_3`) display rotating intro
-sentences that fade in, hold, cycle through, and fade out. All three
-share IDENTICAL timing parameters via shared CSS custom properties +
-shared TypeScript constants. Change a value once in the source and
-every consumer updates.
+Two views (`VIEW_1`, `VIEW_2`) display rotating intro sentences that fade in,
+hold, cycle through, and fade out. (`VIEW_3`'s intro caption was **removed** —
+it no longer participates; only its non-rotating `MODES_CAPTION` remains, which
+reuses `VIEW3_PANEL_MS` for its hold and `--rotate-*` for its fade.) Both share
+IDENTICAL timing parameters via shared CSS custom properties + shared
+TypeScript constants. Change a value once in the source and every consumer
+updates.
 
 ### Shared parameters
 
@@ -3670,7 +3783,7 @@ imported by all three views):
 |---|---|---|
 | `VIEW1_PANEL_MS` | Per-sentence hold for VIEW_1's explanation panels. | `4000ms` |
 | `VIEW2_PANEL_MS` | Per-sentence hold for VIEW_2's interface narration **and** the project-only narration. | `6000ms` |
-| `VIEW3_PANEL_MS` | Per-sentence hold for VIEW_3's intro narration **and** the "Four modes…" modes-caption. | `6000ms` |
+| `VIEW3_PANEL_MS` | Hold for VIEW_3's "Four modes…" modes-caption (the intro narration that also used it was removed). | `6000ms` |
 | `ROTATE_FADE_OUT_MS` | Duration of the leave animation; drives the `setTimeout` that delays the next view advance until the leave completes. **Must equal `--rotate-fade-ms`** numerically (the CSS var and the JS constant are two halves of the same number). | `400ms` |
 
 > **Per-view holds (not one shared cadence).** The hold was decoupled per view
@@ -3678,7 +3791,7 @@ imported by all three views):
 > `--rotate-fade-ms`) stays locked across all rotating text. Each view imports
 > its own `VIEWn_PANEL_MS`.
 
-### Three consumers
+### Two consumers
 
 Each view wraps its rotating `<p>` in `<Transition name="..."
 mode="out-in">` with `:key` driving sentence-to-sentence remount, and
@@ -3688,17 +3801,21 @@ a script-side ref driving the exit leave:
 |---|---|---|---|---|---|
 | VIEW_1 | `View1Explanation.vue` | `.caption-*` | `PANELS` | `captionVisible` | timer (calls `advance()` after last panel) |
 | VIEW_2 | `View2Disperse.vue` | `.entry-*` | `ENTRY_PANELS` | `entryCaptionVisible` | sprite click in iframe via `view0:image-click` postMessage, OR timer after last sentence |
-| VIEW_3 | `View3Transition.vue` | `.intro-*` | `INTRO_PANELS` | `introVisible` | 4th quadrant cross clicked (watcher on `store.allCanvasesZoomed`), OR timer after last sentence |
+
+> **VIEW_3 was removed from this table.** It used to be a third consumer
+> (`.intro-*` / `INTRO_PANELS` / `introVisible`); the intro caption was deleted,
+> so VIEW_3 no longer wraps a rotating `<p>`. The `MODES_CAPTION` it still shows
+> is a single non-rotating `.modes-caption` (no `<Transition>`, no cycling).
 
 Each view's stylesheet declares `.{prefix}-enter-active`,
 `.{prefix}-enter-from`, `.{prefix}-leave-active`, `.{prefix}-leave-to`
 rules that reference the `--rotate-*` vars. Style is opacity-only —
 no transform drift. The base caption rule
-(`.caption` / `.entry-caption` / `.intro-caption`) sets
+(`.caption` / `.entry-caption`) sets
 `transform: translateX(-50%)` for centring, which would override any
 drift on the transition hooks via CSS cascade anyway.
 
-### `appear` vs JS-gated first render — VIEW_1 uses Vue, VIEW_2 + VIEW_3 use JS
+### `appear` vs JS-gated first render — VIEW_1 uses Vue, VIEW_2 uses JS
 
 **VIEW_1** uses Vue's native `<Transition appear>` with the
 `.caption-appear-active` rule applying the `--rotate-appear-delay`
@@ -3711,12 +3828,12 @@ view-level transition's reflow commit styles before Vue's
 appear-from class can register, so the `--rotate-appear-delay`
 silently doesn't apply and the first sentence drifts in immediately.
 
-**VIEW_3** has the same problem from a different cause — its many
-child elements (corner labels, 4 quadrant crosses, 4 ProximityPanel
-components, CentralImage stack) all mount at once, producing a
-similar reflow race.
+(VIEW_3 used to share this JS-gated workaround for its intro caption — for a
+similar reflow-race reason — but the intro caption was removed, so VIEW_3 no
+longer has a rotating first-render to gate. It now just uses a single
+`setTimeout(--rotate-appear-delay)` in `onMounted` to reveal the crosses.)
 
-For both, the workaround is identical:
+For VIEW_2, the workaround is:
 
 1. The visibility ref starts `false` (e.g. `entryCaptionVisible = ref(false)`).
 2. `<Transition>` does **not** have `appear`.
@@ -3730,15 +3847,14 @@ For both, the workaround is identical:
    appearDelay + fadeMs` — exactly matching VIEW_1's Vue-appear path.
 
 The JS reads the CSS vars at runtime, so any `:root` tweak
-automatically propagates to all three views — no second edit needed.
+automatically propagates to both views — no second edit needed.
 
-VIEW_2 and VIEW_3 stylesheets therefore have NO `.*-appear-*` rules;
-only `.*-enter-*` and `.*-leave-*`. VIEW_1 keeps its
-`.caption-appear-*` rules.
+VIEW_2's stylesheet therefore has NO `.*-appear-*` rules; only `.*-enter-*`
+and `.*-leave-*`. VIEW_1 keeps its `.caption-appear-*` rules.
 
 ### Last-sentence auto-fade
 
-All three views auto-fade their last sentence after its full per-view
+Both views auto-fade their last sentence after its full per-view
 hold (`VIEWn_PANEL_MS`), even if the view doesn't auto-advance.
 The timer's setInterval increments the sentence index each tick; on
 the tick AFTER the last sentence becomes current (i.e. once the last
@@ -3751,11 +3867,10 @@ ref flips false → Vue leave animation runs.
   caption; the view stays on VIEW_2 until the user clicks a sprite.
   The sprite-click handler treats "already faded" as "advance
   immediately" so the user isn't blocked.
-* **VIEW_3** — flipping `introVisible` to false JUST hides the
-  caption; the view stays on VIEW_3 until the user clicks all 4
-  quadrant crosses. The `store.allCanvasesZoomed` watcher also flips
-  `introVisible` false (defensive — handles the case where the user
-  clicks crosses before the last-sentence timer fires).
+
+(VIEW_3 had a last-sentence auto-fade for its intro caption; with the caption
+removed, that path is gone — VIEW_3's crosses are revealed by a plain settle
+timer instead.)
 
 ### Exit fade-then-advance
 
@@ -3772,24 +3887,21 @@ with the still-visible caption. The setTimeout duration MUST equal
 
 ### Interaction gating — disabled until the rotation finishes
 
-VIEW_2 and VIEW_3 gate their primary interaction OFF until the rotating
-intro text has fully finished, so the user reads the intro before the view
-becomes interactive:
+VIEW_2 and VIEW_3 both gate their primary interaction OFF for a beat after
+mount, but the trigger differs now that VIEW_3 has no intro:
 
 * **VIEW_2** — sprite **hover** (preview + `set-highlight`) AND **click**
   (`selectImage`) are ignored in `onMessage` until `interactionReady` is true.
   (`view0:dispersed` is NOT gated — the overview-reveal sync must still fire.)
+  This flag is **linked to the rotation**: it's flipped true from *inside the
+  last-sentence branch of VIEW_2's rotation `setInterval`*, delayed by
+  `ROTATE_FADE_OUT_MS` so it lands exactly when the last sentence has faded —
+  changing `VIEW2_PANEL_MS` / the panel array moves the gate automatically.
 * **VIEW_3** — the four quadrant **crosses** are `:disabled` + `.pending`
-  (hidden, no glow) until `crossesReady` is true, then they fade in.
-
-Both flags are **linked to the rotation, not a parallel timer**: each is
-flipped true from *inside the same last-sentence branch of the view's
-rotation `setInterval`* that ends the text, delayed by `ROTATE_FADE_OUT_MS`
-so it lands exactly when the last sentence has faded out. Changing the
-per-view hold (`VIEWn_PANEL_MS`), `ROTATE_FADE_OUT_MS`, or the panel arrays
-automatically moves the gate — there is no duplicated cadence to keep in sync. The timer
-handles store the gate's `setTimeout` and clear it on unmount alongside the
-rotation timers.
+  (hidden, no glow) until `crossesReady` is true, then they fade in. Since the
+  intro caption was removed, `crossesReady` is now flipped by a **plain
+  `setTimeout(--rotate-appear-delay)` in `onMounted`** (a short settle beat),
+  not by a rotation branch.
 
 ### Visual continuity with VIEW_0's exit
 
@@ -3853,19 +3965,13 @@ drives `overviewFinalePhase: 'idle' | 'bright' | 'dissolve' | 'fadeout'`:
 
 1. **bright** (`OVERVIEW_BRIGHT_MS`) — the four quadrants' suggestion images
    flash to full opacity and hold.
-2. **dissolve** — the 16 cells fade out one-by-one **clockwise across the
-   whole oval** (per-cell `--dissolve-delay` = the absolute clockwise position
-   eased by `sweepDelayFraction` — the *inverse* of an ease-in-out, so the
-   hand starts slow, accelerates through the middle and eases out, with no
-   mid-sweep bunching — × `OVERVIEW_DISSOLVE_SWEEP_MS`). `SWEEP = 5000` is the
-   clockwise hand; each cell's own fade is a 600ms tail (`.finale-dissolve
-   .cell` opacity 600ms, CSS only). This is the **same duration + ease + 600ms
-   tail as the VIEW_3 central-image dissolve** (`PREVIEW_DISSOLVE_SWEEP_MS`,
-   *Central-image click*) so the two clockwise effects look alike — only the
+2. **dissolve** — the 16 cells fade out **all together** (no clockwise sweep)
+   to 0 over `OVERVIEW_DISSOLVE_MS = 600` (`.finale-dissolve .cell` opacity
+   600ms, uniform — no per-cell `--dissolve-delay`). Same uniform flash → fade
+   shape as the VIEW_3 central-image dissolve (*Central-image click*); only the
    end opacity differs (finale → 0; VIEW_3 preview → latent 0.05).
-3. **fadeout** (`OVERVIEW_FADEOUT_MS`) — fires the instant the clockwise hand
-   completes, at `OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_SWEEP_MS` = **6200ms**
-   (the 600ms per-cell fade tail runs out just after).
+3. **fadeout** (`OVERVIEW_FADEOUT_MS`) — fires the instant the cells finish
+   fading, at `OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_MS` = **1800ms**.
    The central image **deck**, the **grid cross**, and the **corner labels**
    all fade out **together** over 700ms: deck via `.center-anchor.deck-fadeout`,
    cross via `.view-3.finale-fadeout::before`, corner labels via
@@ -3889,9 +3995,14 @@ drives `overviewFinalePhase: 'idle' | 'bright' | 'dissolve' | 'fadeout'`:
      `set-center-caption(…, 'rotate')` — "Your images found different neighbors
      across each proximity mode." (`HOLD_PROJECT_MS`).
    After both (`CROSS_DELAY_MS`), a `+` **center cross** fades in at the middle
-   of the circle (warm trigger-glow, `.center-cross`). Clicking it runs
-   `enterSinglePathView()` **and** shows a new interface-centre rotate caption
-   "Look for some previous user journey collaboration" (`EXPLORE_TEXT`).
+   of the circle (warm trigger-glow, `.center-cross`) **together with a
+   call-to-action `ActionPrompt`** (`ZOOM_PATH_ACTION` = "Zoom into your journey
+   and other participants'.", `showZoomPathAction`) — the same `ActionPrompt`
+   component + styling as VIEW_2's "Select an image…" (interface-only, pinned
+   near the top), appearing once the project sentence has finished. Clicking the
+   cross hides the prompt, runs `enterSinglePathView()`, **and** shows a new
+   interface-centre rotate caption "See how you move across proximity maps and
+   other participants journeys." (`EXPLORE_TEXT`).
 
 Interaction is **frozen** for the whole finale: `setQuadrantHover`,
 `stepBack/Forward/jumpToHistory` early-return on `overviewFinaleActive`, and
@@ -3915,10 +4026,12 @@ to prepare the explore-others ribbons.
 Once in the single-path view, four **existing Replay-proximity sets** appear
 as **L-shaped ribbons** in the corners (they were ovals; now corner ribbons).
 Each set is a random Replay neighbourhood from a new Nuxt endpoint
-**`server/api/replay-circles.get.ts`** (reuses `loadUmapDataset` +
-`pickRelations` on `component_4` / `umap_replay.json`; a **diversity guard**
-rejects sets ≥70% overlapping an accepted one). No new data source, no
-persistence — proximity already encodes the collaborative trace.
+**`server/api/replay-circles.get.ts`** (`loadUmapByFile('umap_replay.json')` +
+`pickRelations`; a **diversity guard** rejects sets ≥70% overlapping an
+accepted one). The ribbons read **`umap_replay.json`** directly — decoupled
+from canvas-4's `umap_spiral.json` (`component_4`) — because they
+represent past collaborative paths, not the canvas-4 map. No persistence —
+proximity already encodes the collaborative trace.
 
 Store surface (`interaction.ts`): `replayCircles`, `centeredCircleIds`,
 `centeredStack` (computed — `centeredCircleIds ?? centralStack`, so the
@@ -3998,11 +4111,11 @@ Do not modify project, **with fourteen explicit exceptions**:
    applies the `big` highlight preset, sets the gradient backdrop
    inline), and the `enablePicking({ onHover, onClick })` API in `app.js`
    that posts `view0:image-hover` / `view0:image-click` messages back to
-   `window.parent` via `postMessage`. The embed boots with its **cursor
-   hidden and picking disarmed**; it only arms picking (un-hides cursor,
-   enables hover glow) when the parent posts **`view0:enable-hover`** — the
-   parent→iframe message sent once VIEW_2's intro narration clears (the
-   "Explore…" prompt appears). `main.js` also posts a one-shot
+   `window.parent` via `postMessage`. The embed boots with **picking disarmed**
+   (the cursor stays visible — the old boot-time cursor hide was removed); it
+   only arms picking (enables hover glow) when the parent posts
+   **`view0:enable-hover`** — the parent→iframe message sent once VIEW_2's intro
+   narration clears (the "Explore…" prompt appears). `main.js` also posts a one-shot
    `view0:dispersed` message the moment the disperse burst begins, which the
    parent uses to fire the standalone project's overview reveal in sync with
    the spawning sprites (see *`enterEntryView()` — hidden snap to overview,
@@ -4060,7 +4173,11 @@ Do not modify project, **with fourteen explicit exceptions**:
      COLLABORATIVE pop **per-quadrant** on the project in lockstep with
      the interface (which gates its own `.corner-label.visible` on
      `store.canvasZoomed[i]`), instead of all four at once at VIEW_4
-     entry. `enterRelationalView` no longer emits the all-on plural.
+     entry. `enterRelationalView` then re-asserts the all-on plural
+     (`set-corner-labels(true)`) on entry — idempotent after the per-quadrant
+     reveals in the normal flow, but the actual reveal when VIEW_3 was skipped
+     via the "Next" button (crosses never clicked). Harmless now that the
+     announce-glow is gone (opacity-only).
    Once revealed the labels stay visible across subsequent state
    transitions until the next boot. **The one-shot glow pulse was
    removed** (the old `@keyframes corner-label-glow`): animating the

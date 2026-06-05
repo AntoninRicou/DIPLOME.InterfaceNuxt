@@ -1,11 +1,12 @@
 <script setup lang="ts">
-// Persistent action prompt — a single call-to-action line pinned to the
-// BOTTOM of the viewport, styled like the rotating narration captions
-// (shared --rotate-size + the organic blue-grey glyph stroke) and fading
-// in/out on the shared --rotate-* timing, so it stays in the same visual
-// "rotate-text" family. Unlike the narration captions it does NOT rotate and
-// is NOT mirrored to project — it is an interface-side affordance that appears
-// once the narration has cleared and stays until its action is performed.
+// Persistent action prompt — a single call-to-action line pinned near the TOP
+// of the viewport, styled like the rotating narration captions (shared
+// --rotate-size) and fading in/out on the shared --rotate-* timing, so it stays
+// in the same visual "rotate-text" family. Instead of the captions' dense glyph
+// stroke it wears a soft blue glow that gently breathes in/out (loading-style)
+// to draw the eye. Unlike the narration captions it does NOT rotate and is NOT
+// mirrored to project — an interface-side affordance that appears once the
+// narration has cleared and stays until its action is performed.
 //
 // Used by VIEW_2 ("Select an image…") and VIEW_3 ("Zoom in the four modes…"
 // then "Click on the top cross…"). The parent owns the `visible` timing (sets
@@ -51,45 +52,40 @@ defineProps<{ visible: boolean; text: string }>()
   pointer-events: none;
 }
 
-/* Same organic blue-grey glyph stroke as the rotating captions
-   (.caption-text in View1/2/3) so the action line reads in the same family.
-   PLUS a one-shot blue glow swell that plays once each time the prompt appears
-   (the <p> remounts on every `visible` flip), so the eye is drawn to it. The
-   keyframe starts and ends on the static stroke, swelling the blue mid-way. */
-.action-prompt .caption-text {
-  text-shadow:
-    0 0 4px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 15px var(--rotate-panel-bg),
-    0 0 18px var(--rotate-panel-bg);
-  animation: action-prompt-glow 3s ease-out 1 both;
+/* No dense glyph stroke (that read as an opaque blue backing). Instead an
+   actual GLOW sits BEHIND the text — a soft radial blue light (a blurred
+   pseudo-element, not a text-shadow, which was washing out to grey fog on the
+   light gradient). It breathes in/out + scales continuously like a loading
+   indicator. Saturated enough to read as light on the day backdrop; its edges
+   fade to transparent so it's a glow, not a filled box. */
+.action-prompt::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 118%;
+  height: 340%;
+  transform: translate(-50%, -50%);
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(150, 178, 248, 0.85) 0%,
+    rgba(146, 174, 240, 0.5) 32%,
+    rgba(140, 168, 228, 0.18) 58%,
+    rgba(140, 168, 228, 0) 78%
+  );
+  filter: blur(6px);
+  animation: action-prompt-pulse 2.4s ease-in-out infinite;
 }
-@keyframes action-prompt-glow {
+@keyframes action-prompt-pulse {
   0%, 100% {
-    text-shadow:
-      0 0 4px var(--rotate-panel-bg),
-      0 0 6px var(--rotate-panel-bg),
-      0 0 6px var(--rotate-panel-bg),
-      0 0 9px var(--rotate-panel-bg),
-      0 0 9px var(--rotate-panel-bg),
-      0 0 12px var(--rotate-panel-bg),
-      0 0 12px var(--rotate-panel-bg),
-      0 0 15px var(--rotate-panel-bg),
-      0 0 18px var(--rotate-panel-bg);
+    opacity: 0.4;
+    transform: translate(-50%, -50%) scale(0.9);
   }
-  30% {
-    text-shadow:
-      0 0 6px var(--rotate-panel-bg),
-      0 0 14px var(--rotate-panel-bg),
-      0 0 26px var(--rotate-panel-bg),
-      0 0 44px var(--rotate-panel-bg),
-      0 0 70px var(--rotate-panel-bg),
-      0 0 110px var(--rotate-panel-bg);
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.08);
   }
 }
 

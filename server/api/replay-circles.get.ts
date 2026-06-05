@@ -1,12 +1,16 @@
 import { defineEventHandler, getQuery } from 'h3'
-import { loadUmapDataset, pickRelations } from '~~/server/utils/mockRelations'
+import { loadUmapByFile, pickRelations } from '~~/server/utils/mockRelations'
 
-// Build N "existing circles" from the Replay UMAP (component_4) — the same
-// proximity data canvas-4 renders. Each circle is a random anchor image plus
-// its nearest neighbours, so it reads as another journey through the corpus.
-// The interface shows these in the four corners after "See your path"; the
+// Build N "existing circles" from the Replay UMAP (umap_replay.json) — the
+// collaborative-path proximity. Each circle is a random anchor image plus its
+// nearest neighbours, so it reads as another journey through the corpus. The
+// interface shows these in the four corners after "See your path"; the
 // proximity computation stays server-side (interface never sees coordinates).
-const REPLAY_COMPONENT = 'component_4'
+//
+// This is decoupled from component_4's canvas map (umap_spiral_archipel.json):
+// the corner ribbons are about past collaborative paths, so they read their
+// own umap_replay.json directly rather than the file canvas-4 renders.
+const REPLAY_DATASET_FILE = 'umap_replay.json'
 
 // Discard a candidate circle whose id set overlaps an already-accepted one
 // by this much or more, so the four corners feel meaningfully different
@@ -29,7 +33,7 @@ export default defineEventHandler(async (event) => {
   const count = clampInt(query.count, 4, 1, 8)
   const size = clampInt(query.size, 10, 3, 16)
 
-  const dataset = await loadUmapDataset(REPLAY_COMPONENT)
+  const dataset = await loadUmapByFile(REPLAY_DATASET_FILE)
   if (!dataset || dataset.points.length === 0) {
     return { circles: [] }
   }

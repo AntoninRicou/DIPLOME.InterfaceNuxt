@@ -1,5 +1,5 @@
 import { defineEventHandler, getQuery, getRouterParam, createError } from 'h3'
-import { loadUmapDataset, loadSubjectMap, pickRelations } from '~~/server/utils/mockRelations'
+import { loadUmapDataset, loadSubjectMap, loadTagData, loadYearMap, pickRelations } from '~~/server/utils/mockRelations'
 
 export default defineEventHandler(async (event) => {
   const componentId = getRouterParam(event, 'componentId')
@@ -25,10 +25,47 @@ export default defineEventHandler(async (event) => {
   // look it up on hover. Empty object for components without subjects.
   const subjectMap = await loadSubjectMap(componentId)
   const subjects: Record<string, string> = {}
+  let centralSubject = ''
   if (subjectMap) {
+    centralSubject = subjectMap.get(centralImageId) ?? ''
     for (const id of related) {
       const s = subjectMap.get(id)
       if (s) subjects[id] = s
+    }
+  }
+
+  // Attach the candidate tag list per related id and the central image's own
+  // tags (only component_3 / Semantic today), plus the global frequency of
+  // each tag involved. The client intersects each neighbor's tags with the
+  // central tags to surface the SHARED tags that explain the proximity,
+  // ordered rarest-first via tagFreq.
+  const tagData = await loadTagData(componentId)
+  const tags: Record<string, string[]> = {}
+  const tagFreq: Record<string, number> = {}
+  let centralTags: string[] = []
+  if (tagData) {
+    centralTags = tagData.byId.get(centralImageId) ?? []
+    for (const tag of centralTags) tagFreq[tag] = tagData.freq.get(tag) ?? 0
+    for (const id of related) {
+      const t = tagData.byId.get(id)
+      if (t) {
+        tags[id] = t
+        for (const tag of t) tagFreq[tag] = tagData.freq.get(tag) ?? 0
+      }
+    }
+  }
+
+  // Attach the per-id year + the central image's year (only component_4 /
+  // Collaborative today, year-based proximity). Neighbors share the centre's
+  // year, so this is the "common year" the hover label surfaces.
+  const yearMap = await loadYearMap(componentId)
+  const years: Record<string, string> = {}
+  let centralYear = ''
+  if (yearMap) {
+    centralYear = yearMap.get(centralImageId) ?? ''
+    for (const id of related) {
+      const y = yearMap.get(id)
+      if (y) years[id] = y
     }
   }
 
@@ -37,5 +74,11 @@ export default defineEventHandler(async (event) => {
     centralImageId,
     related,
     subjects,
+    centralSubject,
+    tags,
+    tagFreq,
+    centralTags,
+    years,
+    centralYear,
   }
 })
