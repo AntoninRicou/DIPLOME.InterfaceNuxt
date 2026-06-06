@@ -63,6 +63,10 @@ export const useInteractionStore = defineStore('interaction', () => {
   // interface-only; the redraw reuses the existing path primitives.
   const replayCircles = ref<{ anchorId: ImageId; ids: ImageId[] }[]>([])
   const centeredCircleIds = ref<ImageId[] | null>(null)
+  // How many corner ribbons the user has picked (each pick refreshes the
+  // corners, so every pick is a different ribbon). The "Start over" control
+  // appears once this reaches REPLAY_PICKS_FOR_RESTART.
+  const replayPickCount = ref(0)
   // The deck the centred CentralImage renders: the clicked foreign circle if
   // one is centred, otherwise the user's own path (centralStack). View4 binds
   // this and never needs to know which source it is.
@@ -201,7 +205,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCanvasText(canvasIndex, title, body)
     // Reveal this quadrant's corner label on project at the same beat the
     // interface reveals its own (View3Transition gates on canvasZoomed[i]),
-    // so SOURCE / FORM / SEMANTIC / COLLABORATIVE pop per-quadrant on both
+    // so SOURCE / FORM / SEMANTIC / TIME pop per-quadrant on both
     // screens instead of all four at VIEW_4 entry.
     projectSocket.setCornerLabel(canvasIndex, true)
   }
@@ -386,7 +390,10 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCornerLabels(true)
   }
 
-  function activateCentral(id: ImageId) {
+  // `quadrant` (0=tl,1=tr,2=bl,3=br) identifies which relation component the
+  // user clicked in; it's forwarded on the path-segment wire so project can
+  // colour the new segment by quadrant (see project/src/pathColors.js).
+  function activateCentral(id: ImageId, quadrant?: number) {
     if (!viewState.is('RELATIONAL')) return
     if (activeCentralImageId.value === id) return
 
@@ -437,7 +444,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     })
     if (isMidBranch) projectSocket.pathTruncate(truncateKeepCount)
     projectSocket.focus(id)
-    projectSocket.pathSegment(prevId, id)
+    projectSocket.pathSegment(prevId, id, quadrant)
   }
 
   // ── Overview finale sequence (replaces the old tick-ring loader) ──
@@ -446,12 +453,11 @@ export const useInteractionStore = defineStore('interaction', () => {
   // clockwise sweep was removed) — only then does confirmOverview fire (→ the
   // circle of 10 reveals). The central image + all interaction are frozen for
   // the duration. The cells' fade lives in CSS (`.finale-dissolve .cell` →
-  // opacity 600ms, uniform), matched here by OVERVIEW_DISSOLVE_MS. The cells
-  // finish fading at bright + dissolve (= 1800ms) — THAT is when the `fadeout`
-  // phase begins and the central deck, the grid cross, AND the corner labels
-  // all fade out TOGETHER (deck via `.center-anchor.deck-fadeout`, cross +
-  // labels via `.finale-fadeout` rules).
-  const OVERVIEW_BRIGHT_MS = 1200
+  // opacity 600ms, uniform), matched here by OVERVIEW_DISSOLVE_MS. The central
+  // DECK fades out simultaneously with the cells (it starts on the `dissolve`
+  // phase — see View4's deckHidden watch). The grid cross + corner labels fade
+  // a step later, on the `fadeout` phase (`.view-3.finale-fadeout` rules).
+  const OVERVIEW_BRIGHT_MS = 2300
   // Uniform fade-out duration for the finale cells (the clockwise sweep was
   // removed). All cells fade to 0 together over this window — matches the
   // `.finale-dissolve .cell` CSS in RelationComponent (600ms).
@@ -460,7 +466,7 @@ export const useInteractionStore = defineStore('interaction', () => {
   // labels fade out together over this window (matches the 700ms CSS fades on
   // `.center-anchor.deck-fadeout`, `.view-3.finale-fadeout::before`, and
   // `.rel.finale-fadeout .corner-label`) before confirmOverview fires.
-  const OVERVIEW_FADEOUT_MS = 800
+  const OVERVIEW_FADEOUT_MS = 700
   // "See your path" appears this long after the circle has revealed.
   const SEE_YOUR_PATH_DELAY_MS = 6000
   const overviewFinalePhase = ref<'idle' | 'bright' | 'dissolve' | 'fadeout'>('idle')
@@ -530,8 +536,20 @@ export const useInteractionStore = defineStore('interaction', () => {
     const HOLD_MS = 300
     const FADE_OUT_MS = 500
     projectSocket.setMask(1, FADE_IN_MS)
-    setTimeout(() => projectSocket.setState('single', MORPH_MS), FADE_IN_MS)
+    setTimeout(() => {
+      projectSocket.setState('single', MORPH_MS)
+      // Arm the top-left map label so it names the auto-cycling map as the
+      // single explore view appears (fades in with the mask reveal).
+      projectSocket.setMapLabel(true)
+    }, FADE_IN_MS)
     setTimeout(() => projectSocket.setMask(0, FADE_OUT_MS), FADE_IN_MS + MORPH_MS + HOLD_MS)
+  }
+
+  // Fade out the single-explore map label. Called from the Start over handler
+  // so the label leaves on the same beat as the rest of the restart fade,
+  // before the page reloads. (Everything else in the restart is unchanged.)
+  function hideMapLabel() {
+    projectSocket.setMapLabel(false)
   }
 
   // Fetch four corner circles, each a random Replay-proximity neighbourhood
@@ -571,6 +589,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     const circle = replayCircles.value[index]
     if (!circle || circle.ids.length === 0) return
     centeredCircleIds.value = circle.ids
+    replayPickCount.value += 1
     redrawCircleOnSingle(circle.ids)
     // Refresh the four corners so a fresh set of existing circles appears
     // after each pick (the chosen one is now centred). `centeredCircleIds`
@@ -735,10 +754,12 @@ export const useInteractionStore = defineStore('interaction', () => {
     startOverviewFinale,
     singlePathViewActive,
     enterSinglePathView,
+    hideMapLabel,
     replayCircles,
     centeredCircleIds,
     centeredStack,
     centerReplayCircle,
+    replayPickCount,
     stepBackInHistory,
     stepForwardInHistory,
     jumpToHistory,

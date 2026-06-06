@@ -74,13 +74,20 @@ export function useProjectSocket() {
     return true
   }
 
-  function pathSegment(fromId: string, toId: string): boolean {
+  // `quadrant` (0=tl,1=tr,2=bl,3=br) is the quadrant of the clicked image —
+  // project uses it to colour the segment (see project/src/pathColors.js).
+  // Interface stays colour-blind: it sends WHICH quadrant, not a colour.
+  // Omitted for the explore-others foreign-path redraw (project falls back to
+  // its default/override colour).
+  function pathSegment(fromId: string, toId: string, quadrant?: number): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
       console.warn('[socket] not connected; dropping path-segment', fromId, toId)
       return false
     }
-    socket.emit('message', { type: 'path-segment', payload: { fromId, toId } })
+    const payload: { fromId: string; toId: string; quadrant?: number } = { fromId, toId }
+    if (typeof quadrant === 'number') payload.quadrant = quadrant
+    socket.emit('message', { type: 'path-segment', payload })
     return true
   }
 
@@ -239,9 +246,22 @@ export function useProjectSocket() {
     return true
   }
 
+  // Arms/disarms the project-side single-explore map label (the top-left
+  // name of the auto-cycling map). Enabled on entering the single explore
+  // view; cleared on Start over (fade) and on every (re)connect (hygiene).
+  function setMapLabel(active: boolean): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-map-label', active)
+      return false
+    }
+    socket.emit('message', { type: 'set-map-label', payload: { active } })
+    return true
+  }
+
   function isConnected(): boolean {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCanvasText, setCenterCaption, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCanvasText, setCenterCaption, setMapLabel, isConnected }
 }

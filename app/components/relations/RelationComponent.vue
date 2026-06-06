@@ -25,6 +25,13 @@ const panelAlign = computed(() => interpretation.value?.align ?? 'center')
 
 const centralImageId = computed(() => store.activeCentralImageId)
 
+// History dedup — every image already in the navigation path is sent as
+// `exclude` so a visited image never reappears as a suggestion in any
+// quadrant; the server skips them in pickRelations and returns the
+// next-nearest instead. Joined to a stable comma string so useFetch's query
+// watcher only refetches on an actual path change.
+const excludeIds = computed(() => store.navigationHistory.join(','))
+
 const { data, pending, error, refresh } = await useFetch<{
   componentId: string
   centralImageId: string
@@ -41,12 +48,12 @@ const { data, pending, error, refresh } = await useFetch<{
   tagFreq: Record<string, number>
   centralTags: string[]
   // Per-id year + the central image's year. Present only for components with a
-  // year source (component_4 / Collaborative today — year-based proximity).
+  // year source (component_4 / Time today — year-based proximity).
   years: Record<string, string>
   centralYear: string
 }>(() => `/api/relations/${props.componentId}`, {
-  query: computed(() => ({ centralImageId: centralImageId.value ?? '' })),
-  watch: [centralImageId],
+  query: computed(() => ({ centralImageId: centralImageId.value ?? '', exclude: excludeIds.value })),
+  watch: [centralImageId, excludeIds],
   immediate: !!centralImageId.value,
 })
 
@@ -55,6 +62,18 @@ watch(centralImageId, (v) => {
 })
 
 const { getAspect } = useAtlas()
+const { naturalDimsVmin } = useCentralImageDims()
+
+// Balanced cell size — the SAME natural-dims model the central deck, circle of
+// 10 and corner ribbons use (ratio preserved, extreme aspects gently balanced,
+// subtle per-image hash variation), so the quadrant suggestions feel coherent
+// with the rest of the view instead of a fixed-width row. Only the width is
+// driven here; the height follows the image's true aspect (AtlasThumb
+// fit="width"), so the box keeps the real ratio. Scaled to ~16vmin typical.
+const QUADRANT_SCALE = 0.6
+function cellWidthVmin(id: string): string {
+  return `${(naturalDimsVmin(id).width * QUADRANT_SCALE).toFixed(2)}vmin`
+}
 
 // ── Per-quadrant slot ranking by max image height ──
 // Each slot has a fixed max half-height before the image gets clipped by
@@ -119,8 +138,8 @@ const cells = computed(() => {
 // Hierarchy reading (cell-1 closest, cell-4 furthest) is preserved by
 // the existing z-index stacking (`.cell-1` z=4 front-most) and the
 // per-index `--reveal-delay` stagger — not by radius.
-const RX = 40 // vw — x semi-axis
-const RY = 40 // vh — y semi-axis
+const RX = 43 // vw — x semi-axis
+const RY = 38 // vh — y semi-axis
 const N_CELLS = 4
 // CSS-screen angles: 0° = +x right, 90° = +y down, 180° = -x left, 270° = -y up.
 const QUADRANT_BASE_DEG: Record<'tl' | 'tr' | 'bl' | 'br', number> = {
@@ -156,6 +175,12 @@ onUnmounted(() => {
 //   Fast at t=0 (y-axis end), slow at t=π/2 (x-axis end).
 // The BL/TR angles are the reflection of BR/TL across t = π/4 — i.e.
 // `π/2 − tᵢ` reversed. Same equal-arc-length spacing, just mirrored.
+// Angular margin (degrees) kept clear at BOTH ends of each quadrant's 90° arc
+// so the end cells don't sit on the axes (= the grid cross). The four cells are
+// spread equal-arc within [inset, 90° − inset] instead of [0°, 90°]; they stay
+// on the SAME ellipse (oval shape unchanged), just pulled off the centerlines.
+// Raise it if cells still touch the cross; lower it to let them reach wider.
+const CELL_INSET_DEG = 5
 const cellArcAnglesByQuadrant = computed<Record<'tl' | 'tr' | 'bl' | 'br', number[]>>(() => {
   const a = (RX / 100) * viewportSize.value.w
   const b = (RY / 100) * viewportSize.value.h
@@ -168,18 +193,31 @@ const cellArcAnglesByQuadrant = computed<Record<'tl' | 'tr' | 'bl' | 'br', numbe
     total += Math.sqrt(a * a * Math.sin(t) ** 2 + b * b * Math.cos(t) ** 2) * dTheta
     cum.push(total)
   }
-  const brAngles: number[] = []
-  for (let i = 0; i < N_CELLS; i++) {
-    const target = ((i + 0.5) * total) / N_CELLS
+  // Arc length at a given angle (linear interp on cum), and its inverse.
+  const arcAt = (theta: number): number => {
+    const x = Math.min(STEPS, Math.max(0, theta / dTheta))
+    const j = Math.floor(x)
+    const lo = cum[j] ?? 0
+    const hi = cum[Math.min(STEPS, j + 1)] ?? lo
+    return lo + (hi - lo) * (x - j)
+  }
+  const angleAt = (targetArc: number): number => {
     for (let j = 1; j <= STEPS; j++) {
       const cumJ = cum[j]
       const cumPrev = cum[j - 1]
-      if (cumJ !== undefined && cumPrev !== undefined && cumJ >= target) {
-        const frac = (target - cumPrev) / (cumJ - cumPrev)
-        brAngles.push(((j - 1) + frac) * dTheta)
-        break
+      if (cumJ !== undefined && cumPrev !== undefined && cumJ >= targetArc) {
+        return ((j - 1) + (targetArc - cumPrev) / (cumJ - cumPrev)) * dTheta
       }
     }
+    return Math.PI / 2
+  }
+  // Inset both ends of the arc, then place the four cells equal-arc inside it.
+  const inset = (CELL_INSET_DEG * Math.PI) / 180
+  const arcLo = arcAt(inset)
+  const arcSpan = arcAt(Math.PI / 2 - inset) - arcLo
+  const brAngles: number[] = []
+  for (let i = 0; i < N_CELLS; i++) {
+    brAngles.push(angleAt(arcLo + ((i + 0.5) * arcSpan) / N_CELLS))
   }
   const blAngles = brAngles.slice().reverse().map((t) => Math.PI / 2 - t)
   return { br: brAngles, tl: brAngles, bl: blAngles, tr: blAngles }
@@ -253,7 +291,8 @@ function enterDelay(slotIdx: number): string {
 
 function onRelatedClick(id: string) {
   if (props.preview) return
-  store.activateCentral(id)
+  // Pass this quadrant so project can colour the new path segment by quadrant.
+  store.activateCentral(id, QUADRANT_INDEX[props.position ?? 'tl'])
 }
 
 // Hovering a relation cell lights up the same image on the standalone
@@ -304,7 +343,11 @@ const hoveredOffset = computed(() =>
     : null,
 )
 
-// ── 3-tag selection: 2 own + 1 rotating shared (Semantic) ──
+// ── 3-tag selection: 2 own + 1 rotating shared (Semantic + Form) ──
+// Drives BOTH the Semantic and Form quadrants: both receive tags from
+// umap_semantic_llm.json (Form borrows them by id — see COMPONENT_TAG_FILES),
+// so the identical rule below selects keywords for each. `centralTags` is the
+// centred image's semantic tags in both cases.
 // Each image shows 2 of its OWN distinctive tags (not shared with the centre)
 // for diversity, plus 1 SHARED tag (the proximity link). The shared slot
 // rotates across the 4 images and avoids the most-shared / dominant tag, so
@@ -386,7 +429,7 @@ const hoveredTags = computed(() =>
 // the centre→cell vector (0 = centre, 1 = cell).
 //   Semantic     → own (inner) · shared (middle) · own (outer)
 //   Source       → central image's subject (inner) · hovered subject (outer)
-//   Collaborative → the common (shared) year, single value at the middle
+//   Time → the common (shared) year, single value at the middle
 const RADIAL_FRACTIONS_3 = [0.32, 0.5, 0.68] // own · shared · own
 const RADIAL_FRACTIONS_2 = [0.4, 0.6] // central subject · hovered subject
 
@@ -424,7 +467,7 @@ const radialWords = computed<{ key: string; text: string; frac: number }[]>(() =
     const fr = words.length === 2 ? RADIAL_FRACTIONS_2 : [0.5]
     return words.map((t, i) => ({ key: `subj-${i}`, text: t, frac: fr[i] ?? 0.5 }))
   }
-  // Collaborative: the common year (single value, centred on the line).
+  // Time: the common year (single value, centred on the line).
   const year = data.value?.years?.[hoveredCell.value.id]
   if (year) return [{ key: `year-${year}`, text: year, frac: 0.5 }]
   return []
@@ -548,6 +591,7 @@ function onMouseEnter(e: MouseEvent) {
         :style="{
           '--cell-x': CELL_OFFSETS[position ?? 'tl'][cell.slotIdx]?.x,
           '--cell-y': CELL_OFFSETS[position ?? 'tl'][cell.slotIdx]?.y,
+          '--cell-w': cellWidthVmin(cell.id),
           '--enter-delay': enterDelay(cell.slotIdx),
         }"
         :title="cell.id"
@@ -648,7 +692,7 @@ function onMouseEnter(e: MouseEvent) {
    text-shadow swell was removed everywhere for paint cost.) */
 .corner-label {
   /* Above the cells AND above the interpretation veil (.interpret-veil,
-     z: 5) so the Source / Form / Semantic / Collaborative tags stay crisp
+     z: 5) so the Source / Form / Semantic / Time tags stay crisp
      and visible in interpretation mode rather than being blurred away. */
   z-index: 6;
 }
@@ -736,7 +780,10 @@ function onMouseEnter(e: MouseEvent) {
 
 .cell {
   position: absolute;
-  width: 12vmin;
+  /* Per-image balanced width (naturalDimsVmin × QUADRANT_SCALE, bound inline);
+     height follows the image aspect via AtlasThumb fit="width". Fallback keeps
+     a sane size before the atlas resolves. */
+  width: var(--cell-w, 16vmin);
   /* No padding, no background — the AtlasThumb fills the cell edge to edge.
      The transparent border preserves a 1px layout slot so hover's
      border-color: #7a7a85 can fill in without shifting layout. */
@@ -750,9 +797,14 @@ function onMouseEnter(e: MouseEvent) {
      the reveal direction; on un-hover the variable reverts to 0ms so all
      cells fade out together. Other transitions stay un-delayed so cell
      focus amplification fires immediately. */
+  /* Hover scale matches the end circle's images: grow quickly on hover (see
+     the :hover transition override below) and settle back slowly with an
+     ease-in-out — the same `transform 900ms cubic-bezier(0.45,0,0.55,1)` the
+     circle layers use at rest. (Position is constant per cell, so this 900ms
+     only governs the hover scale return, never a layout move.) */
   transition:
     opacity 260ms ease-out var(--reveal-delay, 0ms),
-    transform 200ms ease-out,
+    transform 900ms cubic-bezier(0.45, 0, 0.55, 1),
     box-shadow 200ms ease-out,
     border-color 200ms ease-out;
   box-sizing: border-box;
@@ -875,7 +927,16 @@ function onMouseEnter(e: MouseEvent) {
 .rel:hover .cell:hover,
 .rel:hover .cell:focus-visible {
   opacity: 1;
-  --cell-scale: 1.1;
+  /* Same growth as the end circle's hovered image (SCALE_HOVER / SCALE_OTHER =
+     0.95 / 0.85 ≈ +12%) and the same responsive grow curve the circle uses on
+     hover (`.layer.is-highlighted` → transform 250ms cubic-bezier(0.22,0.61,
+     0.36,1)). On leave the base 900ms ease-in-out takes over. */
+  --cell-scale: 1.118;
+  transition:
+    opacity 260ms ease-out,
+    transform 250ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    box-shadow 200ms ease-out,
+    border-color 200ms ease-out;
   border-color: #7a7a85;
   color: #f0f0f4;
   box-shadow: 0 0 22px 2px rgba(200, 200, 220, 0.18);

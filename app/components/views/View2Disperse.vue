@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import AtlasThumb from '~/components/AtlasThumb.vue'
 import ActionPrompt from '~/components/ActionPrompt.vue'
+import SkipButton from '~/components/SkipButton.vue'
 import type { ImageId } from '~/types/interaction'
 import { VIEW2_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
@@ -35,8 +36,8 @@ const ENTRY_PANELS = [
 // set-center-caption with the same rotate params. Each sentence fades in,
 // holds ENTRY_PANEL_MS, fades out — sequenced by playProjectNarration().
 const PROJECT_PANELS = [
-  'This same corpus is organized here in four distinct configurations.',
-  'Each one determines how proximity and relations are established between images .',
+  'This same corpus is organized into four distinct maps, each based on a unique principle.',
+  'Those configurations create different structures of relations, revealing image proximity.',
 ]
 // Two bottom prompts (interface-only). HOVER_ACTION appears once the interface
 // narration clears and hover unlocks (but NOT click); after the project
@@ -424,15 +425,7 @@ onBeforeUnmount(() => {
          pickable state (clickEnabled), leaving the "Select an image…" prompt
          showing. Hidden once selection is unlocked (whether via this button or
          the natural phase progression) and during the exit. -->
-    <button
-      v-if="!clickEnabled && !entryExiting"
-      class="next-button"
-      type="button"
-      aria-label="skip to image selection"
-      @click="skipToPick"
-    >
-      Next ›
-    </button>
+    <SkipButton v-if="!clickEnabled && !entryExiting" @click="skipToPick" />
     <!-- Spawn-and-fade hover previews. Each preview is anchored to the
          viewport position where the cursor first entered its sprite and
          runs its own fade-in → hold → fade-out lifecycle. Multiple can
@@ -473,35 +466,12 @@ onBeforeUnmount(() => {
      specificity. */
 }
 
-/* Grid cross — mirrors the cross in VIEW-1 / VIEW-3 / VIEW-4 so the
-   structural seam reads as continuous across the whole view chain. Split
-   into two pseudo-elements (horizontal in ::before, vertical in ::after)
-   to stay animation-ready (matches View1Explanation's pattern). No draw
-   animation here — static, fully visible from mount. Sits at z-index 5,
-   above the iframe; the .central-slot hover preview at z-index 10 stays
-   on top. */
-.view-0::before,
-.view-0::after {
-  content: "";
-  position: absolute;
-  background: rgba(166, 154, 128, 0.85);
-  pointer-events: none;
-  z-index: 5;
-}
-.view-0::before {
-  left: 5%;
-  right: 5%;
-  top: 50%;
-  height: 1px;
-  margin-top: -0.5px;
-}
-.view-0::after {
-  top: 5%;
-  bottom: 5%;
-  left: 50%;
-  width: 1px;
-  margin-left: -0.5px;
-}
+/* Grid cross is NOT drawn here in VIEW_2. The interface can only paint over
+   the opaque project iframe, which would put the cross on top of the spawning
+   sprites. Instead the cross is drawn INSIDE the project's disperse view,
+   behind the transparent sprite canvas (see `body[data-state="disperse"]
+   #container-1::before` in project/src/style.css), so it reads behind the
+   images. VIEW-1 / VIEW-3 / VIEW-4 still draw their own cross. */
 .project-frame {
   position: absolute;
   inset: 0;
@@ -518,31 +488,6 @@ onBeforeUnmount(() => {
 .view-0.is-exiting .project-frame {
   opacity: 0;
   pointer-events: none;
-}
-
-/* Skip-to-pick "Next" button — bottom-centred, muted like VIEW_1's skip
-   chevron. */
-.next-button {
-  position: absolute;
-  bottom: 2.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  background: transparent;
-  border: none;
-  color: #595b54;
-  font-family: inherit;
-  font-size: 1rem;
-  letter-spacing: 0.02em;
-  line-height: 1;
-  padding: 0.25rem 0.75rem;
-  cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 150ms ease;
-  z-index: 13;
-  pointer-events: auto;
-}
-.next-button:hover {
-  opacity: 1;
 }
 .preview {
   position: absolute;

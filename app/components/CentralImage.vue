@@ -29,6 +29,9 @@ const props = withDefaults(defineProps<{
   // the centred overview circle passes a larger value, the corner replay
   // circles keep 1.
   radiusScale?: number
+  // Extra multiplier on the RY (vertical) axis only, on top of radiusScale —
+  // lets a circle be flattened (shorter than wide) without touching RX.
+  radiusScaleY?: number
 }>(), {
   activeIndex: -1,
   expanded: false,
@@ -40,6 +43,7 @@ const props = withDefaults(defineProps<{
   revealKey: 0,
   revealDrift: false,
   radiusScale: 1,
+  radiusScaleY: 1,
 })
 
 const emit = defineEmits<{
@@ -58,11 +62,14 @@ const { naturalDimsVmin } = useCentralImageDims()
 const RADIUS_X_VMIN = 27
 const RADIUS_Y_VMIN = 20
 // Per-image size on the ring (multiplies each image's natural vmin dims).
-// Independent of the ellipse radius above — bumped up so the images read
-// larger without changing the oval's spread.
-const SCALE_OTHER = 0.7
-const SCALE_ACTIVE = 0.7
-const SCALE_HOVER = 0.79
+// Set to 1.0 so a ring image renders at the SAME size as the collapsed
+// central-image deck (which draws at natural dims, scale 1) — the circle is
+// the same images as the centre, just in the ring configuration. Overlap on
+// the ring is accepted (the images are full-size). SCALE_HOVER lifts the
+// hovered one slightly for feedback.
+const SCALE_OTHER = 0.85
+const SCALE_ACTIVE = 0.85
+const SCALE_HOVER = 0.95
 
 // Which layer the cursor is over, in expanded (circle) mode. Drives the
 // `is-highlighted` emphasis and the `hover` emit. Stays null in collapsed
@@ -151,7 +158,11 @@ function layerStyle(i: number) {
   const activeI = props.activeIndex < 0 ? n - 1 : props.activeIndex
   const isActive = i === activeI
   const center = 'translate(-50%, -50%)'
-  const dims = naturalDimsVmin(props.ids[i]!)
+  // Central-image family is scaled down a touch relative to the quadrant/ribbon
+  // surfaces (CENTER_IMAGE_SCALE); the circle's per-image SCALE_* multiplies on
+  // top of this for the ring.
+  const raw = naturalDimsVmin(props.ids[i]!)
+  const dims = { width: raw.width * CENTER_IMAGE_SCALE, height: raw.height * CENTER_IMAGE_SCALE }
 
   if (!props.expanded || n === 0) {
     // Collapsed stack: every layer piles at the exact geometric center,
@@ -173,9 +184,13 @@ function layerStyle(i: number) {
   const isHovered = i === hoveredIdx.value
   const angle = -Math.PI / 2 + (i / n) * Math.PI * 2
   const x = Math.cos(angle) * RADIUS_X_VMIN * props.radiusScale
-  const y = Math.sin(angle) * RADIUS_Y_VMIN * props.radiusScale
+  const y = Math.sin(angle) * RADIUS_Y_VMIN * props.radiusScale * props.radiusScaleY
   const scale = isHovered ? SCALE_HOVER : isActive ? SCALE_ACTIVE : SCALE_OTHER
-  const z = isHovered ? n + 2 : isActive ? n + 1 : i + 1
+  // Overlap order on the ring: FIRST image on top, LAST below (z = n - i, so
+  // i=0 → highest). No active-on-top lift here (that would put the last
+  // selected on top, breaking the order); only the hovered layer lifts above
+  // all for feedback. (The collapsed deck above keeps its own active-on-top.)
+  const z = isHovered ? n + 1 : n - i
   // Drift reveal: a layer that hasn't had its turn yet sits stacked at the
   // centre (0,0); when `shown` flips it, layerStyle returns the oval offset
   // and the `.layer` transform transition eases it out. Clockwise order via

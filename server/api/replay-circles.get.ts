@@ -7,9 +7,9 @@ import { loadUmapByFile, pickRelations } from '~~/server/utils/mockRelations'
 // interface shows these in the four corners after "See your path"; the
 // proximity computation stays server-side (interface never sees coordinates).
 //
-// This is decoupled from component_4's canvas map (umap_spiral_archipel.json):
-// the corner ribbons are about past collaborative paths, so they read their
-// own umap_replay.json directly rather than the file canvas-4 renders.
+// This is decoupled from component_4's canvas map (umap_spiral.json — the Time
+// mode): the corner ribbons are about past collaborative paths, so they read
+// their own umap_replay.json directly rather than the file canvas-4 renders.
 const REPLAY_DATASET_FILE = 'umap_replay.json'
 
 // Discard a candidate circle whose id set overlaps an already-accepted one

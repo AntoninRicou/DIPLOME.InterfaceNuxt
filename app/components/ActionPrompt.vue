@@ -39,13 +39,11 @@ defineProps<{ visible: boolean; text: string }>()
   max-width: min(60em, 90vw);
   text-align: center;
   /* Differs from the rotating NARRATION (which is ABC Otto at --rotate-size):
-     action lines use Neue Kabel Medium and a reduced size — kept tied to the
-     rotate scale (just × 0.65) so it still tracks the rotate family if
-     --rotate-size changes. Everything else (position, stroke, fade, colour)
-     is identical to the narration captions. */
+     action lines use Neue Kabel Medium and a reduced size. Everything else
+     (position, stroke, fade, colour) is identical to the narration captions. */
   font-family: 'Neue Kabel', sans-serif;
   font-weight: 500;
-  font-size: calc(var(--rotate-size) * 0.7);
+  font-size: 1.05rem;
   line-height: 1.4;
   color: #595b54;
   z-index: 13;

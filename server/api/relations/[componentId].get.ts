@@ -18,7 +18,15 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: `unknown component: ${componentId}` })
   }
 
-  const related = pickRelations(dataset, centralImageId, 8)
+  // `exclude` is a comma-separated list of image ids already in the user's
+  // navigation path. pickRelations skips them (in addition to the central
+  // image) so a visited image never reappears as a quadrant suggestion —
+  // the next-nearest neighbour is returned in its place. Empty/absent → no
+  // extra exclusions (e.g. the replay-circles caller).
+  const excludeRaw = typeof query.exclude === 'string' ? query.exclude : ''
+  const exclude = excludeRaw ? excludeRaw.split(',').filter(Boolean) : []
+
+  const related = pickRelations(dataset, centralImageId, 8, exclude)
 
   // Attach the per-id subject string for components that have a subject
   // source (only component_1 today). Keyed by image id so the client can
@@ -35,8 +43,9 @@ export default defineEventHandler(async (event) => {
   }
 
   // Attach the candidate tag list per related id and the central image's own
-  // tags (only component_3 / Semantic today), plus the global frequency of
-  // each tag involved. The client intersects each neighbor's tags with the
+  // tags (component_3 / Semantic AND component_2 / Form — both read tags from
+  // umap_semantic_llm.json; see COMPONENT_TAG_FILES), plus the global frequency
+  // of each tag involved. The client intersects each neighbor's tags with the
   // central tags to surface the SHARED tags that explain the proximity,
   // ordered rarest-first via tagFreq.
   const tagData = await loadTagData(componentId)
@@ -56,7 +65,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Attach the per-id year + the central image's year (only component_4 /
-  // Collaborative today, year-based proximity). Neighbors share the centre's
+  // Time today, year-based proximity). Neighbors share the centre's
   // year, so this is the "common year" the hover label surfaces.
   const yearMap = await loadYearMap(componentId)
   const years: Record<string, string> = {}

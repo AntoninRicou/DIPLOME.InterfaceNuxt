@@ -4,7 +4,7 @@ import { useInteractionStore } from '~/stores/interaction'
 export default defineNuxtPlugin(() => {
   const {
     init, onRegister, setState, pathClear, setMask, setCanvasBg, setCanvasVeil,
-    setCornerLabels, setCanvasText, setCenterCaption, setMarks,
+    setCornerLabels, setCanvasText, setCenterCaption, setMarks, setMapLabel,
   } = useProjectSocket()
   onRegister(() => {
     pathClear()
@@ -26,6 +26,9 @@ export default defineNuxtPlugin(() => {
     setCornerLabels(false)
     for (let i = 0; i < 4; i++) setCanvasText(i, '', '')
     setCenterCaption('')
+    // Single-explore map label off on every (re)connect, so an interface
+    // reload mid-explore can't leak it onto the boot single state.
+    setMapLabel(false)
   })
   init()
 })

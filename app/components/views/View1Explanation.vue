@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
+import SkipButton from '~/components/SkipButton.vue'
 import { VIEW1_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 const store = useInteractionStore()
@@ -63,7 +64,7 @@ onBeforeUnmount(() => {
     class="view-1 bg-gradient"
     :style="{ '--cross-draw-duration': `${crossDurationMs}ms` }"
   >
-    <button class="skip" @click="skip" aria-label="skip">&gt;</button>
+    <SkipButton @click="skip" />
     <!-- Vue <Transition> with `appear` + `mode="out-in"`. The
          out-in mode makes sentence-to-sentence transitions sequential:
          the old sentence fully fades out before the new sentence
@@ -175,11 +176,10 @@ onBeforeUnmount(() => {
   to   { transform: scaleY(1); }
 }
 
-/* Caption + skip are absolutely positioned (out of the flex flow) so each
-   has its own offset: the sentence sits at top: 4vh, the skip `>` button
-   at bottom: 2vh. Both centred via left:50% + translateX(-50%). */
-.caption,
-.skip {
+/* Caption is absolutely positioned (out of the flex flow), centred via
+   left:50% + translateX(-50%). The skip control is the shared `SkipButton`
+   component (bottom-centred, fixed). */
+.caption {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
@@ -188,9 +188,9 @@ onBeforeUnmount(() => {
 
 .caption {
   /* Centred in the viewport (was top: 4vh). Overrides the translateX-only
-     transform from the shared `.caption, .skip` rule above so the box is
-     centred on both axes; the fade hooks are opacity-only so this won't
-     fight the transitions. */
+     transform from the `.caption` rule above so the box is centred on both
+     axes; the fade hooks are opacity-only so this won't fight the
+     transitions. */
   top: 50%;
   transform: translate(-50%, -50%);
   /* One line per sentence: no wrap, width grows to the text. */
@@ -223,21 +223,4 @@ onBeforeUnmount(() => {
     0 0 18px var(--rotate-panel-bg);
 }
 
-.skip {
-  bottom: 2vh;
-  background: transparent;
-  border: none;
-  color: #595b54;
-  padding: 0.25rem 0.75rem;
-  font-size: 1.5rem;
-  line-height: 1;
-  font-family: inherit;
-  cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 150ms ease;
-}
-
-.skip:hover {
-  opacity: 1;
-}
 </style>

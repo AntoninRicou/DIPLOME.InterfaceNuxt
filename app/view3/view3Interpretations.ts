@@ -1,5 +1,5 @@
 // Interpretation layer — descriptive metadata for each of the four
-// relation components (Mirror / Trace / Shift / Replay). Pure data:
+// relation components (Source / Form / Semantic / Time). Pure data:
 // no Vue, no DOM, no layout logic.
 //
 // Shared between VIEW_3 and VIEW_4:
@@ -44,27 +44,27 @@ export const IMAGE_CREDIT_LINES: readonly string[] = [
 
 export const view3Interpretations: Record<View3ComponentId, View3Interpretation> = {
   component_1: {
-    title: 'Tracing origins',
+    title: 'Source tracing',
     body:
       'These images are organized through shared book sources and subject ' +
       'metadata derived from the centered image.',
   },
   component_2: {
-    title: 'Mirroring structures',
+    title: 'Form mirroring',
     body:
       'These images are organized through shared visual structural and ' +
       'compositional relations derived from the centered image.',
   },
   component_3: {
-    title: 'Shifting descriptions',
+    title: 'Semantic shifting',
     body:
       'These images are organized through shared semantic proximity ' +
       'derived from the centered image.',
   },
   component_4: {
-    title: 'Replaying paths',
+    title: 'Time drifting',
     body:
-      'These images are organized through previous user selections or ' +
-      'previously unseen images. Your journey contributes to the evolving map.',
+      'These images are organized through temporal proximity across' +
+      'a time-based structure derived from the centered image.',
   },
 }

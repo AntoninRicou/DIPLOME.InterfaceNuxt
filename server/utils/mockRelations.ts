@@ -65,11 +65,19 @@ export async function loadSubjectMap(componentId: string): Promise<Map<string, s
 }
 
 // Per-component "tags" metadata source. Like subjects, the tag list for each
-// image lives in a file (here the same UMAP the component renders, which
-// carries a `tags` array of 5 visual descriptors per point). Only components
-// listed here expose tags — component_3 (Semantic) today.
+// image lives in a file (here a UMAP that carries a `tags` array of 5 visual
+// descriptors per point). Only components listed here expose tags.
+//
+// Both Semantic AND Form read tags from `umap_semantic_llm.json`. Semantic also
+// resolves its *proximity* from that file; Form resolves proximity from
+// `mirror.json` (visual structure) but borrows the SAME semantic tags by id —
+// the id populations match, so each Form neighbour's id is looked up in the
+// semantic file for tags. The client applies the identical own·shared·own
+// selection rule to both (see `tagSelection` in RelationComponent.vue), with
+// `centralTags` = the centred image's semantic tags in both cases.
 const COMPONENT_TAG_FILES: Record<string, string> = {
-  component_3: 'umap_semantic_llm.json',
+  component_2: 'umap_semantic_llm.json', // Form — borrows semantic tags (ids match)
+  component_3: 'umap_semantic_llm.json', // Semantic — its own tag source
 }
 
 interface TagPoint {
@@ -114,7 +122,7 @@ export async function loadTagData(componentId: string): Promise<TagData | null> 
   }
 }
 
-// Per-component "year" metadata source. component_4 (Collaborative) now draws
+// Per-component "year" metadata source. component_4 (Time) now draws
 // its proximity from a year-based spiral embedding whose points carry a `year`
 // field; the hover label surfaces the (shared) year. Same id population as the
 // proximity dataset.
@@ -204,15 +212,23 @@ export function pickRelations(
   dataset: UmapDataset,
   centralImageId: string,
   count = 8,
+  exclude?: Iterable<string>,
 ): string[] {
   const center = dataset.byId.get(centralImageId)
   if (!center) return []
+
+  // Ids to skip in addition to the central image itself. Used for VIEW_4
+  // history dedup: every image already in the navigation path is excluded so
+  // a visited image never reappears as a suggestion. Because we scan the whole
+  // dataset, the slice still returns `count` true next-nearest neighbours.
+  const skip = exclude ? new Set(exclude) : null
 
   const cx = center.x
   const cy = center.y
   const distances: Array<{ id: string; d2: number }> = []
   for (const p of dataset.points) {
     if (p.id === centralImageId) continue
+    if (skip && skip.has(p.id)) continue
     if (typeof p.x !== 'number' || typeof p.y !== 'number') continue
     if (Number.isNaN(p.x) || Number.isNaN(p.y)) continue
     const dx = p.x - cx

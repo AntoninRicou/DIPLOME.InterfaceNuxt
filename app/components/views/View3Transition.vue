@@ -5,6 +5,7 @@ import CentralImage from '~/components/CentralImage.vue'
 import ProximityPanel from '~/components/ProximityPanel.vue'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
 import ActionPrompt from '~/components/ActionPrompt.vue'
+import SkipButton from '~/components/SkipButton.vue'
 import { type View3ComponentId } from '~/view3/view3Interpretations'
 import { VIEW3_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
@@ -82,6 +83,26 @@ function skipToRelational() {
   store.enterRelationalView('skip')
 }
 
+// ── Reach-to-zoom (replaces cross-click) ──
+// The quadrant is zoomed by REACHING it with the cursor (mouseenter on the
+// quadrant's hover zone), not by clicking its cross. Gated on `crossesReady`
+// (the settle beat) and idempotent via `zoomCanvas` (the `canvasZoomed[i]`
+// guard short-circuits a re-entered quadrant). The `+` cross stays as a
+// non-interactive marker at each quadrant centre.
+function onQuadrantReach(index: number) {
+  if (!crossesReady.value) return
+  store.zoomCanvas(index)
+}
+// Each quadrant's hover zone covers its quarter of the viewport, derived from
+// the quadrant's centre (x/y): 25% → flush to the top/left edge, 75% → the
+// far half.
+function zoneStyle(q: Quadrant): Record<string, string> {
+  return {
+    left: q.x === '25%' ? '0' : '50%',
+    top: q.y === '25%' ? '0' : '50%',
+  }
+}
+
 // Corner labels appear at the four viewport corners at the same screen
 // positions VIEW_4's RelationComponent corner labels occupy, so the swap
 // between VIEW_3 → VIEW_4 reads as a continuation, not a new layer. Each
@@ -93,7 +114,7 @@ const CORNERS = [
   { position: 'tl', name: 'Source', index: 0 },
   { position: 'tr', name: 'Form', index: 1 },
   { position: 'bl', name: 'Semantic', index: 2 },
-  { position: 'br', name: 'Collaborative', index: 3 },
+  { position: 'br', name: 'Time', index: 3 },
 ] as const
 
 // The VIEW_3 entry intro caption ("This image has been selected.") was REMOVED
@@ -112,6 +133,9 @@ let crossesReadyTimer: ReturnType<typeof setTimeout> | null = null
 // HOLDS (one rotate panel), then fades OUT over --rotate-fade-ms — after which
 // the advance `+` (top cross) + the bottom start prompt appear.
 const showModesCaption = ref(false)
+// How long the "Four modes of proximity…" caption holds at full opacity —
+// 2s shorter than a standard rotate panel (it was reading too long).
+const MODES_HOLD_MS = VIEW3_PANEL_MS - 2000
 let captionTimer: ReturnType<typeof setTimeout> | null = null
 let modesHoldTimer: ReturnType<typeof setTimeout> | null = null
 let modesAfterTimer: ReturnType<typeof setTimeout> | null = null
@@ -164,12 +188,12 @@ watch(() => store.allCanvasesZoomed, (zoomed) => {
     modesHoldTimer = setTimeout(() => {
       showModesCaption.value = false
       store.setCenterCaption('')
-      // (hold = VIEW3_PANEL_MS, same as the intro narration)
+      // (hold = MODES_HOLD_MS = VIEW3_PANEL_MS − 2s)
       // Once it has faded out, reveal the advance `+` (top cross) and the
       // bottom "Click on the top cross…" action prompt together (interface-
       // only). They persist until the user clicks `+` into the relational view.
       modesAfterTimer = setTimeout(() => { showStartAction.value = true }, ROTATE_FADE_OUT_MS)
-    }, VIEW3_PANEL_MS)
+    }, MODES_HOLD_MS)
   }, CAPTION_DELAY_MS)
 })
 
@@ -188,7 +212,7 @@ onBeforeUnmount(clearTimers)
       <RelationComponent component-id="component_1" label="Source" position="tl" preview />
       <RelationComponent component-id="component_2" label="Form" position="tr" preview />
       <RelationComponent component-id="component_3" label="Semantic" position="bl" preview />
-      <RelationComponent component-id="component_4" label="Collaborative" position="br" preview />
+      <RelationComponent component-id="component_4" label="Time" position="br" preview />
     </div>
 
     <span
@@ -202,16 +226,23 @@ onBeforeUnmount(clearTimers)
     </span>
 
     <template v-for="q in QUADRANTS" :key="q.index">
-      <button
+      <!-- Reach zone: entering this quadrant with the cursor zooms its canvas
+           (replaces clicking the cross). Covers the quarter; transparent. -->
+      <div
+        class="quadrant-zone"
+        :style="zoneStyle(q)"
+        @mouseenter="onQuadrantReach(q.index)"
+      />
+      <!-- Cross is now a non-interactive marker (pointer-events: none) at the
+           quadrant centre — it shows/glows where to reach and fades when zoomed. -->
+      <div
         class="cross-button cross-quadrant"
         :class="{ faded: store.canvasZoomed[q.index], pending: !crossesReady }"
         :style="{ left: q.x, top: q.y }"
-        :aria-label="`zoom canvas ${q.index + 1}`"
-        :disabled="!crossesReady"
-        @click="store.zoomCanvas(q.index)"
+        aria-hidden="true"
       >
         +
-      </button>
+      </div>
       <ProximityPanel
         class="quadrant-text"
         :class="{ visible: store.canvasZoomed[q.index], dissolving }"
@@ -245,14 +276,7 @@ onBeforeUnmount(clearTimers)
 
     <!-- Skip-to-relational button: jumps straight to VIEW_4, bypassing the
          four quadrant-cross zooms + the modes-caption. -->
-    <button
-      class="next-button"
-      type="button"
-      aria-label="skip to relational view"
-      @click="skipToRelational"
-    >
-      Next ›
-    </button>
+    <SkipButton @click="skipToRelational" />
   </section>
 </template>
 
@@ -266,31 +290,6 @@ onBeforeUnmount(clearTimers)
   inset: 0;
   color: #595b54;
   z-index: 100;
-}
-
-/* Skip-to-relational "Next" button — bottom-centred, muted like VIEW_1's
-   skip chevron. Sits above the grid + cells. */
-.next-button {
-  position: absolute;
-  bottom: 2.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  background: transparent;
-  border: none;
-  color: #595b54;
-  font-family: inherit;
-  font-size: 1rem;
-  letter-spacing: 0.02em;
-  line-height: 1;
-  padding: 0.25rem 0.75rem;
-  cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 150ms ease;
-  z-index: 20;
-  pointer-events: auto;
-}
-.next-button:hover {
-  opacity: 1;
 }
 
 /* Grid cross — same shape as VIEW-1 / VIEW-2 / VIEW-4 so the structural
@@ -355,11 +354,21 @@ onBeforeUnmount(clearTimers)
   pointer-events: none;
 }
 
-/* Cross button — the four quadrant zoom triggers (.cross-quadrant). Same `+`
-   glyph and visual treatment as VIEW_4's `.interpret-control` (dark monospace
-   on the gradient), with a pulsing warm glow so each reads as a click target.
-   (The advance `+` was removed — the central image is the VIEW_3 → VIEW_4
-   trigger now.) */
+/* Quadrant reach zones — four transparent quarters of the viewport. Entering
+   one with the cursor (`@mouseenter`) zooms that quadrant's canvas (reach-to-
+   zoom, replacing the cross click). Sit below the visual layers (which are all
+   pointer-events: none during this phase) so the mouseenter reliably lands. */
+.quadrant-zone {
+  position: absolute;
+  width: 50%;
+  height: 50%;
+  z-index: 8;
+}
+
+/* Cross — now a non-interactive `+` MARKER at each quadrant centre (the
+   quadrant itself is the reach target). Same glyph + pulsing warm glow so it
+   reads as "reach here"; pointer-events off so it never blocks the reach zone
+   below it. */
 .cross-button {
   position: absolute;
   background: transparent;
@@ -374,13 +383,10 @@ onBeforeUnmount(clearTimers)
   line-height: 1;
   letter-spacing: 0;
   color: #595b54;
-  cursor: pointer;
+  pointer-events: none;
   transition: opacity 600ms ease-out, color 150ms ease-out;
   animation: cross-glow 1.8s ease-in-out infinite;
   z-index: 15;
-}
-.cross-button:hover {
-  color: #2a2e36;
 }
 /* Inert until the settle beat elapses (crossesReady false): hidden,
    non-interactive, and no attention glow. When crossesReady flips true the
@@ -394,15 +400,14 @@ onBeforeUnmount(clearTimers)
 
 /* Quadrant variant — positioned by inline style (q.x / q.y) and centred
    on that point. Visible from VIEW_3 mount; faded out once the canvas
-   it represents has been zoomed. */
+   it represents has been zoomed. Non-interactive (the reach zone handles
+   the hover) — pointer-events stays off from the base `.cross-button`. */
 .cross-quadrant {
   transform: translate(-50%, -50%);
   opacity: 1;
-  pointer-events: auto;
 }
 .cross-quadrant.faded {
   opacity: 0;
-  pointer-events: none;
 }
 
 /* Mode-of-proximity description, shown at the quadrant centre in place
@@ -443,6 +448,10 @@ onBeforeUnmount(clearTimers)
   width: 22vmin;
   height: 22vmin;
   z-index: 10;
+  /* Non-interactive during the reach phase so it doesn't block the quadrant
+     reach zones where they meet at centre; `.clickable` re-enables it once the
+     central image becomes the VIEW_3 → VIEW_4 trigger. */
+  pointer-events: none;
 }
 /* Once the start prompt shows, the central image is the click target (the
    VIEW_3 → VIEW_4 trigger). It pulses a blue drop-shadow glow (same

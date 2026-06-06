@@ -73,7 +73,7 @@
      glyphs themselves — a soft organic "stroke" hugging the letterforms via a
      layered `text-shadow` on the inner `.caption-text` span (NOT a rectangle
      behind the line). */
-  --rotate-size: 1.7rem;
+  --rotate-size: 1.5rem;
   --rotate-panel-bg: rgba(170, 180, 194, 0.9);
 
   /* Project-wide blue-gray text halo. Two-tier composition: 3 tight
@@ -177,7 +177,7 @@ html {
   background-position: 0 0;
 }
 /* ── Corner labels ──
-   Shared "MIRROR / TRACE / SHIFT / REPLAY" tags placed in the four
+   Shared "SOURCE / FORM / SEMANTIC / TIME" tags placed in the four
    outer corners. Used by VIEW_3 (the post-disperse transition) and
    VIEW_4 (the relational grid, via `RelationComponent.quarter-tag`'s
    replacement). Pixel-positioned identically in both views so the

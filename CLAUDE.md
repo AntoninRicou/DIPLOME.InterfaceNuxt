@@ -130,7 +130,8 @@ VIEW_0 → VIEW_1 → VIEW_2 → VIEW_3 → VIEW_4
   its boot `single` state throughout.
 * **VIEW_1 (EXPLANATION)** — gradient backdrop with the structural cross
   drawing from center over the full panel runtime. Two rotating text panels
-  describing the tool, 5 s each. A `>` skip chevron is available; the
+  describing the tool, 5 s each. A bottom-centred **`Skip` button** (the shared
+  `SkipButton` component — see *SKIP BUTTON*) is available; the
   advance also fires automatically when the last panel finishes. On
   advance, `enterEntryView` emits `set-mask(1, 250)` → `set-state('overview',
   0)` (instant snap behind the opaque mask) → and a disperse-synced
@@ -144,8 +145,9 @@ VIEW_0 → VIEW_1 → VIEW_2 → VIEW_3 → VIEW_4
   fires `selectImage`, which emits only `focus(id)` (no `set-state` —
   project stays in overview) and advances to VIEW_3.
 * **VIEW_3 (TRANSITION)** — the four-quadrant zoom-in step. Project starts
-  in `overview`. The user clicks four `+` crosses, one centered in each
-  quadrant. Each click fires `set-canvas-zoom` so the standalone visually
+  in `overview`. The user **reaches into each of the four quadrants** (cursor
+  enters the quadrant — the `+` crosses are now non-interactive markers). Each
+  reach fires `set-canvas-zoom` so the standalone visually
   morphs canvas-by-canvas from overview to a split-like rendering on the
   selected image (see *VIEW_3 — QUADRANT ZOOM MECHANIC*). When all four
   are zoomed, the modes caption + corner labels + advance `+` button fade
@@ -153,8 +155,8 @@ VIEW_0 → VIEW_1 → VIEW_2 → VIEW_3 → VIEW_4
   flip — no visible change, since the overrides already match split) and
   advances to VIEW_4.
 * **VIEW_4 (RELATIONAL)** — the main relational interface. Project is in
-  `split`. Four named relation components — **Trace** (tl), **Mirror**
-  (tr), **Shift** (bl), **Replay** (br) — surround the centered image (see
+  `split`. Four named relation components — **Source** (tl), **Form**
+  (tr), **Semantic** (bl), **Time** (br) — surround the centered image (see
   *VIEW_4 — COMPONENT LAYOUT* and *VIEW_4 — RELATION CASCADE*).
 
 Once the system enters VIEW_4, it must never return to:
@@ -1027,13 +1029,15 @@ pseudo-element with transparent edges — a real light, not a text-shadow, which
 washed out to grey fog on the light gradient) that **breathes in/out + scales**
 continuously (`action-prompt-pulse`, infinite ease-in-out — loading-style) to
 draw the eye — only one visible at a time. (The same component carries VIEW_3's
-`ZOOM_ACTION` / `START_ACTION` and VIEW_4's `ZOOM_PATH_ACTION`.)
+`ZOOM_ACTION` / `START_ACTION`. VIEW_4's former `ZOOM_PATH_ACTION` cross CTA was
+removed when the center cross was retired in favour of the auto-advance — see
+*VIEW_4 — OVERVIEW FINALE & EXPLORE-OTHERS*.)
 
-### Skip-to-pick "Next" button
+### Skip-to-pick button
 
-A bottom-centred **`Next ›` button** (`.next-button`, shown while
-`!clickEnabled && !entryExiting`) lets the user **skip the narrations and jump
-straight to the pickable state**. `skipToPick()` clears the phase timers,
+A bottom-centred **`Skip` button** (the shared `SkipButton` component — see
+*SKIP BUTTON*; shown while `!clickEnabled && !entryExiting`) lets the user
+**skip the narrations and jump straight to the pickable state**. `skipToPick()` clears the phase timers,
 hides the intro caption + `HOVER_ACTION`, clears any in-flight project
 narration, flips `hoverEnabled` + `clickEnabled` true, shows `CLICK_ACTION`
 ("Select an image to initiate exploration."), guards the project narration
@@ -1068,6 +1072,16 @@ that flag activates **embed mode**, which:
   `goTo`, which is where presets are normally chosen per state),
 * sets `body[data-canvas-bg = 'gradient']` inline so the disperse field
   sits on the same day backdrop as the rest of project.
+
+The disperse view also draws the **structural cross BEHIND the spawning
+sprites** via `body[data-state="disperse"] #container-1::before` in
+`project/src/style.css` — a `z-index: -1` pseudo inside container-1's own
+stacking context (`isolation: isolate`), so it paints above the gradient
+background but below the transparent (`alpha:true`) sprite canvas. VIEW_2's
+interface (`View2Disperse.vue`) therefore does **not** draw its own cross —
+the interface can only paint over the opaque iframe, which would put the
+cross on top of the sprites. Disperse-only, so the standalone (which never
+enters disperse) is unaffected.
 
 Embed mode is the **fourth scoped project-side exception** (see *CURRENT
 DEVELOPMENT SCOPE* exception #4). Its surface is small and tightly
@@ -1256,9 +1270,25 @@ mask's `duration` differs.
 VIEW_3 is the **quadrant zoom-in step** between the disperse selection
 (VIEW_2) and the relational grid (VIEW_4). Project is in `overview`
 throughout VIEW_3; the standalone visually morphs from overview to a
-split-equivalent rendering one canvas at a time, driven by user clicks on
-four `+` crosses (one centered in each quadrant). Each cross click also
-reveals that quadrant's **suggestion-image preview** + corner label + text.
+split-equivalent rendering one canvas at a time, driven by the user
+**reaching into each quadrant** (see *Reach-to-zoom* below). Reaching a
+quadrant also reveals its **suggestion-image preview** + corner label + text.
+
+> **Reach-to-zoom (replaced cross-click).** The trigger is now **moving the
+> cursor into a quadrant**, not clicking its `+` cross. Four transparent
+> `.quadrant-zone` divs (one per quarter of the viewport, `z-index: 8`, derived
+> from each quadrant's `x/y`) fire `onQuadrantReach(i)` → `zoomCanvas(i)` on
+> `@mouseenter` (gated on `crossesReady`, idempotent via the `canvasZoomed[i]`
+> guard). The `+` **cross is now a non-interactive marker** (a `<div>`,
+> `pointer-events: none`) at each quadrant centre — it still glows ("reach
+> here") and fades out when its quadrant is zoomed. The `.central-slot` is
+> `pointer-events: none` during this phase (so the four zones work where they
+> meet at centre) and only re-enables via `.clickable` when the central image
+> becomes the VIEW_3 → VIEW_4 trigger. **Throughout the rest of this doc, "cross
+> click" now means "quadrant reach"** — the per-quadrant emissions
+> (`set-canvas-zoom` etc.) are unchanged; only the trigger gesture changed.
+> Edge case: a quadrant the cursor is *already* inside when `crossesReady` flips
+> won't zoom until the cursor leaves and re-enters (`mouseenter` only).
 
 > **Current trigger: the central image, not an advance cross.** The old
 > top-centre advance `+` is **removed**. After the four quadrants are
@@ -1305,11 +1335,13 @@ timer; advance is entirely user-driven.
 on the gradient backdrop with the structural cross (same split-pseudo
 pattern as VIEW_1, no draw animation — static). Foreground elements:
 
-* **Four quadrant crosses** at the quadrant centres
-  (25/25, 75/25, 25/75, 75/75). Each is a `+` glyph button. Inert
-  (`.pending`: hidden, no glow, `:disabled`) until `crossesReady` (intro
-  cleared); then they glow and are clickable. Click → `store.zoomCanvas(i)`.
-  The cross hides once its canvas is zoomed.
+* **Four quadrant reach zones + cross markers.** Four transparent
+  `.quadrant-zone` divs cover the quarters; entering one (`@mouseenter`, gated
+  on `crossesReady`) calls `onQuadrantReach(i)` → `store.zoomCanvas(i)`. At each
+  quadrant centre (25/25, 75/25, 25/75, 75/75) a `+` `.cross-button` **marker**
+  (`<div>`, `pointer-events: none`) glows ("reach here") via `.pending` (hidden
+  until `crossesReady`) → glow → `.faded` (hidden once that canvas is zoomed).
+  The cross is no longer clicked — the zone is the trigger (see *Reach-to-zoom*).
 * **Per-quadrant suggestion-image preview** — the SAME four
   `RelationComponent`s VIEW_4 renders, here in **`preview` mode**
   (non-interactive). Laid out in a `.grid` matching VIEW_4's exactly, so
@@ -1320,15 +1352,16 @@ pattern as VIEW_1, no draw animation — static). Foreground elements:
 * **Per-quadrant text** (`ProximityPanel`, `.quadrant-text`) at the
   quadrant centre, fading in when that canvas is zoomed. Content from
   `view3Interpretations` keyed by `componentId` — Source / Form / Semantic
-  / Collaborative.
+  / Time.
 * **Central image** at viewport centre, 22vmin × 22vmin (same geometry as
   VIEW_4's `.center-anchor`). Becomes the **VIEW_3 → VIEW_4 trigger** once
   `showStartAction` is up (see *Central-image click*).
 * **Modes caption** (`.modes-caption`, `MODES_CAPTION`) at viewport centre
-  — fades in 1 s after the fourth cross, holds one `VIEW3_PANEL_MS`, fades
-  out; mirrored to project (`variant: 'rotate'`).
+  — fades in 1 s after the fourth quadrant is reached, holds `MODES_HOLD_MS`
+  (`VIEW3_PANEL_MS − 2000`, trimmed because it read too long), fades out;
+  mirrored to project (`variant: 'rotate'`).
 * **Corner labels** at the four outer corners showing **Source / Form /
-  Semantic / Collaborative**. Revealed **per-quadrant**, gated on
+  Semantic / Time**. Revealed **per-quadrant**, gated on
   `store.canvasZoomed[index]`, in lockstep with the project-side
   `set-corner-label(index, true)` emitted by `zoomCanvas`. Opacity-only
   fade (the glow pulse was removed — see exception #9).
@@ -1342,23 +1375,24 @@ pattern as VIEW_1, no draw animation — static). Foreground elements:
 
 ```
 (no intro caption — removed) settle beat (--rotate-appear-delay)
-  → crossesReady = true + ZOOM_ACTION prompt appears (crosses now clickable)
-t = 0          click a cross i         →  zoomCanvas(i):
+  → crossesReady = true + ZOOM_ACTION prompt appears (reach zones now armed)
+t = 0          reach quadrant i        →  onQuadrantReach(i) → zoomCanvas(i):
                                           setCanvasZoom(i, activeId)
                                           + setCanvasText(i, title, body)
                                           + setCornerLabel(i, true)
-                                       →  canvasZoomed[i] = true; cross i hides,
+                                       →  canvasZoomed[i] = true; cross i marker hides,
                                           quadrant i preview + text + label reveal,
                                           canvas i tweens overview → split
-... user clicks the other crosses (any order)
-t = N          4th cross               →  allCanvasesZoomed = true → watch fires
+... user reaches the other quadrants (any order)
+t = N          4th quadrant reached    →  allCanvasesZoomed = true → watch fires
                                        →  ZOOM_ACTION hides
 t = N + 1000   showModesCaption = true →  modes-caption fades in (both screens)
                                           (CAPTION_DELAY_MS)
-t = N + 1000 + VIEW3_PANEL_MS           →  modes-caption fades out
-   + ROTATE_FADE_OUT_MS                 →  START_ACTION prompt + central-image
+t = N + 1000 + MODES_HOLD_MS             →  modes-caption fades out
+   + ROTATE_FADE_OUT_MS                 →  (MODES_HOLD_MS = VIEW3_PANEL_MS − 2s)
+                                          START_ACTION prompt + central-image
                                           blue pulse appear
-t = future     click central image     →  onCenterClick: flash → dissolve →
+t = future     click central image     →  onCenterClick: fades quadrant texts →
                                           enterRelationalView('skip')
                                        →  setState('split', 0) + focus(id)
                                        →  viewState.advance() to VIEW_4
@@ -1426,7 +1460,7 @@ corner labels.
 The reason param (`'auto'` | `'skip'`) is stored in `view2ExitReason` and
 consumed by VIEW_4's reveal-overlay animation. The `'skip'` path is reached
 two ways — the central-image click (after the four crosses) **and** the
-**skip-to-relational "Next" button** (see below); the `'auto'` path is
+**skip-to-relational `Skip` button** (see below); the `'auto'` path is
 reserved for any future timed advance.
 
 The function emits:
@@ -1451,10 +1485,11 @@ The function emits:
 It also resets `canvasZoomed = [false, false, false, false]` so that
 re-entering VIEW_3 (no path today, but defensive) starts clean.
 
-### Skip-to-relational "Next" button
+### Skip-to-relational button
 
-A bottom-centred **`Next ›` button** (`.next-button`, always shown in VIEW_3)
-calls `skipToRelational()` → `store.enterRelationalView('skip')` immediately —
+A bottom-centred **`Skip` button** (the shared `SkipButton` component — see
+*SKIP BUTTON*; always shown in VIEW_3) calls `skipToRelational()` →
+`store.enterRelationalView('skip')` immediately —
 **no flash/dissolve animation** — bypassing the four quadrant-cross zooms and
 the modes-caption. The `set-corner-labels(true)` re-assert inside
 `enterRelationalView` is what makes the skipped entry still land VIEW_4 with
@@ -1481,9 +1516,9 @@ The same image therefore generates different proximities depending on the active
 
 ## VIEW_4 — COMPONENT LAYOUT
 
-> **Current labels: Source / Form / Semantic / Collaborative.** The mode
+> **Current labels: Source / Form / Semantic / Time.** The mode
 > names below were renamed (Trace → **Source**, Mirror → **Form**, Shift →
-> **Semantic**, Replay → **Collaborative**); the `component_N` ids,
+> **Semantic**, Replay → Collaborative → **Time**); the `component_N` ids,
 > quadrants, datasets and interpretation titles are listed authoritatively
 > in *RELATIONAL RESOLUTION FLOW › Component → UMAP dataset mapping*. The
 > prose below keeps the old names for the per-mode descriptions — the
@@ -1492,7 +1527,7 @@ The same image therefore generates different proximities depending on the active
 The 4 relation components are arranged in a fixed 2×2 grid:
 
 [ Source (tl) ] [ Form (tr)        ]
-[ Semantic (bl) ] [ Collaborative (br) ]
+[ Semantic (bl) ] [ Time (br) ]
 
 Each component is identified by a position name (`tl` / `tr` / `bl` / `br`,
 matching project's `STATES.split.rects` ordering) and rendered with a
@@ -1504,9 +1539,10 @@ human-readable label via the `<RelationComponent>` prop `label`:
   shapes, textures. Highlights recurring visual form.
 * **Semantic** (bottom-left, `component_3`, was *Shift*) — semantic
   embeddings related to the image. Shifts the reading through meaning.
-* **Collaborative** (bottom-right, `component_4`, was *Replay*) — previous
-  user selections (or previously unseen images). The collaborative trace of
-  past navigations; contributions accumulate into an evolving map.
+* **Time** (bottom-right, `component_4`) — temporal proximity: images
+  organized through a year-based structure (the spiral embedding), so
+  neighbours share the centred image's period. The hover label surfaces the
+  shared year.
 
 The names are rendered in each component's outer corner via the
 `.quarter-tag` span (see `RelationComponent.vue`), pixel-positioned
@@ -1560,11 +1596,22 @@ Each component displays different related images even though they originate from
 Proximity resolution lives in
 [`server/utils/mockRelations.ts`](server/utils/mockRelations.ts):
 `loadUmapDataset(componentId)` reads the component's JSON from
-`assets/mock/`, and `pickRelations(dataset, centralImageId, count = 8)`
+`assets/mock/`, and `pickRelations(dataset, centralImageId, count = 8, exclude?)`
 returns the Euclidean k-nearest neighbours on `(x, y)` within that single
 dataset (ordering is scale-invariant, so no cross-dataset normalization;
 returns `[]` if the central id isn't in that dataset — routine, since the
 four quadrant datasets don't share id populations).
+
+**History dedup.** `pickRelations`'s optional `exclude` (an iterable of ids)
+is skipped alongside the central image, so a visited image never reappears as
+a VIEW_4 suggestion — the scan covers the whole dataset, so the slice still
+yields `count` true next-nearest neighbours. The relations endpoint
+(`/api/relations/[componentId]`) reads it from a comma-separated `?exclude=`
+query; `RelationComponent.vue` sends `store.navigationHistory.join(',')` and
+watches it, so every quadrant refetches when the path changes and only shows
+images not already in the timeline. Scope is **history only** — the same
+*unvisited* image can still appear in two quadrants at once (no cross-quadrant
+dedup). `exclude` defaults empty, so the replay-circles caller is unaffected.
 
 `COMPONENT_DATASET_FILES` is the authoritative map (each component pulls
 proximity from the same UMAP its sibling canvas renders, so `component_N`
@@ -1573,46 +1620,59 @@ and `canvas_N` share a coordinate space). The **current canonical mapping**
 
 | componentId   | Quadrant | Label (current) | `view3Interpretations` title | Dataset file (`assets/mock/`) | project mapType |
 | ------------- | -------- | --------------- | ---------------------------- | ----------------------------- | --------------- |
-| `component_1` | tl       | **Source**        | Tracing origins      | `umap_book2.json`        | `trace`  |
-| `component_2` | tr       | **Form**          | Mirroring structures | `mirror.json`            | `mirror` |
-| `component_3` | bl       | **Semantic**      | Shifting descriptions| `umap_semantic_llm.json` | `shift`  |
-| `component_4` | br       | **Collaborative** | Replaying paths      | `umap_spiral.json` | `replay` |
+| `component_1` | tl       | **Source**        | Tracing origins      | `umap_book2.json`        | `source`  |
+| `component_2` | tr       | **Form**          | Mirroring structures | `mirror.json`            | `form`  |
+| `component_3` | bl       | **Semantic**      | Shifting descriptions| `umap_semantic_llm.json` | `semantic` |
+| `component_4` | br       | **Time** | Time drifting        | `umap_spiral.json` | `time`  |
 
 > **Component_4 dataset — `umap_spiral.json`.** `component_4`'s quadrant
 > suggestions AND canvas-4 both render `umap_spiral.json` (its
-> `COMPONENT_DATASET_FILES` entry in `mockRelations.ts` AND the `replay`
+> `COMPONENT_DATASET_FILES` entry in `mockRelations.ts` AND the `time`
 > mapType in `project/src/mapData.js` `sources` — **both** must agree or the
 > proximity is computed on a different coordinate space than the one rendered,
-> and the on-screen map won't reflect a `mockRelations.ts`-only change). This
-> dataset was swapped through `umap_replay.json` → `umap_spiral_archipel.json`
-> → `umap_spiral.json`; the spiral embedding also carries a `year` field, so
-> `COMPONENT_YEAR_FILES.component_4` points at the same file (the hover label
-> surfaces the year — see `loadYearMap`).
+> and the on-screen map won't reflect a `mockRelations.ts`-only change). The
+> spiral embedding carries a `year` field, so `COMPONENT_YEAR_FILES.component_4`
+> points at the same file (the hover label surfaces the year — see `loadYearMap`).
 
 > **Component_4 vs. explore-others ribbons — two different UMAPs.** The VIEW_4
 > **explore-others corner ribbons** are decoupled from canvas-4's map: they
 > read `umap_replay.json` directly via `loadUmapByFile`, because they represent
-> past *collaborative paths* rather than the canvas-4 map. That decoupling is
-> deliberate and was **not** changed by the spiral swap. See *VIEW_4 — OVERVIEW
-> FINALE & EXPLORE-OTHERS*.
+> **past collaborative paths** (other participants' journeys) rather than the
+> canvas-4 map. That decoupling is deliberate — the explore-others ribbons keep
+> the "replay" naming even though the 4th mode is now "Time". See *VIEW_4 —
+> OVERVIEW FINALE & EXPLORE-OTHERS*.
 
 > **Label rename.** The four modes were renamed from
-> **Mirror / Trace / Shift / Replay** to **Source / Form / Semantic /
-> Collaborative**. Older sections below (esp. *VIEW_4 — COMPONENT LAYOUT*)
-> still use the old names in prose — translate via this table; the
-> *roles* are unchanged except that the two top quadrants' identities are
-> as above (tl = `component_1` = Source = book-source proximity; tr =
-> `component_2` = Form = visual-structure proximity). The label strings
-> live in `View3Transition.vue`'s `CORNERS` and `View4Relational.vue`'s
-> `RelationComponent label="…"` props.
+> **Mirror / Trace / Shift / Replay** to **Source / Form / Semantic / Time**
+> (the br quadrant went Replay → Collaborative → **Time**). Older sections below
+> (esp. *VIEW_4 — COMPONENT LAYOUT*) still use the old names in prose —
+> translate via this table; the *roles* are unchanged except that the two top
+> quadrants' identities are as above (tl = `component_1` = Source = book-source
+> proximity; tr = `component_2` = Form = visual-structure proximity). The label
+> strings live in `View3Transition.vue`'s `CORNERS` (+ its preview
+> `RelationComponent label`), `View4Relational.vue`'s `RelationComponent label`,
+> and `project/index.html`'s `.corner-label` spans.
 
 Mapping is a straight index match — `component_N` renders on `canvas_N`
 (tl = canvas-1 = `component_1` … br = canvas-4 = `component_4`).
 `zoomCanvas` and `toggleView3Interpretation` in `interaction.ts` map
 canvasIndex 0..3 directly to `component_1..4` (`` `component_${i+1}` ``);
 `View4Relational` and `View3Transition`'s `QUADRANTS` place `component_N`
-at the matching corner; project's `createApp` mapTypes (`trace` / `mirror`
-/ `shift` / `replay` → the dataset files via `mapData.js` `sources`) agree.
+at the matching corner; project's `createApp` mapTypes (`source` / `form`
+/ `semantic` / `time` → the dataset files via `mapData.js` `sources`) agree.
+
+> **MapType keys == labels (convention).** The project mapType keys are now the
+> lowercase of the corner labels — `source` / `form` / `semantic` / `time`
+> (renamed from the old `trace` / `mirror` / `shift` / `replay`). They live in
+> three project files that must stay in agreement: `mapData.js` `sources` keys,
+> the `createApp(i, '<mapType>')` calls in `main.js`, and `ALL_MAP_TYPES` (plus
+> the `?? 'form'` fallback) in `stateManager.js`. The **dataset filenames are
+> unchanged** (`umap_book2.json`, `mirror.json`, `umap_semantic_llm.json`,
+> `umap_spiral.json`) — only the keys were renamed. The lone exception to the
+> "no replay/collaborative" rule is the VIEW_4 **explore-others** ribbons, which
+> deliberately keep `replay` (the `replay-circles` endpoint + `umap_replay.json`)
+> because they're a separate "other participants' journeys" surface — see
+> *VIEW_4 — OVERVIEW FINALE & EXPLORE-OTHERS*.
 
 The dataset loader caches each parsed dataset by componentId
 (`loadUmapDataset`), delegating to a filename-keyed `loadUmapByFile` that owns
@@ -1631,9 +1691,8 @@ truth, mirrored to project via `set-canvas-text`):
   structural and compositional relations derived from the centered image."
 * **component_3 / Semantic** — "These images are organized through shared
   semantic proximity derived from the centered image."
-* **component_4 / Collaborative** — "These images are organized through
-  previous user selections or previously unseen images. Your journey
-  contributes to the evolving map."
+* **component_4 / Time** — "These images are organized through temporal
+  proximity across a time-based structure derived from the centered image."
 
 ---
 
@@ -1740,11 +1799,22 @@ remains in source but is **never engaged** by `interface_nuxt`.
 Two directives, both flowing from `interface_nuxt` to `project` through the
 opaque relay (`server`):
 
-* `path-segment({ fromId, toId })` — append a new visible segment from
-  `fromId` to `toId`. Project picks the segment color locally (color is a
-  rendering concern, not a wire concern) and animates the new segment's
-  `progress` against the current `focus(id)` pan animation, so the segment
-  visibly "grows" in sync with camera convergence on the new central image.
+* `path-segment({ fromId, toId, quadrant? })` — append a new visible segment
+  from `fromId` to `toId`. `quadrant` (0=tl,1=tr,2=bl,3=br) is the relation
+  component the clicked image came from; project maps it to a colour (color
+  stays a rendering concern). The colour scheme lives in
+  [pathColors.js](project/src/pathColors.js) — `QUADRANT_COLORS[tl,tr,bl,br]`
+  plus a single `OVERRIDE_COLOR` that, when non-null, forces the WHOLE path to
+  one colour (currently `0x595b55`). `colorForQuadrant(quadrant)` =
+  `OVERRIDE_COLOR ?? QUADRANT_COLORS[quadrant] ?? default`. Interface stays
+  colour-blind — it sends WHICH quadrant, never a colour (omitted for the
+  explore-others foreign-path redraw → project falls back to the override/
+  default). The segment animates its `progress` against the current `focus(id)`
+  pan, so it visibly "grows" in sync with camera convergence. **Rendering:** the
+  core path line is a **fat line** (`LineSegments2` + `LineMaterial`,
+  `PATH_LINEWIDTH = 1.6` px — plain WebGL lines clamp to 1px on desktop) drawn
+  from pre-allocated buffers updated in place each tick; the white **glow trail**
+  along the nodes is recoloured to warm beige (`GLOW_COLOR = 0xf9ecd0`).
 * `path-truncate({ keepCount })` — drop all segments after index
   `keepCount`. The surviving last segment is clamped to fully drawn. Used
   to visually destroy a forward branch that was just rewritten by a
@@ -1842,8 +1912,9 @@ project-internal; `interface_nuxt` does not orchestrate it.
   server, not in `localStorage`, not on the wire beyond the per-event
   directives. Page reload destroys it; subsequent activations rebuild it
   from the next user interactions.
-* Color is chosen inside `project` per segment. `interface_nuxt` is
-  color-blind by design — the wire stays minimal.
+* Color is chosen inside `project` per segment (keyed by the `quadrant` index
+  the wire carries — see `pathColors.js`). `interface_nuxt` is color-blind by
+  design — it sends the quadrant, never a colour.
 
 ---
 
@@ -1934,21 +2005,16 @@ top of each other:
    active layer scales to `SCALE_ACTIVE = 0.5`, others to
    `SCALE_OTHER = 0.35`. Ordering follows `centralStack` (= nav history)
    index, starting at 12 o'clock and walking clockwise.
-4. **Per-image natural dimensions.** Each layer is sized from its source
-   pixel dims in the atlas metadata, scaled by a single
-   `VMIN_PER_PIXEL` factor with two stable per-image modulations:
-   * a **hash-derived size variation** keyed off the image id — breaks
-     the visual collision created by the source atlas normalizing most
-     images to a 500px max edge (so two portraits with identical aspect
-     no longer render at identical size);
-   * an **aspect-balance penalty** that reduces the overall scale of
-     extreme-aspect images (no aspect distortion), so ribbons don't
-     visually dominate squares.
-   Both modulations are deterministic — same image id always yields the
-   same footprint. Same-aspect images therefore don't collapse to
-   identical visual sizes, and peek-out between stacked layers in stack
-   mode is a structural consequence of these dimensions, not an
-   animation effect.
+4. **Per-image dimensions — EQUAL-AREA normalized.** Each layer is sized by
+   `useCentralImageDims.naturalDimsVmin` so every image covers the **same
+   surface** regardless of aspect (`width = BASE_EDGE·√aspect`, `height =
+   BASE_EDGE/√aspect`), with a subtle deterministic hash on **area** for
+   organic variation. See *EQUAL-AREA IMAGE SIZING (surface balance)* for the
+   full model and the per-surface multipliers. (This replaced an earlier
+   longest-edge model that scaled atlas pixel dims by `VMIN_PER_PIXEL` plus an
+   aspect-balance penalty — squares looked far bigger than thin images.)
+   Same id always yields the same footprint; peek-out between stacked layers
+   is a structural consequence of these dimensions, not an animation effect.
 
 A single CSS transition on `transform` (700ms, `cubic-bezier(0.22, 0.61,
 0.36, 1)`) drives every visual change: stagger reshuffles on history
@@ -2231,6 +2297,186 @@ The server returns up to 8 related images per component; the client
 slices to 4 for the oval. Increasing this number requires extending
 the per-cell index rules (`cell-1` … `cell-N`) and the `N_CELLS`
 constant in `CELL_OFFSETS`'s computation.
+
+---
+
+## EQUAL-AREA IMAGE SIZING (surface balance)
+
+All four image surfaces — the central deck, the circle of 10, the
+VIEW_4 quadrant suggestion cells, and the explore-others corner ribbons —
+size every image through **one shared composable**,
+[`app/composables/useCentralImageDims.ts`](app/composables/useCentralImageDims.ts)
+(`naturalDimsVmin(id)`). The goal is **surface balance**: a very tall
+picture and a very wide picture read as the **same visual weight**, just
+different shapes — not normalized by longest edge (which left squares
+looking far bigger than thin images).
+
+### The model
+
+Every image targets the **same area** `BASE_EDGE_VMIN²` regardless of aspect:
+
+```text
+width  = BASE_EDGE_VMIN · √aspect
+height = BASE_EDGE_VMIN / √aspect
+⇒ width · height = BASE_EDGE_VMIN²   (constant area, ratio preserved)
+```
+
+* `BASE_EDGE_VMIN = 26` — the equal-area square's edge; raise/lower to scale
+  every surface at once. A square renders ~26×26; landscapes get wider +
+  shorter, portraits narrower + taller, all covering the same surface.
+* A subtle per-image **hash** (`SIZE_VARIATION_MIN/MAX = 0.85/1.25`) scales
+  **area** (the linear edge factor is its `√`), so the jitter stays gentle
+  (~±10% per edge) — organic, never a rigid grid. Deterministic per id.
+* `export const CENTER_IMAGE_SCALE = 0.8` — an extra multiplier applied to
+  the **central-image family only** (the deck + the circle of 10, both drawn
+  by `CentralImage`, and VIEW_4's hover hit-box which must match). Lets the
+  centre/circle shrink without touching the quadrant cells or ribbons.
+
+### Per-surface multipliers
+
+Each consumer multiplies `naturalDimsVmin` by its own scale on top of the
+shared model, so the relative sizes are tunable independently while the
+balance recipe stays identical:
+
+| Surface | Scale | Where |
+| --- | --- | --- |
+| Central deck (collapsed) | `× CENTER_IMAGE_SCALE` (0.8) | `CentralImage.vue` `layerStyle` |
+| Circle of 10 (expanded ring) | `× 0.8 × SCALE_OTHER` (0.68) | `SCALE_OTHER/ACTIVE = 0.85`, `SCALE_HOVER = 0.95` |
+| Quadrant cells | `× QUADRANT_SCALE` (0.6) | `RelationComponent.vue` — only the **width** is driven (`--cell-w`); height follows the aspect via `AtlasThumb fit="width"` |
+| Explore ribbons | `× RIBBON_SCALE` (0.46) | `View4Relational.vue` |
+
+`View2Disperse.vue` hover previews also share the composable. Tuning the
+balance feel (variation strength) lives in one place, so it propagates to
+all surfaces. The VIEW_4 hover hit-box (`centerAnchorStyle`) multiplies by
+`CENTER_IMAGE_SCALE` so the sensor tracks the visible (reduced) deck image.
+
+---
+
+## VIEW_4 — HOVER METADATA LABELS (radial words)
+
+Hovering a suggestion cell in VIEW_4 surfaces short metadata text laid out
+**along the radial line** from the centred image out to the hovered cell,
+rotated to follow that line — different per mode. Pure interface feedback;
+never on the wire.
+
+### Per-mode content
+
+* **Source (`component_1`)** — the image **subject**. Two words on the line:
+  the **centred image's** subject (inner) and the **hovered** image's
+  subject (outer), even when identical (subject-based proximity often makes
+  them the same).
+* **Semantic (`component_3`)** — three visual **tags** as `own · shared ·
+  own`: two of the hovered image's own distinctive tags + one tag **shared**
+  with the centre (the proximity link), on the middle line. The shared slot
+  **rotates** across the 4 cells and avoids the most-shared/dominant tag, so
+  the four labels don't all repeat e.g. `linear`. Selection is computed for
+  all 4 cells together (deterministic) in `RelationComponent.vue`'s
+  `tagSelection`.
+* **Time (`component_4`)** — the **common year** (year-based proximity, so
+  neighbours share the centre's year), a single value centred on the line.
+
+### Server metadata (the relations endpoint)
+
+[`server/api/relations/[componentId].get.ts`](server/api/relations/[componentId].get.ts)
+returns, alongside `related: string[]`, optional metadata maps populated only
+for the component that has a source (others get empty):
+
+| Field | Component | Source file | Loader (`server/utils/mockRelations.ts`) |
+| --- | --- | --- | --- |
+| `subjects` / `centralSubject` | Source | `umap_subjects_embeddings2.json` | `loadSubjectMap` |
+| `tags` / `tagFreq` / `centralTags` | Semantic | `umap_semantic_llm.json` | `loadTagData` (also global tag frequency) |
+| `years` / `centralYear` | Time | `umap_spiral.json` | `loadYearMap` |
+
+Each loader is cached by componentId and parses a per-component file map
+(`COMPONENT_SUBJECT_FILES` / `COMPONENT_TAG_FILES` / `COMPONENT_YEAR_FILES`).
+The client performs all display selection (the tag diversity pick, the
+subject/year pairing) — the server only ships raw metadata, same division as
+the aspect-aware slot assignment.
+
+### Radial rendering
+
+`RelationComponent.vue` renders the hovered cell's words via a `<Teleport
+to="body">` fixed overlay (`z-index: 90`) so they're never clipped by
+`.rel`'s `overflow: hidden` and always paint above the central deck. Each
+word is anchored at the viewport centre, pushed to its `--frac` along the
+centre→cell vector (`--cell-x/y`, already signed per quadrant), and an inner
+span rotates by `--angle` (positioning stays in screen space, separate from
+the rotation). `hoveredAngleDeg` is the on-screen angle of the centre→cell
+line computed from the **real pixel vector** (the ellipse scales x by vw, y
+by vh, so it isn't the raw polar angle), flipped into `[-90°, 90°]` so glyphs
+stay upright. A dense blue `text-shadow` (the rotate-caption stroke) keeps
+the text legible over the images.
+
+### Hover sound
+
+[`app/composables/useSound.ts`](app/composables/useSound.ts) is a generic
+Web-Audio helper (decode-once buffers, lazy `AudioContext` resumed on first
+play). `RelationComponent.vue`'s cell-hover handler plays
+`/sounds/hover.wav` — scoped to the relational view because that handler
+early-returns in VIEW_3 preview mode. Audio files live in `public/sounds/`.
+
+---
+
+## VIEW_4 — EXPLORE-OTHERS RIBBON LAYOUT
+
+The four explore-others corner circles (revealed after the finale auto-advance,
+on first circle hover) render as L-shaped **ribbons**
+hugging the two window edges at each corner (`View4Relational.vue`). The
+layout guarantees that two **different** ribbons sharing an edge never
+overlap (the edge stays readable) while images of the **same** ribbon may
+overlap each other to fit at full size.
+
+* **Arm split** (`ribbonArms`) — `RIBBON_VERTICAL_COUNT` (4) images go on the
+  short vertical arm, the rest (`n − RVC`) on the long horizontal arm. The
+  top/bottom edges are longer, so they hold more.
+* **Edge-length-aware caps** (`ribbonArmCaps`, recomputed from
+  `ribbonViewport` on resize) — each arm reaches at most `edge/2 −
+  RIBBON_EDGE_GAP_VMIN/2`, so the two arms sharing an edge always leave a
+  visible `RIBBON_EDGE_GAP_VMIN` (14) gap in the middle, on any window
+  aspect. (Horizontal edge = `100vw`, vertical = `100vh`, both in vmin.)
+* **In-arm overlap** (`layoutArm`) — images render at full
+  `RIBBON_SCALE` size (no shrink-to-fit, so every ribbon image is one
+  consistent scale). The **spacing** compresses instead: images advance by
+  at most `RIBBON_MAX_ADVANCE` (0.85 → ~15% baseline overlap) and compress
+  further only when an arm must fit its cap. So a short, image-dense arm
+  overlaps its own images; no arm crosses into the other ribbon's half.
+
+Tunables: `RIBBON_SCALE` (image size), `RIBBON_VERTICAL_COUNT` (images per
+side arm), `RIBBON_EDGE_GAP_VMIN` (mid-edge gap), `RIBBON_MAX_ADVANCE`
+(baseline in-arm overlap).
+
+---
+
+## VIEW_4 — MISC INTERFACE ADDITIONS
+
+* **"One image left to pick"** — a transient rotate-caption narration
+  (`View4Relational.vue`, `.final-caption` style) that plays when the active
+  branch reaches depth 9 (`historyIndex + 1 === MAX_BRANCH_DEPTH - 1`, pre-
+  overview, pre-finale): the 10th pick reaches the cap and auto-runs the
+  finale. Fades in, holds `ONE_LEFT_HOLD_MS` (3s), fades out; hides if the
+  user leaves depth 9.
+* **Deck → circle flash fix** — at `confirmOverview` the deck must NOT
+  un-hide when `overviewFinalePhase` clears, or the already-faded deck flashes
+  back for a frame while the `center-fade` out-in transition is still leaving
+  it. `deckHidden` is set true on the `fadeout` phase and only released by the
+  transition's `@after-leave` (by which point the circle is entering) — a
+  clean cross-fade.
+* **Overview-finale timing** lives in `interaction.ts`
+  (`OVERVIEW_BRIGHT_MS` / `OVERVIEW_DISSOLVE_MS` / `OVERVIEW_FADEOUT_MS`,
+  `startOverviewFinale`); the circle's `radius-scale` and reveal-delay are
+  props on the `CentralImage` in `View4Relational.vue`; the post-confirm
+  interface narration hold is `HOLD_INTERFACE_MS`.
+* **Hover-zoom ease parity** — the quadrant cell hover scale matches the
+  end circle's hovered image: ≈ +12% growth (`--cell-scale: 1.118`), quick
+  grow (`transform 250ms cubic-bezier(0.22,0.61,0.36,1)`) and slow ease-in-
+  out settle (`900ms cubic-bezier(0.45,0,0.55,1)`) — the same curves
+  `CentralImage`'s `.layer` / `.layer.is-highlighted` use.
+* **Canvas quadrant text size** — the per-quadrant interpretation text drawn
+  on the project canvas (`.canvas-text-title` / `-body`) is sized by
+  `--canvas-text-size` (`project/src/style.css`, **1.6rem**) — independent of
+  the `--label-size` corner-label tier so it can read larger on the canvas.
+  `--rotate-size` (interface rotate captions) is **1.5rem**. Per the user's
+  preference, these are explicit rem literals, not `calc(... × n)`.
 
 ---
 
@@ -3155,7 +3401,7 @@ Key properties:
 
 `set-canvas-text` is the wire directive that paints a title + body block
 onto a specific project canvas. It mirrors interface_nuxt's
-`.proximity-panel` content (the Mirror / Trace / Shift / Replay
+`.proximity-panel` content (the Source / Form / Semantic / Time
 descriptive text) on the project side so the interface-side panel and
 the canvas-side overlay appear simultaneously, with identical typography,
 centred inside the same quadrant.
@@ -3304,7 +3550,8 @@ copy at viewport centre on the project side. It has **three consumers**
 * **VIEW_3 modes-caption** — a single sentence (`MODES_CAPTION`, "Four modes
   of proximity each suggesting new images relationing differently with the
   center image"), revealed `CAPTION_DELAY_MS` (1 s) after the fourth quadrant
-  cross, held one `VIEW3_PANEL_MS`, then cleared. Emitted with **`variant:
+  is reached, held `MODES_HOLD_MS` (`VIEW3_PANEL_MS − 2000`), then cleared.
+  Emitted with **`variant:
   'rotate'`** so it carries the rotate-caption look (size + blue-grey stroke)
   on both screens.
 * **VIEW_4 image-credit** — the three-line provenance note (the
@@ -3351,7 +3598,7 @@ reveals so both screens animate in lockstep:
 | --------------------------------------------------------------- | -------------------------------------------------------- |
 | VIEW_2 project narration (`playProjectNarration`, 4 s after first hover) | per sentence: `set-center-caption(PROJECT_PANELS[i], 'rotate')`, hold `VIEW2_PANEL_MS`, then `set-center-caption('')`; cleared on image-click + unmount. |
 | ~~VIEW_3 rotating intro caption `<Transition>` `@enter` / `@leave`~~ | **REMOVED** — the VIEW_3 intro ("This image has been selected.") is now interface-only; no `set-center-caption` is emitted for it. |
-| 1 s after fourth VIEW_3 quadrant cross click                    | `set-center-caption(MODES_CAPTION, 'rotate')` — fade in (rotate style); cleared after one `VIEW3_PANEL_MS` hold.   |
+| 1 s after the fourth VIEW_3 quadrant is reached                 | `set-center-caption(MODES_CAPTION, 'rotate')` — fade in (rotate style); cleared after `MODES_HOLD_MS` (`VIEW3_PANEL_MS − 2000`).   |
 | VIEW_3 → VIEW_4 advance (`enterRelationalView`)                 | `set-center-caption('')` — clear before VIEW_4 mounts. |
 | VIEW_4 interpret-control toggle (`toggleView3Interpretation`)   | ON → `set-center-caption(IMAGE_CREDIT_LINES.join('\n'))`; OFF → `set-center-caption('')`. Same beat as the four `set-canvas-text` calls + `set-canvas-veil`. |
 
@@ -3466,7 +3713,7 @@ mirrors onto the project canvas.
   `backdrop-filter` blur disappears entirely — hence the own-blur approach
   instead of letting the veil blur it. `transition: filter 240ms`.
 * **Corner labels stay crisp.** `RelationComponent`'s `.corner-label` is at
-  `z-index: 6` (above the veil) so Mirror / Trace / Shift / Replay remain
+  `z-index: 6` (above the veil) so Source / Form / Semantic / Time remain
   legible; the interpretation text panels are at `z-index: 6` too.
 * **Centred image-credit.** The `.interpret-message` `<p>` renders the
   three `IMAGE_CREDIT_LINES` (`view3Interpretations.ts`) separated by
@@ -3634,6 +3881,32 @@ canvas seams.
 pushes the viewport-sized VIEW-3 surface past the viewport, producing a
 16px scroll range on each axis. The reset is global because the issue
 is global — any page using `100vw / 100vh` is affected.
+
+---
+
+## SKIP BUTTON
+
+`app/components/SkipButton.vue` is the **single shared "Skip" affordance** used
+by **VIEW_1** (explanation), **VIEW_2** (disperse) and **VIEW_3** (quadrant) to
+skip forward. It exists so the three skip controls can't drift apart — one
+component owns the look; each parent owns the action.
+
+* **Look (fixed, identical everywhere):** the word **"Skip"** in **Neue Kabel**
+  (`font-weight: 500`, upright — not italic), `1.05rem` (same size as the
+  `ActionPrompt`), muted grey `#595b54` at **50% opacity**, lifting to `1` on
+  hover (`transition: opacity 150ms`). Pinned bottom-centre (`position: fixed;
+  bottom: 0; left: 50%; translateX(-50%)`) and **vertically aligned with the
+  bottom corner labels** — it reuses their `bottom: 0` anchor, `0.75rem 0.95rem`
+  padding and `0.015em` tracking, so "Skip" sits on the same line as the
+  `bl`/`br` tags. `z-index: 20`, `pointer-events: auto`.
+* **Action (per parent, via the `click` emit):** VIEW_1 → `skip()` (→
+  `advance()` → `enterEntryView()`); VIEW_2 → `skipToPick()` (jump to the
+  pickable state); VIEW_3 → `skipToRelational()` (→ `enterRelationalView('skip')`).
+* **Visibility (per parent, via `v-if`):** always shown in VIEW_1 / VIEW_3;
+  VIEW_2 gates it on `!clickEnabled && !entryExiting`.
+
+Replaced the earlier per-view buttons (VIEW_1's `.skip` `>` chevron and VIEW_2/
+VIEW_3's `.next-button` "Next ›"), which had drifted in size/opacity/position.
 
 ---
 
@@ -3963,46 +4236,44 @@ Reaching depth 10 (`overviewEligible`) fires `store.startOverviewFinale()`
 (from a `watch(overviewEligible)` in `View4Relational`). A phased sequence
 drives `overviewFinalePhase: 'idle' | 'bright' | 'dissolve' | 'fadeout'`:
 
-1. **bright** (`OVERVIEW_BRIGHT_MS`) — the four quadrants' suggestion images
-   flash to full opacity and hold.
+1. **bright** (`OVERVIEW_BRIGHT_MS = 2300`) — the four quadrants' suggestion
+   images flash to full opacity and **hold ~2.3 s**.
 2. **dissolve** — the 16 cells fade out **all together** (no clockwise sweep)
    to 0 over `OVERVIEW_DISSOLVE_MS = 600` (`.finale-dissolve .cell` opacity
-   600ms, uniform — no per-cell `--dissolve-delay`). Same uniform flash → fade
-   shape as the VIEW_3 central-image dissolve (*Central-image click*); only the
-   end opacity differs (finale → 0; VIEW_3 preview → latent 0.05).
-3. **fadeout** (`OVERVIEW_FADEOUT_MS`) — fires the instant the cells finish
-   fading, at `OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_MS` = **1800ms**.
-   The central image **deck**, the **grid cross**, and the **corner labels**
-   all fade out **together** over 700ms: deck via `.center-anchor.deck-fadeout`,
-   cross via `.view-3.finale-fadeout::before`, corner labels via
-   `.rel.finale-fadeout .corner-label`. They leave in lockstep, leaving only
-   the gradient before the circle reveals. (The grid is then unmounted at
-   confirm — `v-if="!overviewConfirmed"` — and the cross `display:none`'d via
-   `.minimal`, both already at opacity 0, so no cut.)
+   600ms, uniform — no per-cell `--dissolve-delay`). **The central image deck
+   fades out SIMULTANEOUSLY with the cells** — `View4Relational`'s `deckHidden`
+   watch flips on the `dissolve` phase (not `fadeout`), so the deck leaves on
+   the same beat as the cells (`.center-anchor.deck-fadeout`, 700ms). Same
+   flash → fade shape as the VIEW_3 central-image dissolve; only the end opacity
+   differs (finale → 0; VIEW_3 preview → latent 0.05).
+3. **fadeout** (`OVERVIEW_FADEOUT_MS = 700`) — fires the instant the cells
+   finish fading, at `OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_MS` = **2900ms**.
+   The **grid cross** (`.view-3.finale-fadeout::before`) and the **corner
+   labels** (`.rel.finale-fadeout .corner-label`) fade out over 700ms (the deck
+   already left on `dissolve`, one step earlier). Leaves only the gradient
+   before the circle reveals. (The grid is then unmounted at confirm —
+   `v-if="!overviewConfirmed"`.)
 4. → `confirmOverview()` — `set-state('overview')` + `set-marks(navigation
    History)` (whole path lit, exception #13); the **circle of the 10
    selected images** reveals **all at once** — a single chill fade-in (no
    clock effect): the central `CentralImage` uses `reveal-stagger="0"`, so
    the per-image fade fires simultaneously after the `reveal-delay` beat.
-5. **Post-confirm finale narration → center cross** (replaces the retired
-   "See your path" button; `overviewControlsReady` is no longer used for it).
-   `FINAL_TEXT_DELAY_MS` (4 s) after the circle reveals, a two-beat rotate
-   caption plays **sequentially** across the two screens (`startFinaleNarration`
-   in `View4Relational`):
-   * sentence 1 on the **interface** centre — "Your journey has produced a
-     unique selection of ten images." (rotate style, `HOLD_INTERFACE_MS`);
-   * then, once it fades, sentence 2 on the **project** centre via
-     `set-center-caption(…, 'rotate')` — "Your images found different neighbors
-     across each proximity mode." (`HOLD_PROJECT_MS`).
-   After both (`CROSS_DELAY_MS`), a `+` **center cross** fades in at the middle
-   of the circle (warm trigger-glow, `.center-cross`) **together with a
-   call-to-action `ActionPrompt`** (`ZOOM_PATH_ACTION` = "Zoom into your journey
-   and other participants'.", `showZoomPathAction`) — the same `ActionPrompt`
-   component + styling as VIEW_2's "Select an image…" (interface-only, pinned
-   near the top), appearing once the project sentence has finished. Clicking the
-   cross hides the prompt, runs `enterSinglePathView()`, **and** shows a new
-   interface-centre rotate caption "See how you move across proximity maps and
-   other participants journeys." (`EXPLORE_TEXT`).
+   The centred circle is flattened on the **RY axis only** via the
+   `radius-scale-y` prop (0.85) on top of `radius-scale` (1.05) — RX unchanged.
+5. **Post-confirm finale narration → AUTO-ADVANCE (no cross).** The center `+`
+   cross + its `ActionPrompt` CTA are **removed**. `FINAL_TEXT_DELAY_MS = 2500`
+   after the circle reveals, a two-beat rotate caption plays **sequentially**
+   (`startFinaleNarration` in `View4Relational`); when it finishes the
+   experience **auto-advances** into explore-others — no user click:
+   * sentence 1 on the **interface** centre — "Your produced a unique journey
+     through your selection." (rotate style, `HOLD_INTERFACE_MS = 3000`);
+   * after it fades, plus a `PROJECT_SENTENCE_EXTRA_MS = 1000` extra beat,
+     sentence 2 on the **project** centre via `set-center-caption(…, 'rotate')`
+     — "Your images found different neighbors across each proximity mode."
+     (`HOLD_PROJECT_MS = 6000`);
+   * `ADVANCE_DELAY_MS = 2000` after sentence 2 clears, `advanceToExplore()`
+     fires automatically — the exact transition the retired center cross used to
+     trigger on click (`enterSinglePathView()`), minus the cross moment.
 
 Interaction is **frozen** for the whole finale: `setQuadrantHover`,
 `stepBack/Forward/jumpToHistory` early-return on `overviewFinaleActive`, and
@@ -4013,25 +4284,36 @@ latent). All timing constants live in `interaction.ts`; the two matching CSS
 durations are the dissolve transition in `RelationComponent.vue` and
 `.center-anchor.deck-fadeout` in `View4Relational.vue`.
 
-### center cross → single
+### auto-advance → single
 
-`enterSinglePathView()` (fired by the **center `+` cross**, step 5 above)
-morphs the standalone project `overview → single` behind the gradient
-render-mask (same hidden-morph choreography as `enterEntryView`) so the
-contributed path reads on the full map. It also fires `loadReplayCircles()`
-to prepare the explore-others ribbons.
+`enterSinglePathView()` (fired **automatically** by `advanceToExplore()` once
+the finale narration finishes — no longer a cross click) morphs the standalone
+project `overview → single` behind the gradient render-mask (same hidden-morph
+choreography as `enterEntryView`) so the contributed path reads on the full
+map. It also fires `loadReplayCircles()` to prepare the explore-others ribbons.
+
+`EXPLORE_TEXT` ("See how you move across the different proximity maps.") then
+shows on the **project centre only** (NOT the interface), **on one line**,
+`EXPLORE_DELAY_MS = 2000` after the morph, holding `EXPLORE_HOLD_MS = 5000`.
+Project is in `single` here, where `#center-caption` is normally gated off — so
+this caption is emitted with `allowSingle: true` (a third `set-center-caption`
+arg threaded interface → `useProjectSocket` → `commands.js`), which sets a
+`single-ok` class that lifts it past the `:not([data-state="single"])` guard
+**and** forces `white-space: nowrap` so it stays one line. The `single-ok`
+opt-out is the ONLY caption that shows in `single`.
 
 ### Explore-others — corner ribbons
 
 Once in the single-path view, four **existing Replay-proximity sets** appear
 as **L-shaped ribbons** in the corners (they were ovals; now corner ribbons).
-Each set is a random Replay neighbourhood from a new Nuxt endpoint
+Each set is a random Replay-proximity neighbourhood from a new Nuxt endpoint
 **`server/api/replay-circles.get.ts`** (`loadUmapByFile('umap_replay.json')` +
 `pickRelations`; a **diversity guard** rejects sets ≥70% overlapping an
 accepted one). The ribbons read **`umap_replay.json`** directly — decoupled
-from canvas-4's `umap_spiral.json` (`component_4`) — because they
-represent past collaborative paths, not the canvas-4 map. No persistence —
-proximity already encodes the collaborative trace.
+from canvas-4's `umap_spiral.json` (`component_4`, the Time mode) — because
+they represent past **collaborative paths** (other participants' journeys), not
+the canvas-4 map. No persistence — proximity already encodes the collaborative
+trace.
 
 Store surface (`interaction.ts`): `replayCircles`, `centeredCircleIds`,
 `centeredStack` (computed — `centeredCircleIds ?? centralStack`, so the
@@ -4054,18 +4336,47 @@ each pick.
   of every edge** (top/bottom and left/right).
 * The whole ribbon is **one click target** → `centerReplayCircle(i)`. **Hover
   is group-level**: hovering anywhere on a ribbon lifts that whole group from
-  its rest opacity (0.4) to full (`.corner-ribbon:hover .ribbon-thumb`),
+  its rest opacity (**0.36**) to full (`.corner-ribbon:hover .ribbon-thumb`),
   mimicking the relation-field reveal. **Per-image hover** (the `set-highlight`
   project forward + emphasis) is reserved for the **centred** circle only — the
   side ribbons do NOT forward to project.
+* **Hover-gated reveal (not on entry).** The ribbons do NOT appear when the
+  explore view opens. The user must first **hover a circle image**; the timer
+  is armed once, in `onCircleHover`, gated on `singlePathViewActive` (so
+  hovering the circle during the earlier finale doesn't arm it). Then:
+  `RIBBON_REVEAL_AFTER_HOVER_MS = 8000` after the first hover the corner ribbons
+  fade in (smoothly — `opacity 1100ms` cubic-bezier on `.ribbon-enter-active`),
+  and `RIBBON_CAPTION_AFTER_RIBBONS_MS = 1500` LATER a NEW **interface-only**
+  rotate caption `EXPLORE_RIBBONS_TEXT` ("Look for other previous participants
+  journey.") appears (`.final-caption`, holds `EXPLORE_HOLD_MS`, fades). Order:
+  ribbons first, caption 1.5 s after.
 * **Appear/disappear fades**: the corner ribbons are a `<TransitionGroup>`
-  (fade in on entering explore-others, fade-swap on each corner pick) and the
-  centred circle a `<Transition mode="out-in">`, so nothing pops.
-* The **centred** circle is still the `CentralImage` ellipse (`RADIUS_X_VMIN >
-  RADIUS_Y_VMIN`, wider than tall), enlarged via the `radius-scale` prop
-  (≈1.45) — bigger *radius* only, per-image size (`SCALE_OTHER/ACTIVE/HOVER`)
-  unchanged. Hovering an image in the centred circle forwards its id via
-  `store.setHighlight(id)`; the frozen path is never touched.
+  (fade in once revealed, fade-swap on each corner pick) and the centred circle
+  a `<Transition mode="out-in">`, so nothing pops.
+* The **centred** circle is the `CentralImage` ellipse, sized via `radius-scale`
+  (1.05) and flattened on the **RY axis only** via `radius-scale-y` (0.85) —
+  RX unchanged; per-image size (`SCALE_OTHER/ACTIVE/HOVER`) unchanged. Hovering
+  an image forwards its id via `store.setHighlight(id)` (the frozen path is
+  never touched). Because the path images are all **marked** (`set-marks`) at
+  the same big scale, a plain glow wouldn't make the hovered one stand out — so
+  a **marked + hovered** sprite also **scales up past the mark scale and rises
+  to top z** on the project canvas (pointsManager `hoverT` track +
+  `HOVER_EXTRA_SCALE = 0.5`, eased; z-lift instant). Scoped to marked sprites,
+  so VIEW_2 / split hovers are unaffected.
+
+### "Start over" + smooth restart
+
+A single **"Start over"** control reuses the shared **`SkipButton`** component
+(same class + parameters as the skip/next control — Neue Kabel, muted grey
+50%→full on hover), at the **bottom** centre, aligned to the bottom corner
+labels (`placement` defaults to `'bottom'`; `SkipButton` gained `label` +
+`placement` props). It appears only after the user has picked at least
+`REPLAY_PICKS_FOR_RESTART = 3` different ribbons (`store.replayPickCount`,
+incremented in `centerReplayCircle`). Click → `onStartOver`: sets a `restarting`
+flag that fades the whole VIEW_4 surface to the shared gradient backdrop
+(`.view-3.is-restarting`, `opacity 600ms`) — reading like the other view
+cross-fades — then `window.location.reload()` for a clean reset that re-boots
+the app at **VIEW_0**.
 
 ### `set-marks` and read-equal highlighting
 
@@ -4170,7 +4481,7 @@ Do not modify project, **with fourteen explicit exceptions**:
      `#container-${i+1} .corner-label`. This is now the **canonical
      reveal path**: `store.zoomCanvas(i)` emits `setCornerLabel(i, true)`
      on each VIEW_3 quadrant cross click, so SOURCE / FORM / SEMANTIC /
-     COLLABORATIVE pop **per-quadrant** on the project in lockstep with
+     TIME pop **per-quadrant** on the project in lockstep with
      the interface (which gates its own `.corner-label.visible` on
      `store.canvasZoomed[i]`), instead of all four at once at VIEW_4
      entry. `enterRelationalView` then re-asserts the all-on plural
