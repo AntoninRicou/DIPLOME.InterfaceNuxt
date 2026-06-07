@@ -505,6 +505,8 @@ in order:
 5. `set-corner-labels(false)`
 6. `set-canvas-text(i, '', '')` for `i ∈ {0,1,2,3}`
 7. `set-center-caption('')`
+8. `set-map-label(false)`
+9. `set-map-words({ form: [], source: [], time: [] })`
 
 This is the canonical session-reset handshake. No aggregate `reset-session`
 wire verb exists; composition is sufficient because the wire vocabulary is
@@ -558,6 +560,8 @@ reconnect.
 | `body[data-corner-labels]` | `set-corner-labels(false)` → attribute cleared |
 | Each `.canvas-text` `.visible` | `set-canvas-text(i, '', '')` × 4 → `.visible` removed (textContent left as-is so the text can fade out; hidden either way) |
 | `#center-caption` `.visible` + textContent | `set-center-caption('')` → class removed + text emptied |
+| `#explore-map-label` `.visible` | `set-map-label(false)` → `.visible` removed, label fades out |
+| `#map-words` `.visible` + nodes | `set-map-words({form:[],source:[],time:[]})` → fade-out guard set, `.visible` removed |
 
 Together they leave `project` indistinguishable from a cold boot: empty
 path, camera at origin, no focal target, layout in `single`, every
@@ -1988,10 +1992,14 @@ The component computes per-layer `transform` and `z-index` from
 `(i, activeIndex, ids.length, expanded)`. Three concerns are layered on
 top of each other:
 
-1. **Z-order.** The layer at `activeIndex` is elevated to `z = n + 1`
-   (top of the deck). All other layers keep their nav-history order
-   (`z = i + 1`). The active image is therefore **always visually on
-   top**, regardless of where it sits in `navigationHistory`.
+1. **Z-order.** The layer at `activeIndex` is elevated to a high fixed
+   `z = ACTIVE_COLLAPSED_Z` (100) in collapsed mode (top of the deck). All
+   other layers keep their nav-history order (`z = i + 1`, ≤ 10 since the deck
+   is capped at 10). The active image is therefore **always visually on top**,
+   regardless of where it sits in `navigationHistory`. The wide gap below the
+   active (z 100 vs ≤10) is deliberate: it lets the Semantic bridge's centre
+   connector sit at `z 50` — under the current image, over the older ones (see
+   *VIEW_4 — HOVER METADATA LABELS › Semantic image-to-image bridge*).
 2. **Stack mode** (`expanded === false`). Every layer piles at the
    **exact geometric center** via `translate(-50%, -50%) scale(1)`. The
    active sits on top via z-index; older layers sit underneath at full
@@ -2365,13 +2373,17 @@ never on the wire.
   the **centred image's** subject (inner) and the **hovered** image's
   subject (outer), even when identical (subject-based proximity often makes
   them the same).
-* **Semantic (`component_3`)** — three visual **tags** as `own · shared ·
-  own`: two of the hovered image's own distinctive tags + one tag **shared**
-  with the centre (the proximity link), on the middle line. The shared slot
-  **rotates** across the 4 cells and avoids the most-shared/dominant tag, so
-  the four labels don't all repeat e.g. `linear`. Selection is computed for
-  all 4 cells together (deterministic) in `RelationComponent.vue`'s
-  `tagSelection`.
+* **Form (`component_2`)** — three-tag `own · shared · own` rule (radial
+  words). Form images are chosen by `mirror.json` proximity (visual
+  structure); their hover tags come from its **own keyword source**
+  **`umap_formkeywords_llm.json`** (not the semantic file — `COMPONENT_TAG_FILES`
+  maps `component_2 → umap_formkeywords_llm.json`). Selection is the shared
+  `tagSelection` (own·shared·own; see below).
+* **Semantic (`component_3`)** — **NOT** own·shared·own anymore: it shows an
+  **image-to-image bridge** — the centred image's top tag and the hovered
+  neighbour's top tag, **stacked upright** at the midpoint with two **connector
+  lines** reaching each image. See *Semantic image-to-image bridge* below.
+  (`tagSelection` / own·shared·own now drives Form only.)
 * **Time (`component_4`)** — the **common year** (year-based proximity, so
   neighbours share the centre's year), a single value centred on the line.
 
@@ -2384,7 +2396,8 @@ for the component that has a source (others get empty):
 | Field | Component | Source file | Loader (`server/utils/mockRelations.ts`) |
 | --- | --- | --- | --- |
 | `subjects` / `centralSubject` | Source | `umap_subjects_embeddings2.json` | `loadSubjectMap` |
-| `tags` / `tagFreq` / `centralTags` | Semantic | `umap_semantic_llm.json` | `loadTagData` (also global tag frequency) |
+| `tags` / `tagFreq` / `centralTags` | Form | `umap_formkeywords_llm.json` | `loadTagData` (also global tag frequency) |
+| `tags` / `tagFreq` / `centralTags` | Semantic | `umap_semantic_llm.json` | `loadTagData` |
 | `years` / `centralYear` | Time | `umap_spiral.json` | `loadYearMap` |
 
 Each loader is cached by componentId and parses a per-component file map
@@ -2405,7 +2418,52 @@ the rotation). `hoveredAngleDeg` is the on-screen angle of the centre→cell
 line computed from the **real pixel vector** (the ellipse scales x by vw, y
 by vh, so it isn't the raw polar angle), flipped into `[-90°, 90°]` so glyphs
 stay upright. A dense blue `text-shadow` (the rotate-caption stroke) keeps
-the text legible over the images.
+the text legible over the images. (The Semantic bridge below overrides this
+radial layout for `component_3`.)
+
+### Semantic image-to-image bridge
+
+Semantic (`component_3`) does **not** use the radial own·shared·own words.
+Instead, on hover it draws an **image-to-image bridge** between the centred
+image (A) and the hovered neighbour (B): A's representative tag and B's
+representative tag, **stacked upright** (A over B) at the midpoint, with a
+**connector line reaching each image**. Deterministic, runtime, no LLM — just
+the existing `tags`.
+
+* **Tag selection — `bridgePairs`** (computed for ALL 4 cells together, slot
+  order, deterministic). Each cell gets a pair `{ a, b }`: `a` a tag for the
+  centred image, `b` a tag for that neighbour, with **no repetition across the
+  quadrant** (a running `used` set), `a !== b`, and each side preferring a tag
+  **not shared** with the other image (so it reads as that image's *own*
+  keyword), with graceful fallbacks when a tag pool runs short. `pickBridgeTag`
+  no longer exists — this replaced it. `capFirst` capitalises the first letter
+  of the first word of each tag for display ("grass nest" → "Grass nest").
+* **Tags layout** — the two tags render as a single `.radial-bridge` block
+  (flex column, **upright — not rotated** to the radial line), centred at
+  `frac 0.5`. (The earlier `──────` separator was removed.)
+* **Connector lines** — TWO `.radial-connector` segments (each `BRIDGE_SEG =
+  0.4` of the centre→cell distance, leaving a middle gap for the tags), 2.5px
+  thick. `bridgeLine` gives the **true** (unflipped) centre→cell direction +
+  px length; each segment translates to its `--start-frac` along the
+  `--cell-x/y` vector then rotates to that direction. Segment 1: centre →
+  A-tag; segment 2: B-tag → cell.
+* **Z-sandwich (the key bit).** The pieces live in three different layers so
+  the lines tuck behind the right images:
+  - **Tags** → the body overlay (`z 90`) — always on top, readable.
+  - **Cell segment** → `#bridge-line-layer` (a `z 0` fixed layer in View4) —
+    **below the suggestion cells** (z 1–4) so it tucks under the thumbnail.
+  - **Centre segment** → `#bridge-line-mid` (`z 50`), a target **inside
+    `.center-anchor`** (the central deck's own stacking context). The deck's
+    **active (current) layer** is bumped to `ACTIVE_COLLAPSED_Z = 100`
+    (`CentralImage.vue`, collapsed mode) while older layers stay `z ≤ 10`
+    (deck capped at 10), so `z 50` sits **between** them — the centre line is
+    **sandwiched under the current image but over the older stacked images**.
+    Works because `.central-image` / `.center-focus` aren't stacking contexts,
+    so the deck `.layer`s participate directly in `.center-anchor`'s context;
+    `.center-anchor` / `#bridge-line-mid` keep `overflow: visible` so the line
+    extends out to the tags.
+* Gated on hover (`bridgeActive`) and never renders in VIEW_3 preview; the
+  teleport targets only exist in View4.
 
 ### Hover sound
 
@@ -4397,7 +4455,7 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with fourteen explicit exceptions**:
+Do not modify project, **with seventeen explicit exceptions**:
 
 1. The user-driven path-rendering directive surface inside `project` —
    `path-segment`, `path-truncate`, and the `pathTrace` primitive they
@@ -4571,7 +4629,62 @@ Do not modify project, **with fourteen explicit exceptions**:
     interaction-logic participation. See *VIEW_4 — INTERPRETATION MODE
     (REVEAL + BLUR VEIL)*.
 
-All fourteen exceptions are scoped tightly: pure rendering / configuration
+15. The **explore-single map-name label** — `set-map-label({ active })`,
+    the `<span id="explore-map-label" class="explore-map-label">` element
+    in `project/index.html` (element MUST carry the class from HTML — base
+    styles never apply otherwise), the `.explore-map-label` / `.visible`
+    rules in `project/src/style.css` (same visual params as `.corner-label`:
+    `position: fixed; top: 0; left: 0`, `--canvas-text-size`, weight 500,
+    italic, warm cream `text-shadow`; **no** `:not([data-state="single"])`
+    guard — MADE for single), and `stateManager.setMapLabel` /
+    `updateMapLabel` (reads `MAP_LABELS[singleCurrentMap]`, gated on
+    `mapLabelActive && singleActive`). Hooked into `goTo('single')` entry,
+    the leave branch, and `tickSingleCycle`. Armed by `enterSinglePathView`
+    (`setMapLabel(true)`); disarmed on Start over + boot handshake
+    (`setMapLabel(false)`). Boot-single (VIEW_0/1) never shows it because
+    `mapLabelActive` is only set by `enterSinglePathView`.
+
+16. The **explore-single map-words overlay** — `set-map-words({ form, source, time })`,
+    the `<div id="map-words">` container + `.map-word` spans in
+    `project/index.html`, `#map-words` / `.map-word` rules in
+    `project/src/style.css`, and `project/src/mapWords.js`
+    (`createMapWords()`). Shows ~15–25 per-zone "most characteristic word"
+    labels anchored to representative sprite screen positions via
+    `app.getScreenPosition(id)` (new `app.js` method that projects world
+    `(x,y)` through the live camera). Three map types annotated: **Form**
+    (25 capitalised semantic keywords by lift, 6×6 grid),
+    **Source** (14 user-specified subjects at cluster centroids),
+    **Time** (25 evenly-spread years 1753–1986, extremes guaranteed, each
+    anchored to its year-cluster centroid). All labels use canvas-1
+    (`apps[0]`) for screen positions — canvas-4 has zero size in `single`.
+    Data served by `server/api/map-words.get.ts` (server-side, cached).
+    `mapWords.update(apps, map, settled)` runs every frame from `main.js`;
+    `stateManager.singleSettled` (= `singleActive && !transition &&
+    singleTimer <= SINGLE_HOLD`) gates so labels only show on a settled map
+    (the cycle morph is a points-morph, NOT a state transition). Sending
+    all-empty arrays triggers a smooth fade-out (`fadingOut` flag blocks
+    `update()` from re-showing); real data resets `fadingOut`. Boot
+    handshake clears with empty arrays. Also: **Form (component_2)** draws its
+    hover tags from its OWN keyword source `umap_formkeywords_llm.json` (via
+    `COMPONENT_TAG_FILES` in `mockRelations.ts`), applying the own·shared·own
+    rule on quadrant hover. (**Semantic (component_3)** no longer uses
+    own·shared·own — it shows the image-to-image bridge; see *VIEW_4 — HOVER
+    METADATA LABELS › Semantic image-to-image bridge*.)
+
+17. The **path fade-out surface** — `path-fade-out` (no payload), `actions.pathFadeOut`
+    in `commands.js`, and `pathTrace.fadeOut(durationSec)` in
+    `project/src/components/pathTrace.js`. Tweens `LineMaterial.opacity`
+    and `glowMat.uniforms.uOpacity` to 0 in the `tick` loop using an
+    ease-out curve (`t*(2-t)`), matching the 600ms CSS transitions on
+    `#map-words` and `.explore-map-label`. Called from `hideMapLabel()`
+    alongside `setMapLabel(false)` and `setMapWords({})` so the corner
+    label, map-words zone labels, and path all fade together on Start over.
+    Opacities are restored to defaults (`0.9` / `GLOW_OPACITY`) by
+    `pathTrace.clear()` (called on boot-handshake `path-clear`), so a fresh
+    session starts at full opacity. `app.js` exposes `fadeOutPath()` which
+    delegates to `pathTrace.fadeOut(0.6)`.
+
+All seventeen exceptions are scoped tightly: pure rendering / configuration
 surfaces driven by explicit `interface_nuxt` directives (or, in the
 VIEW_2 embed case, by an out-of-band `postMessage` channel for the
 canvas-pick input). No project-side interpretation, derivation, or

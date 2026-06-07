@@ -70,6 +70,12 @@ const RADIUS_Y_VMIN = 20
 const SCALE_OTHER = 0.85
 const SCALE_ACTIVE = 0.85
 const SCALE_HOVER = 0.95
+// Collapsed-deck z for the ACTIVE (current) layer — a high fixed value so it
+// stays on top while leaving a clean band below it (the deck is capped at 10,
+// so non-active layers are z ≤ 10). The Semantic bridge connector sits in that
+// band (View4's #bridge-line-mid, z 50) so it tucks UNDER the current image but
+// OVER the older ones.
+const ACTIVE_COLLAPSED_Z = 100
 
 // Which layer the cursor is over, in expanded (circle) mode. Drives the
 // `is-highlighted` emphasis and the `hover` emit. Stays null in collapsed
@@ -170,7 +176,11 @@ function layerStyle(i: number) {
     // A new active that's larger than the previous will cover them; a
     // smaller active will let the older edges show. That asymmetry is
     // intended — it IS the natural variation.
-    const z = isActive ? n + 1 : i + 1
+    // The active (current) layer jumps to a high fixed z (deck is capped at 10
+    // images, so non-active are ≤ 10) — this leaves a clean band BELOW the
+    // active image for the Semantic bridge connector to sit in (sandwiched
+    // between the current image and the older ones). See ACTIVE_COLLAPSED_Z.
+    const z = isActive ? ACTIVE_COLLAPSED_Z : i + 1
     return {
       zIndex: z,
       width: `${dims.width}vmin`,

@@ -65,19 +65,20 @@ export async function loadSubjectMap(componentId: string): Promise<Map<string, s
 }
 
 // Per-component "tags" metadata source. Like subjects, the tag list for each
-// image lives in a file (here a UMAP that carries a `tags` array of 5 visual
+// image lives in a file (a UMAP that carries a `tags` array of 5 visual
 // descriptors per point). Only components listed here expose tags.
 //
-// Both Semantic AND Form read tags from `umap_semantic_llm.json`. Semantic also
-// resolves its *proximity* from that file; Form resolves proximity from
-// `mirror.json` (visual structure) but borrows the SAME semantic tags by id —
-// the id populations match, so each Form neighbour's id is looked up in the
-// semantic file for tags. The client applies the identical own·shared·own
+// Semantic and Form each have their OWN keyword source now: Semantic reads
+// `umap_semantic_llm.json` (the same file it resolves proximity from), while
+// Form reads `umap_formkeywords_llm.json` (Form-specific keywords; id population
+// matches so each Form neighbour's id is looked up there). Form still resolves
+// its *proximity* from `mirror.json` (visual structure) — only the tag labels
+// come from this file. The client applies the identical own·shared·own
 // selection rule to both (see `tagSelection` in RelationComponent.vue), with
-// `centralTags` = the centred image's semantic tags in both cases.
+// `centralTags` = the centred image's tags from each component's own source.
 const COMPONENT_TAG_FILES: Record<string, string> = {
-  component_2: 'umap_semantic_llm.json', // Form — borrows semantic tags (ids match)
-  component_3: 'umap_semantic_llm.json', // Semantic — its own tag source
+  component_2: 'umap_formkeywords_llm.json', // Form — its own keyword source
+  component_3: 'umap_semantic_llm.json',     // Semantic — its own tag source
 }
 
 interface TagPoint {

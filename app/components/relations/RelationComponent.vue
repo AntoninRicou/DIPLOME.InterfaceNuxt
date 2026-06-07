@@ -450,11 +450,73 @@ const hoveredAngleDeg = computed(() => {
   return deg
 })
 
-// The ordered words for the hovered cell + their radial fraction. Tags take
-// priority (Semantic); otherwise the subject pair (Source). Empty → nothing
-// renders.
-const radialWords = computed<{ key: string; text: string; frac: number }[]>(() => {
+// ── Semantic image-to-image bridge tag selection ──
+// SEMANTIC ONLY. For each neighbour cell, pick a pair { a, b }: `a` = a tag for
+// the centred image (A), `b` = a tag for the neighbour (B). Deterministic,
+// computed at runtime, no LLM / embeddings / preprocessing — just the existing
+// tags. Computed for ALL 4 cells together so the quadrant has NO repetition:
+//   - every tag shown across the four pairs is unique (a running `used` set);
+//   - within a pair `a !== b`;
+//   - each side prefers a tag NOT shared with the other image (so it reads as
+//     that image's OWN keyword), falling back to shared / any when a pool runs
+//     short. Cells are processed in slot order so the assignment is stable.
+const bridgePairs = computed<Record<string, { a: string; b: string }>>(() => {
+  const tagsMap = data.value?.tags
+  if (!tagsMap) return {}
+  const central = (data.value?.centralTags ?? []).filter(Boolean)
+  const centralSet = new Set(central)
+  const ordered = [...cells.value].sort((x, y) => x.slotIdx - y.slotIdx)
+  const used = new Set<string>()
+  // Prefer: unused & not-in-other-image & ≠exclude → unused & ≠exclude → any ≠exclude.
+  const pick = (list: string[], otherSet: Set<string>, exclude?: string): string => {
+    const clean = list.filter(Boolean)
+    return (
+      clean.find((t) => !used.has(t) && !otherSet.has(t) && t !== exclude) ??
+      clean.find((t) => !used.has(t) && t !== exclude) ??
+      clean.find((t) => t !== exclude) ??
+      ''
+    )
+  }
+  const out: Record<string, { a: string; b: string }> = {}
+  for (const cell of ordered) {
+    const neighbour = tagsMap[cell.id] ?? []
+    const neighbourSet = new Set(neighbour)
+    const a = pick(central, neighbourSet) //   A = a central tag (its own, unique)
+    const b = pick(neighbour, centralSet, a) // B = a neighbour tag (its own, unique, ≠a)
+    if (a) used.add(a)
+    if (b) used.add(b)
+    out[cell.id] = { a, b }
+  }
+  return out
+})
+
+// Capitalise the first letter of the FIRST word only ("grass nest" → "Grass
+// nest") — applied to both bridge tags for display.
+const capFirst = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
+
+// The ordered words for the hovered cell + their radial fraction. Empty →
+// nothing renders. By component:
+//   Semantic (component_3) → image-to-image BRIDGE: central image's top tag
+//     (inner) · separator (middle) · hovered neighbour's top tag (outer).
+//   Form (component_2)     → own·shared·own keyword tags (`hoveredTags`).
+//   Source                 → central subject (inner) · hovered subject (outer).
+//   Time                   → the common (shared) year (centred).
+const radialWords = computed<{ key: string; text: string; frac: number; stack?: string[] }[]>(() => {
   if (!hoveredCell.value) return []
+
+  // Semantic bridge — A (central) → B (hovered neighbour). The two top tags are
+  // STACKED upright (A over B) as a 2-line block, centred at the midpoint
+  // between the centred image and the hovered neighbour. No separator, no
+  // rotation (the `stack` items render via `.radial-bridge`, not the rotated
+  // `.radial-word-inner`).
+  if (props.componentId === 'component_3') {
+    const pair = bridgePairs.value[hoveredCell.value.id]
+    const lines = pair ? [pair.a, pair.b].filter(Boolean).map(capFirst) : []
+    if (lines.length === 0) return []
+    return [{ key: 'bridge', text: '', frac: 0.5, stack: lines }]
+  }
+
+  // Form (and any other tag component): own·shared·own.
   const tags = hoveredTags.value
   if (tags?.length) {
     const fr = tags.length === 3 ? RADIAL_FRACTIONS_3 : tags.map((_, i) => (i + 1) / (tags.length + 1))
@@ -471,6 +533,29 @@ const radialWords = computed<{ key: string; text: string; frac: number }[]>(() =
   const year = data.value?.years?.[hoveredCell.value.id]
   if (year) return [{ key: `year-${year}`, text: year, frac: 0.5 }]
   return []
+})
+
+// ── Semantic bridge connector line ──
+// The bridge tags are stacked at the midpoint; a thin line runs the full
+// centre→cell axis behind them, so each extremity reaches one of the two
+// images (centre = image A, cell = image B) — making clear which two images the
+// tags relate. `hoveredAngleDeg` is flipped to keep glyphs upright, so the
+// connector needs the TRUE direction + the real px length instead.
+const bridgeActive = computed(
+  () => props.componentId === 'component_3' && radialWords.value.some((w) => w.stack),
+)
+// Each leader line spans this fraction of the centre→cell distance. The two
+// segments (centre→A-tag and B-tag→cell) leave a clear gap of (1 − 2·SEG) in
+// the middle for the stacked tags.
+const BRIDGE_SEG = 0.4
+const bridgeLine = computed<{ angle: number; dist: number }>(() => {
+  if (!hoveredCell.value) return { angle: 0, dist: 0 }
+  const pos = props.position ?? 'tl'
+  const a = cellArcAnglesByQuadrant.value[pos][hoveredCell.value.slotIdx] ?? 0
+  const theta = (QUADRANT_BASE_DEG[pos] * Math.PI) / 180 + a
+  const px = (RX * Math.cos(theta) * viewportSize.value.w) / 100
+  const py = (RY * Math.sin(theta) * viewportSize.value.h) / 100
+  return { angle: (Math.atan2(py, px) * 180) / Math.PI, dist: Math.hypot(px, py) }
 })
 
 // ── Cascade reveal direction ──
@@ -541,7 +626,9 @@ function onMouseEnter(e: MouseEvent) {
     :class="{
       'is-inert': interpretationActive,
       'is-frozen': store.overviewFinaleActive,
-      'finale-fadeout': store.overviewFinalePhase === 'fadeout',
+      // Corner labels fade on `dissolve` too (not a step later) so they leave at
+      // the SAME moment as the cells, deck, cross and the project mask.
+      'finale-fadeout': store.overviewFinalePhase === 'dissolve' || store.overviewFinalePhase === 'fadeout',
       'is-preview': preview,
       'no-entrance': suppressMountReveal,
     }"
@@ -629,9 +716,46 @@ function onMouseEnter(e: MouseEvent) {
             :key="w.key"
             class="radial-word"
             :style="{ '--frac': w.frac }"
-          ><span class="radial-word-inner">{{ w.text }}</span></span>
+          ><span v-if="w.stack" class="radial-bridge"><span
+              v-for="(line, li) in w.stack"
+              :key="li"
+              class="radial-bridge-line"
+            >{{ line }}</span></span><span
+            v-else
+            class="radial-word-inner"
+          >{{ w.text }}</span></span>
         </div>
       </Transition>
+    </Teleport>
+
+    <!-- Semantic bridge connector lines — two segments, in two layers:
+         · centre segment → `#bridge-line-mid` (inside the central deck, z 50):
+           sandwiched UNDER the current image, OVER the older stacked ones.
+         · cell segment → `#bridge-line-layer` (z 0): BELOW the suggestion cells.
+         Both leave a gap in the middle for the stacked tags (body overlay). -->
+    <Teleport v-if="bridgeActive" to="#bridge-line-mid">
+      <div
+        class="bridge-line-set"
+        :style="{ '--cell-x': hoveredOffset?.x, '--cell-y': hoveredOffset?.y }"
+        aria-hidden="true"
+      >
+        <span
+          class="radial-connector"
+          :style="{ width: `${bridgeLine.dist * BRIDGE_SEG}px`, '--start-frac': 0, '--line-angle': `${bridgeLine.angle}deg` }"
+        />
+      </div>
+    </Teleport>
+    <Teleport v-if="bridgeActive" to="#bridge-line-layer">
+      <div
+        class="bridge-line-set"
+        :style="{ '--cell-x': hoveredOffset?.x, '--cell-y': hoveredOffset?.y }"
+        aria-hidden="true"
+      >
+        <span
+          class="radial-connector"
+          :style="{ width: `${bridgeLine.dist * BRIDGE_SEG}px`, '--start-frac': 1 - BRIDGE_SEG, '--line-angle': `${bridgeLine.angle}deg` }"
+        />
+      </div>
     </Teleport>
 
     <ProximityPanel
@@ -1040,6 +1164,60 @@ function onMouseEnter(e: MouseEvent) {
     0 0 12px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
     0 0 15px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
     0 0 18px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9));
+}
+/* Semantic image-to-image bridge — A's top tag and B's top tag STACKED upright
+   (A over B) as a 2-line block, centred at the midpoint between the images. No
+   separator, and (unlike `.radial-word-inner`) NOT rotated to the radial line. */
+/* Bridge leader lines — TWO of them. Each is anchored at the viewport centre,
+   translated to its `--start-frac` along the centre→cell vector, then rotated to
+   the TRUE centre→cell direction and extended by its inline `width` (= a
+   fraction of the centre→cell px distance). So one runs centre → top tag (image
+   A) and the other bottom tag → cell (image B), with a clear gap for the tags.
+   They sit behind the stacked tags. */
+/* Fills the teleport target (#bridge-line-layer, a fixed full-viewport layer in
+   View4) so the connectors' top/left: 50% lands on the viewport centre. */
+.bridge-line-set {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.radial-connector {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  height: 1.5px;
+  background: rgba(89, 91, 84, 0.65);
+  transform-origin: 0 50%;
+  transform:
+    translate(
+      calc(var(--cell-x, 0) * var(--start-frac, 0)),
+      calc(var(--cell-y, 0) * var(--start-frac, 0))
+    )
+    rotate(var(--line-angle, 0deg));
+  pointer-events: none;
+}
+.radial-bridge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15em;
+  position: relative;
+}
+.radial-bridge-line {
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-style: italic;
+  letter-spacing: 0.015em;
+  line-height: 1.1;
+  color: #595b54;
+  text-shadow:
+    0 0 4px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 6px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 6px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 9px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 9px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 12px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
+    0 0 12px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9));
 }
 
 .subject-fade-enter-active,

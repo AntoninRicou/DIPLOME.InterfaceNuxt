@@ -259,9 +259,29 @@ export function useProjectSocket() {
     return true
   }
 
+  // Map-words overlay data — per-zone "characteristic word" labels for the
+  // explore-single Form/Source maps. `{ form: [{id,text}], source: [{id,text}] }`;
+  // empty arrays disarm it (boot hygiene).
+  function pathFadeOut(): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) return false
+    socket.emit('message', { type: 'path-fade-out', payload: {} })
+    return true
+  }
+
+  function setMapWords(words: { form: { id: string; text: string }[]; source: { id: string; text: string }[]; semantic: { id: string; text: string }[]; time: { id: string; text: string }[] }): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-map-words')
+      return false
+    }
+    socket.emit('message', { type: 'set-map-words', payload: words })
+    return true
+  }
+
   function isConnected(): boolean {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, setMask, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCanvasText, setCenterCaption, setMapLabel, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, pathFadeOut, setMask, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCanvasText, setCenterCaption, setMapLabel, setMapWords, isConnected }
 }

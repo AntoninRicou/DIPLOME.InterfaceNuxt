@@ -6,7 +6,6 @@ import CentralImage from '~/components/CentralImage.vue'
 import AtlasThumb from '~/components/AtlasThumb.vue'
 import SkipButton from '~/components/SkipButton.vue'
 import { IMAGE_CREDIT_LINES } from '~/view3/view3Interpretations'
-import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 const store = useInteractionStore()
 const { naturalDimsVmin } = useCentralImageDims()
@@ -35,36 +34,39 @@ function onCornerClick(i: number) {
 
 // Clicking the center cross enters the explore-others view. EXPLORE_TEXT shows
 // on the PROJECT centre only (one line) — NOT on the interface. The corner
-// ribbons no longer appear on the click; they wait until the user starts
-// hovering the circle (see onCircleHover) + RIBBON_REVEAL_AFTER_HOVER_MS.
+// ribbons appear on a timer, 10s after the circle reveals (see scheduleRibbons).
 const EXPLORE_TEXT = 'See how you move across the different proximity maps.'
-const EXPLORE_DELAY_MS = 2000 // beat after entering explore before the project caption appears
+// "See how…" appears after the journey sentence leaves / single map reveals
+// (SINGLE_REVEAL_MS 8250). Hand-tuned to 10750ms (+500 over the prior 10250).
+const EXPLORE_DELAY_MS = 10750 // wait before the "See how…" project caption appears
 const EXPLORE_HOLD_MS = 5000
+// After "See how…" fades out, wait this long before revealing the map keywords.
+const MAPWORDS_AFTER_SEE_HOW_MS = 500
 const ribbonsReady = ref(false)
 // Interface-only rotate caption shown AFTER the ribbons (the ribbons fade in,
 // then 1.5s later the user is told to "look for others").
 const EXPLORE_RIBBONS_TEXT = 'Look around for previous participants journey.'
 const exploreRibbonsCaptionVisible = ref(false)
-// After the user FIRST hovers a circle image, the ribbons fade in at this
-// point (8s); the "look for others" caption then appears
-// RIBBON_CAPTION_AFTER_RIBBONS_MS later. Armed once in onCircleHover.
-const RIBBON_REVEAL_AFTER_HOVER_MS = 8000
-const RIBBON_CAPTION_AFTER_RIBBONS_MS = 1500 // caption follows the ribbons by 1.5s
-let ribbonHoverTimer: ReturnType<typeof setTimeout> | null = null
-// Auto-advance into the explore-others (single-path) view. This is the exact
-// transition the center cross used to trigger on click — the cross is gone, so
-// it now runs automatically once the finale rotate narration has finished
-// (see startFinaleNarration).
+// Ribbons + "look for others" caption are time-based: the ribbons fade in 11s
+// AFTER the "See how…" caption disappears (not hover-gated), then the caption
+// follows RIBBON_CAPTION_AFTER_RIBBONS_MS later.
+const RIBBONS_AFTER_SEE_HOW_MS = 11000
+const RIBBON_CAPTION_AFTER_RIBBONS_MS = 1000 // caption follows the ribbons by 1s
+// Advance into the explore-others (single-path) view. Runs automatically from
+// startFinaleNarration — the finale goes straight here, no overview dezoom.
 function advanceToExplore() {
   store.enterSinglePathView()
   // EXPLORE_TEXT — PROJECT centre only, a beat after the advance; holds, fades.
-  // Project is in `single` here (enterSinglePathView morphs overview → single),
+  // Project is in `single` here (enterSinglePathView morphs split → single),
   // where #center-caption is normally gated off — `allowSingle` opts this one
   // caption past that guard (and `single-ok` keeps it on one line).
   finaleTimers.push(setTimeout(() => {
     store.setCenterCaption(EXPLORE_TEXT, 'rotate', true)
     finaleTimers.push(setTimeout(() => {
-      store.setCenterCaption('')
+      store.setCenterCaption('')   // "See how…" begins fading out
+      // …then the map keywords/subjects/years appear 500ms after that fade-out.
+      finaleTimers.push(setTimeout(() => { store.showMapWords() }, MAPWORDS_AFTER_SEE_HOW_MS))
+      scheduleRibbons()            // …ribbons follow 5s later, caption 1s after them
     }, EXPLORE_HOLD_MS))
   }, EXPLORE_DELAY_MS))
 }
@@ -215,19 +217,24 @@ const deckHidden = ref(false)
 watch(() => store.overviewFinalePhase, (p) => { if (p === 'dissolve') deckHidden.value = true })
 function onCenterAfterLeave() { deckHidden.value = false }
 
-// ── Post-overview finale narration + center cross ──
-// 4s after the circle reveals (overviewConfirmed), a two-beat rotate text
-// plays SEQUENTIALLY: sentence 1 on the INTERFACE (centred, rotate style),
-// then — once it's faded — sentence 2 on the PROJECT (set-center-caption). When
-// both are done, the `+` cross fades in at the centre of the circle, replacing
-// the old "See your path" button (clicking it = enterSinglePathView).
+// ── Post-overview finale narration ──
+// No overview dezoom: a short beat after the circle reveals (overviewConfirmed),
+// the project runs its masked morph straight to the single path-map, and at the
+// SAME instant the INTERFACE "unique journey" sentence fades in (gradient). The
+// project is hidden behind its render mask while it morphs, so the eye goes to
+// the interface; once the single map is revealed, "See how..." plays on the
+// project (advanceToExplore drives both the morph and that caption). The old
+// second sentence on the project ("Your images found different neighbors…") was
+// removed.
 const FINAL_INTERFACE_TEXT = 'Your produced a unique journey through your selection.'
-const FINAL_PROJECT_TEXT = 'Your images found different neighbors across each proximity maps.'
-const FINAL_TEXT_DELAY_MS = 2500   // wait before sentence 1 appears (after circle reveals)
-const HOLD_INTERFACE_MS = 3000     // sentence 1 (interface) full-opacity dwell
-const HOLD_PROJECT_MS = 6000       // sentence 2 (project) full-opacity dwell (+1s)
-const ADVANCE_DELAY_MS = 2000      // wait after sentence 2 fades before auto-advancing
-const finalCaptionVisible = ref(false) // interface sentence 1
+// Journey sentence appears 2.8s AFTER the circle (the transition itself starts
+// with the circle, at t=0 — they're decoupled).
+const JOURNEY_TEXT_DELAY_MS = 2800
+// …and fades out at the project's mask-reveal moment (enterSinglePathView:
+// FADE_IN 250 + MORPH 0 + HOLD 8000 = 8250) so the interface text leaving and
+// the project reveal correspond.
+const SINGLE_REVEAL_MS = 8250
+const finalCaptionVisible = ref(false) // interface journey sentence
 let finaleTimers: ReturnType<typeof setTimeout>[] = []
 
 // "One image left to pick" — a narrative rotate caption (same centred
@@ -259,20 +266,14 @@ watch(oneImageLeftReached, (reached) => {
 })
 
 function startFinaleNarration() {
-  const t1 = FINAL_TEXT_DELAY_MS                                   // sentence 1 (interface) in
-  const t1out = t1 + HOLD_INTERFACE_MS                             // sentence 1 out
-  const PROJECT_SENTENCE_EXTRA_MS = 1000                           // +1s wait before sentence 2 fades in
-  const t2 = t1out + ROTATE_FADE_OUT_MS + PROJECT_SENTENCE_EXTRA_MS // sentence 2 (project) in
-  const t2out = t2 + HOLD_PROJECT_MS                               // sentence 2 out
-  const tAdvance = t2out + ADVANCE_DELAY_MS                        // auto-advance (no cross)
-  finaleTimers.push(setTimeout(() => { finalCaptionVisible.value = true }, t1))
-  finaleTimers.push(setTimeout(() => { finalCaptionVisible.value = false }, t1out))
-  finaleTimers.push(setTimeout(() => { store.setCenterCaption(FINAL_PROJECT_TEXT, 'rotate') }, t2))
-  finaleTimers.push(setTimeout(() => { store.setCenterCaption('') }, t2out))
-  // Once the finale rotate narration has finished (the text disappears), the
-  // experience auto-advances into the explore-others view — the same
-  // transition the center cross used to do on click, minus the cross moment.
-  finaleTimers.push(setTimeout(() => { advanceToExplore() }, tAdvance))
+  // The project transition fires the instant the circle appears (t=0).
+  // advanceToExplore runs the masked split→single morph (enterSinglePathView)
+  // and schedules "See how…" on the project (EXPLORE_DELAY_MS later).
+  advanceToExplore()
+  // The interface journey sentence appears 1.5s after the circle, then fades out
+  // at the reveal moment so its exit corresponds to the project revealing single.
+  finaleTimers.push(setTimeout(() => { finalCaptionVisible.value = true }, JOURNEY_TEXT_DELAY_MS))
+  finaleTimers.push(setTimeout(() => { finalCaptionVisible.value = false }, SINGLE_REVEAL_MS))
 }
 
 onMounted(() => {
@@ -327,23 +328,23 @@ const centerAnchorStyle = computed(() => {
 // contributed path stays frozen exactly as drawn. null on leave clears it.
 function onCircleHover(id: string | null) {
   store.setHighlight(id)
-  // The moment the user FIRST hovers a circle image AFTER entering the explore
-  // (single-path) view, start the reveal timer: the ribbons fade in at 8s, then
-  // the "look for others" rotate caption appears 1.5s later. Gated on
-  // singlePathViewActive so hovering the circle during the earlier finale
-  // doesn't arm it. Armed once.
-  if (id && store.singlePathViewActive && !ribbonsReady.value && ribbonHoverTimer === null) {
-    ribbonHoverTimer = setTimeout(() => {
-      // Ribbons first…
-      ribbonsReady.value = true
-      // …then the caption 1.5s later.
-      finaleTimers.push(setTimeout(() => {
-        exploreRibbonsCaptionVisible.value = true
-        finaleTimers.push(setTimeout(() => { exploreRibbonsCaptionVisible.value = false }, EXPLORE_HOLD_MS))
-      }, RIBBON_CAPTION_AFTER_RIBBONS_MS))
-    }, RIBBON_REVEAL_AFTER_HOVER_MS)
-    finaleTimers.push(ribbonHoverTimer)
-  }
+  // Ribbons are no longer armed by hover — they appear on a timer 5s after the
+  // "See how…" caption disappears (see scheduleRibbons). This handler is now
+  // pure highlight forwarding.
+}
+
+// Reveal the explore-others ribbons + "Look around…" caption 5s AFTER the
+// "See how…" caption disappears (time-based, not hover-gated). Called from the
+// "See how…" clear callback in advanceToExplore.
+function scheduleRibbons() {
+  finaleTimers.push(setTimeout(() => {
+    ribbonsReady.value = true
+    // …then the caption 1s later.
+    finaleTimers.push(setTimeout(() => {
+      exploreRibbonsCaptionVisible.value = true
+      finaleTimers.push(setTimeout(() => { exploreRibbonsCaptionVisible.value = false }, EXPLORE_HOLD_MS))
+    }, RIBBON_CAPTION_AFTER_RIBBONS_MS))
+  }, RIBBONS_AFTER_SEE_HOW_MS))
 }
 
 function dotStateAt(i: number): 'current' | 'past' | 'future' | 'empty' {
@@ -386,10 +387,18 @@ function onStartOver() {
     :class="[`bg-${store.canvasBackground}`, {
       minimal: store.overviewConfirmed,
       interpreting: store.view3InterpretationMode,
-      'finale-fadeout': store.overviewFinalePhase === 'fadeout',
+      // Cross + corner labels fade on `dissolve` too (not a step later) so they
+      // leave at the SAME moment as the cells, deck and the project mask.
+      'finale-fadeout': store.overviewFinalePhase === 'dissolve' || store.overviewFinalePhase === 'fadeout',
       'is-restarting': restarting,
     }]"
   >
+    <!-- Teleport target for the Semantic quadrant's bridge connector lines.
+         Low z-index (below the cells / central image, above the gradient) so the
+         leader lines tuck UNDER the images. RelationComponent teleports its two
+         line segments in here; the bridge TAGS stay on top (body overlay). -->
+    <div id="bridge-line-layer" class="bridge-line-layer" aria-hidden="true" />
+
     <div
       v-if="store.view2ExitReason === 'auto'"
       class="reveal-overlay"
@@ -473,6 +482,12 @@ function onStartOver() {
           />
         </div>
       </Transition>
+      <!-- Teleport target for the Semantic bridge's centre-side segment. Sits in
+           the central deck's own stacking context at z 50 — BELOW the active
+           (current) image (z 100) but ABOVE the older stacked images (z ≤ 10),
+           so the line is sandwiched: tucked under the current image, over the
+           rest. (Overflow is visible, so the segment extends out to the tags.) -->
+      <div id="bridge-line-mid" class="bridge-line-mid" aria-hidden="true" />
     </div>
 
     <!-- "Explore others" — four existing Replay-proximity circles, one per
@@ -524,11 +539,13 @@ function onStartOver() {
     </p>
 
 
-    <!-- Post-overview finale: sentence 1 on the interface (centred, rotate
-         style), 4s after the circle reveals. Sentence 2 plays on the project.
-         (Interface-only here; the project sentence is set-center-caption.) -->
+    <!-- Post-overview finale journey sentence (interface, centred, rotate
+         style). Fades in (gradient) at the same instant the project starts its
+         masked morph to the single path-map, then fades out. Stays mounted
+         through singlePathViewActive (the transition flips it true) so the fade
+         can complete — its own finalCaptionVisible flag drives show/hide. -->
     <p
-      v-if="store.overviewConfirmed && !store.singlePathViewActive"
+      v-if="store.overviewConfirmed"
       class="final-caption"
       :class="{ visible: finalCaptionVisible }"
       aria-live="polite"
@@ -699,6 +716,18 @@ function onStartOver() {
      The 1px gap reveals the gradient itself as the seam between quadrants. */
 }
 
+/* Teleport target for the Semantic bridge connector lines. z-index 0 keeps it
+   ABOVE the gradient background but BELOW the suggestion cells (z 1–4), the
+   cross (z 6) and the central deck (z 60), so the leader lines render under the
+   images. Full-viewport so RelationComponent's centre-anchored connectors land
+   correctly. */
+.bridge-line-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
 .center-anchor {
   position: absolute;
   top: 50%;
@@ -788,6 +817,18 @@ function onStartOver() {
   position: absolute;
   inset: 0;
   transform-origin: center center;
+}
+
+/* Teleport target for the Semantic bridge's centre segment. z-index 50 places
+   it in the central deck's stacking context between the active layer (z 100)
+   and the older layers (z ≤ 10) — the sandwich. Fills .center-anchor so the
+   connector's 50%/50% lands on the viewport centre; overflow stays visible so
+   the line extends out toward the tags. */
+.bridge-line-mid {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
 }
 
 /* Corner "existing circle" — now an L-shaped RIBBON hugging the window's two
@@ -1153,6 +1194,13 @@ function onStartOver() {
   z-index: 11;
   display: flex;
   align-items: center;
+  /* Fade with the rest of the finale (cells/deck/cross/labels/mask) instead of
+     popping out. The finale fade-out happens on `dissolve` (before confirm), so
+     by the time `v-if` removes the strip at confirm it has already faded to 0. */
+  transition: opacity 700ms ease-out;
+}
+.view-3.finale-fadeout .history-strip {
+  opacity: 0;
 }
 .strip-steps {
   list-style: none;

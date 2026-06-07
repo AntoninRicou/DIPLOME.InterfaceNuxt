@@ -63,6 +63,15 @@ export const useInteractionStore = defineStore('interaction', () => {
   // interface-only; the redraw reuses the existing path primitives.
   const replayCircles = ref<{ anchorId: ImageId; ids: ImageId[] }[]>([])
   const centeredCircleIds = ref<ImageId[] | null>(null)
+  // Prefetched per-zone map-words (keywords/subjects/years), cached by
+  // loadMapWords and pushed to the project by showMapWords when the "See how…"
+  // caption disappears. null until the prefetch lands.
+  const mapWordsData = ref<{
+    form: { id: ImageId; text: string }[]
+    source: { id: ImageId; text: string }[]
+    semantic: { id: ImageId; text: string }[]
+    time: { id: ImageId; text: string }[]
+  } | null>(null)
   // How many corner ribbons the user has picked (each pick refreshes the
   // corners, so every pick is a different ribbon). The "Start over" control
   // appears once this reaches REPLAY_PICKS_FOR_RESTART.
@@ -484,6 +493,13 @@ export const useInteractionStore = defineStore('interaction', () => {
     overviewFinalePhase.value = 'bright'
     finaleTimers.push(setTimeout(() => {
       overviewFinalePhase.value = 'dissolve'
+      // EVERYTHING fades out at this one moment: the interface cells, deck,
+      // cross and corner labels all fade on the `dissolve` phase now (View4's
+      // finale-fadeout class is bound to dissolve||fadeout), and this fades the
+      // project's render mask in over the SAME duration so both screens go to
+      // gradient together. Mask is opaque well before confirmOverview, so the
+      // setMask(1) in enterSinglePathView is a no-op re-assert.
+      projectSocket.setMask(1, OVERVIEW_FADEOUT_MS)
     }, OVERVIEW_BRIGHT_MS))
     finaleTimers.push(setTimeout(() => {
       overviewFinalePhase.value = 'fadeout'
@@ -503,23 +519,30 @@ export const useInteractionStore = defineStore('interaction', () => {
       historyIndex: historyIndex.value,
       clientTimestamp: Date.now(),
     })
-    projectSocket.setState('overview')
+    // No overview dezoom: the finale goes straight to the single path-map (the
+    // masked overview→single morph used to follow this; now it's split→single
+    // and is driven by View4's startFinaleNarration → enterSinglePathView). We
+    // deliberately do NOT emit set-state('overview') here anymore — the user
+    // never sees the zoom-out-to-grid step.
     // "See your path" surfaces only after a beat (the user takes in the
     // circle first). Gated by overviewControlsReady, flipped 6s later.
     overviewControlsReady.value = false
     setTimeout(() => { overviewControlsReady.value = true }, SEE_YOUR_PATH_DELAY_MS)
     // Light the WHOLE contributed path on every canvas (not just the last
-    // selected image). Emitted after set-state so the marks land after
-    // goTo('overview') has set the 'big' highlight preset and cleared its
-    // transition. set-marks clears the single focus track project-side, so
+    // selected image). set-marks clears the single focus track project-side, so
     // every path image reads equally — and hover (set-highlight) then works
     // uniformly for any of them, including the last. The path itself is
     // untouched (marks never mutate pathTrace), so it stays frozen as drawn.
+    // Lit now (project still in split, where the zoomed-in camera barely shows
+    // it) and carried untouched through the morph, so it reads on the full
+    // single map the instant the mask reveals it.
     projectSocket.setMarks([...navigationHistory.value])
   }
 
-  // Hidden-morph from `overview` back to `single` on the standalone
-  // project, so the contributed path can be read on the full map.
+  // Hidden-morph to `single` on the standalone project, so the contributed
+  // path can be read on the full map. The finale skips the overview dezoom, so
+  // this now morphs straight from `split` → `single` (setState('single') works
+  // from any state); the mask choreography is unchanged.
   // Same gradient-mask choreography as `enterEntryView`: mask fades in,
   // morph runs behind the cover, HOLD absorbs socket/tick slop, mask
   // fades out to reveal the settled state. One-shot — gated by
@@ -531,10 +554,26 @@ export const useInteractionStore = defineStore('interaction', () => {
     // Load the four "existing circles" (Replay proximities) for the corners
     // so they're ready as the single-path view appears. Fire-and-forget.
     loadReplayCircles()
+    // PREFETCH the per-zone map-words (keywords on the Form map, subjects on the
+    // Source map, years on the Time map). The data is cached now but NOT shown
+    // yet — it's pushed to the project later, the moment the "See how…" caption
+    // disappears (see showMapWords / View4's advanceToExplore).
+    loadMapWords()
+    // Mask is ALREADY opaque here (faded in during the finale dissolve so the
+    // project fell out with the interface). This re-asserts it before the morph;
+    // visually a no-op (opacity 1 → 1).
     const FADE_IN_MS = 250
-    const MORPH_MS = 350
-    const HOLD_MS = 300
-    const FADE_OUT_MS = 500
+    // Instant morph behind the opaque mask — the reshape must never be seen, so
+    // it's a snap, not a tween. The mask hold is the deliberate beat.
+    const MORPH_MS = 0
+    // 8s hold: the project sits under the gradient mask (while the interface
+    // circle + journey sentence are read) before the single map is revealed.
+    const HOLD_MS = 8000
+    // Reveal fade — 700ms so the single map fades IN gently (a quick 400ms read
+    // as a brutal pop) and matches the screens' fade-OUT duration. Fires at the
+    // same instant the journey sentence fades out — project reveal and interface
+    // text leave correspond. (View4's SINGLE_REVEAL_MS = FADE_IN + MORPH + HOLD.)
+    const FADE_OUT_MS = 700
     projectSocket.setMask(1, FADE_IN_MS)
     setTimeout(() => {
       projectSocket.setState('single', MORPH_MS)
@@ -545,11 +584,10 @@ export const useInteractionStore = defineStore('interaction', () => {
     setTimeout(() => projectSocket.setMask(0, FADE_OUT_MS), FADE_IN_MS + MORPH_MS + HOLD_MS)
   }
 
-  // Fade out the single-explore map label. Called from the Start over handler
-  // so the label leaves on the same beat as the rest of the restart fade,
-  // before the page reloads. (Everything else in the restart is unchanged.)
   function hideMapLabel() {
     projectSocket.setMapLabel(false)
+    projectSocket.pathFadeOut()
+    projectSocket.setMapWords({ form: [], source: [], semantic: [], time: [] })
   }
 
   // Fetch four corner circles, each a random Replay-proximity neighbourhood
@@ -567,6 +605,34 @@ export const useInteractionStore = defineStore('interaction', () => {
     } catch (err) {
       console.warn('[interaction] loadReplayCircles failed', err)
     }
+  }
+
+  // Fetch the per-zone map-words (computed server-side, static) and CACHE them.
+  // No push here — showMapWords() pushes them to the project later so the maps
+  // only reveal their keywords/subjects/years once the "See how…" caption has
+  // left. Fire-and-forget; leaves the cache null on failure (harmless).
+  async function loadMapWords() {
+    try {
+      const res = await $fetch<{
+        form: { id: ImageId; text: string }[]
+        source: { id: ImageId; text: string }[]
+        semantic: { id: ImageId; text: string }[]
+        time: { id: ImageId; text: string }[]
+      }>('/api/map-words')
+      mapWordsData.value = { form: res?.form ?? [], source: res?.source ?? [], semantic: res?.semantic ?? [], time: res?.time ?? [] }
+    } catch (err) {
+      console.warn('[interaction] loadMapWords failed', err)
+    }
+  }
+
+  // Push the prefetched map-words to the project so the explore-single maps
+  // reveal their characteristic keywords/subjects/years. Called the instant the
+  // "See how…" caption disappears (see View4's advanceToExplore) — the metadata
+  // appears as that sentence leaves. Falls back to a fetch if the prefetch from
+  // enterSinglePathView hasn't landed yet.
+  async function showMapWords() {
+    if (!mapWordsData.value) await loadMapWords()
+    if (mapWordsData.value) projectSocket.setMapWords(mapWordsData.value)
   }
 
   // Redraw the standalone project's single-state path to an ordered list of
@@ -754,6 +820,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     startOverviewFinale,
     singlePathViewActive,
     enterSinglePathView,
+    showMapWords,
     hideMapLabel,
     replayCircles,
     centeredCircleIds,

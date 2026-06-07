@@ -4,7 +4,7 @@ import { useInteractionStore } from '~/stores/interaction'
 export default defineNuxtPlugin(() => {
   const {
     init, onRegister, setState, pathClear, setMask, setCanvasBg, setCanvasVeil,
-    setCornerLabels, setCanvasText, setCenterCaption, setMarks, setMapLabel,
+    setCornerLabels, setCanvasText, setCenterCaption, setMarks, setMapLabel, setMapWords,
   } = useProjectSocket()
   onRegister(() => {
     pathClear()
@@ -29,6 +29,9 @@ export default defineNuxtPlugin(() => {
     // Single-explore map label off on every (re)connect, so an interface
     // reload mid-explore can't leak it onto the boot single state.
     setMapLabel(false)
+    // Same for the per-zone map-words overlay — clear so onboarding's
+    // single-cycle never shows leftover labels.
+    setMapWords({ form: [], source: [], semantic: [], time: [] })
   })
   init()
 })
