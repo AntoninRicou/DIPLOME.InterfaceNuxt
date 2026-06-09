@@ -1,11 +1,42 @@
+<script setup lang="ts">
+import { useInteractionStore } from '~/stores/interaction'
+const store = useInteractionStore()
+</script>
+
 <template>
   <div>
     <NuxtRouteAnnouncer />
     <NuxtPage />
+    <!-- Interface luminosity dimmer — a full-screen black overlay above the
+         whole UI. opacity = store.interfaceDimLevel (0 = full brightness, 1 =
+         fully dark); fade time = store.interfaceDimDuration. Driven by
+         store.setInterfaceDim(level, duration). pointer-events: none so it
+         never blocks interaction. -->
+    <div
+      class="dim-overlay"
+      :style="{
+        opacity: store.interfaceDimLevel,
+        transition: `opacity ${store.interfaceDimDuration}ms linear`,
+      }"
+      aria-hidden="true"
+    />
   </div>
 </template>
 
 <style>
+/* Interface luminosity dimmer — full-screen black overlay above the whole UI.
+   opacity + transition are bound inline from the store; this rule owns the
+   static layout. z-index sits above every view-level surface (top-controls,
+   credits-panel, ribbons … all < 100). */
+.dim-overlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9999;
+}
+
 @font-face {
   font-family: 'ABC Otto';
   font-style: normal;
@@ -74,7 +105,14 @@
      layered `text-shadow` on the inner `.caption-text` span (NOT a rectangle
      behind the line). */
   --rotate-size: 1.5rem;
-  --rotate-panel-bg: rgba(170, 180, 194, 0.9);
+  /* Shared line-height for all rotating intro/finale captions (VIEW_1/2/3/4).
+     Tightened from the old per-view 1.4–1.5 so multi-line captions sit closer. */
+  --rotate-line-height: 1.2;
+  /* Warm beige stroke behind rotate text + quadrant text + centre caption
+     (replaces the former blue-grey). Deepened from f9ecd0 — at glow/stroke
+     sizes the pale cream washed out to near-white, so a more saturated tan is
+     used to actually read as beige. Keep in lockstep with project/src/style.css. */
+  --rotate-panel-bg: rgba(238, 217, 175, 0.92);
 
   /* Project-wide blue-gray text halo. Two-tier composition: 3 tight
      overlapping layers at full alpha build a solid muted blue-gray core
@@ -172,7 +210,8 @@ html {
     radial-gradient(ellipse 18% 16% at 78% 80%, rgba(55, 53, 55, 0.4) 0%, rgba(55, 53, 55, 0) 100%),
     radial-gradient(ellipse 28% 24% at 50% 50%, rgba(25, 30, 45, 0.45) 0%, rgba(25, 30, 45, 0) 100%),
     linear-gradient(170deg, #1f2538 0%, #252a3a 35%, #363438 60%, #1c2030 85%, #14182a 100%);
-  background-attachment: fixed;
+  /* Same as .bg-gradient: no `fixed` so the View_4 black backdrop doesn't flash
+     when the view cross-fades. */
   background-size: 100vw 100vh;
   background-position: 0 0;
 }
@@ -255,20 +294,20 @@ html {
      [[feedback-label-size-sync]] memory for the contract. */
   font-size: var(--label-size);
   font-weight: 500;
-  font-style: italic;
+  font-style: normal;
   letter-spacing: 0.015em;
   line-height: 1.2;
 }
 .proximity-panel-body {
   margin: 0;
-  /* ABC Otto Medium (upright), sized to match the tier-2 title
+  /* ABC Otto Regular (upright), sized to match the tier-2 title
      (--label-size). Mirrors `.canvas-text-body` in project/src/style.css —
      keep family/size/weight/line-height in lockstep. */
   font-family: 'ABC Otto', serif;
   font-size: var(--label-size);
-  font-weight: 500;
+  font-weight: 400;
   font-style: normal;
-  line-height: 1.15;
+  line-height: 1.0;
 }
 
 .bg-gradient {
@@ -283,7 +322,11 @@ html {
     radial-gradient(ellipse 18% 16% at 78% 80%, rgba(195, 188, 175, 0.5) 0%, rgba(195, 188, 175, 0) 100%),
     radial-gradient(ellipse 28% 24% at 50% 50%, rgba(170, 170, 168, 0.4) 0%, rgba(170, 170, 168, 0) 100%),
     linear-gradient(170deg, #9aa6b0 0%, #a8a8a4 35%, #b0a896 60%, #8e96a0 85%, #6f7884 100%);
-  background-attachment: fixed;
+  /* NOT `background-attachment: fixed`: views paint this and cross-fade via
+     opacity, and a fixed background on an opacity (composited) layer
+     re-rasterises against the layer box and repaints — the flash on each view
+     advance (VIEW_1→2, VIEW_3→4). Sized 100vw×100vh at 0 0, it renders
+     identically without `fixed`. The stable `body` backdrop keeps `fixed`. */
   background-size: 100vw 100vh;
   background-position: 0 0;
 }

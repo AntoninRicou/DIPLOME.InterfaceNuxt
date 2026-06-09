@@ -28,14 +28,14 @@ defineProps<{ visible: boolean; text: string }>()
 <style scoped>
 .action-prompt {
   position: fixed;
-  /* Top of the screen (rotate narration sits in the middle). Offset below
-     VIEW_3's advance `+` (the "top cross", at top: 0.22rem) so they don't
-     overlap — the prompt reads as sitting just under it. */
-  top: 2.5rem;
+  /* Aligned to the TOP corner labels: same `top: 0` + 0.75rem vertical padding
+     as the global `.corner-label`, so every prompt sits on the tl/tr label
+     line (centred horizontally). */
+  top: 0;
   left: 50%;
   transform: translateX(-50%);
   margin: 0;
-  padding: 0 1rem;
+  padding: 0.75rem 1rem;
   max-width: min(60em, 90vw);
   text-align: center;
   /* Differs from the rotating NARRATION (which is ABC Otto at --rotate-size):
@@ -45,33 +45,34 @@ defineProps<{ visible: boolean; text: string }>()
   font-weight: 500;
   font-size: 1.05rem;
   line-height: 1.4;
-  color: #595b54;
+  color: rgba(89, 91, 84, 0.5); /* #595b54 at 50% opacity */
   z-index: 13;
   pointer-events: none;
 }
 
-/* No dense glyph stroke (that read as an opaque blue backing). Instead an
-   actual GLOW sits BEHIND the text — a soft radial blue light (a blurred
-   pseudo-element, not a text-shadow, which was washing out to grey fog on the
-   light gradient). It breathes in/out + scales continuously like a loading
-   indicator. Saturated enough to read as light on the day backdrop; its edges
-   fade to transparent so it's a glow, not a filled box. */
+/* No dense glyph stroke (that read as an opaque backing). Instead an actual
+   GLOW sits BEHIND the text — a soft radial warm-beige light (f9ecd0, a
+   blurred pseudo-element, not a text-shadow). It breathes in/out + scales
+   continuously like a loading indicator; its edges fade to transparent so it's
+   a glow, not a filled box. */
 .action-prompt::before {
   content: "";
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 118%;
-  height: 340%;
+  /* Wider than tall: more length, less height than before (was 118% × 340%),
+     so the glow reads as a flat horizontal wash hugging the line. */
+  width: 120%;
+  height: 120%;
   transform: translate(-50%, -50%);
   z-index: -1;
   pointer-events: none;
   background: radial-gradient(
     ellipse at center,
-    rgba(150, 178, 248, 0.85) 0%,
-    rgba(146, 174, 240, 0.5) 32%,
-    rgba(140, 168, 228, 0.18) 58%,
-    rgba(140, 168, 228, 0) 78%
+    rgba(238, 217, 175, 0.9) 0%,
+    rgba(238, 217, 175, 0.55) 32%,
+    rgba(238, 217, 175, 0.2) 58%,
+    rgba(238, 217, 175, 0) 78%
   );
   filter: blur(6px);
   animation: action-prompt-pulse 2.4s ease-in-out infinite;

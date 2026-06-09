@@ -4,7 +4,6 @@ import { useInteractionStore } from '~/stores/interaction'
 import CentralImage from '~/components/CentralImage.vue'
 import ProximityPanel from '~/components/ProximityPanel.vue'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
-import ActionPrompt from '~/components/ActionPrompt.vue'
 import SkipButton from '~/components/SkipButton.vue'
 import { type View3ComponentId } from '~/view3/view3Interpretations'
 import { VIEW3_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
@@ -29,22 +28,22 @@ const QUADRANTS: Quadrant[] = [
   { index: 3, x: '75%', y: '75%', componentId: 'component_4' },
 ]
 
-// After the 4th cross is clicked (`allCanvasesZoomed` flips true), the
-// modes caption (middle narration) fades in 1s later, then the bottom
-// "start exploring" action prompt + the pulsing advance `+` button appear.
-// No auto-advance to VIEW_4 — the transition out is driven by the `+`.
-const CAPTION_DELAY_MS = 2000
+// After the last quadrant is hovered (`allCanvasesZoomed` flips true), the
+// "Four modes of proximity…" middle caption fades in CAPTION_DELAY_MS later,
+// then START_ACTION ("Click on your image…") follows once it fades out.
+const CAPTION_DELAY_MS = 1500
 // Middle NARRATION shown after zooming (mirrored to project). Uses the shared
 // rotate-text params (--rotate-size + fade timing + blue-grey stroke), same as
 // the rotating intro narration — see `.modes-caption` styles.
 const MODES_CAPTION = 'Four modes of proximity each suggesting new images relationing differently with the center image'
-// Bottom CALL-TO-ACTION prompts (interface-only, via ActionPrompt). The zoom
-// prompt appears after the initial settle beat (crosses appear at that same
-// moment) and hides when all four are zoomed; the start prompt appears with
-// the modes caption and hides when the user clicks the advance `+` ("top
-// cross") into the relational view.
+// CALL-TO-ACTION sentences (interface-only) — now rendered as CENTRED rotate
+// text (the .modes-caption style), the 1st and 3rd of a 3-sentence sequence
+// with MODES_CAPTION in between. ZOOM_ACTION appears after the initial settle
+// beat (with the crosses) and HOLDS until all four quadrants are zoomed;
+// START_ACTION appears after the middle caption and HOLDS until the user clicks
+// the central image into the relational view.
 const ZOOM_ACTION = 'Activate the four modes of proximity to start the journey.'
-const START_ACTION = 'Click on the central image to start exploring.'
+const START_ACTION = 'Click on your image to find new relations.'
 const showZoomAction = ref(false)
 const showStartAction = ref(false)
 
@@ -160,9 +159,9 @@ function readMsVar(name: string): number {
 onMounted(() => {
   // No intro caption anymore — after a short settle beat (the shared
   // `--rotate-appear-delay`, so the crosses don't snap in the instant the
-  // view mounts) reveal the four quadrant crosses + the ZOOM_ACTION prompt
-  // together. The view doesn't auto-advance — progress is user-driven via
-  // the crosses.
+  // view mounts) reveal the four quadrant crosses + the ZOOM_ACTION rotate
+  // sentence (1st of the centred 3-sentence sequence) together. The view
+  // doesn't auto-advance — progress is user-driven via the crosses.
   const appearDelayMs = readMsVar('--rotate-appear-delay')
   crossesReadyTimer = setTimeout(() => {
     crossesReady.value = true
@@ -173,8 +172,8 @@ onMounted(() => {
 
 watch(() => store.allCanvasesZoomed, (zoomed) => {
   if (!zoomed) return
-  // User clicked all 4 crosses — the zoom action is done: hide its bottom
-  // prompt, then schedule the modes-caption reveal.
+  // User zoomed all 4 quadrants — the zoom action is done: fade the ZOOM_ACTION
+  // rotate sentence out, then schedule the middle modes-caption reveal.
   showZoomAction.value = false
   captionTimer = setTimeout(() => {
     showModesCaption.value = true
@@ -189,10 +188,11 @@ watch(() => store.allCanvasesZoomed, (zoomed) => {
       showModesCaption.value = false
       store.setCenterCaption('')
       // (hold = MODES_HOLD_MS = VIEW3_PANEL_MS − 2s)
-      // Once it has faded out, reveal the advance `+` (top cross) and the
-      // bottom "Click on the top cross…" action prompt together (interface-
-      // only). They persist until the user clicks `+` into the relational view.
-      modesAfterTimer = setTimeout(() => { showStartAction.value = true }, ROTATE_FADE_OUT_MS)
+      // Once it has faded out, wait one extra second, then reveal the
+      // START_ACTION rotate sentence (3rd of the sequence) + the central-image
+      // pulse. They persist until the user clicks the central image into the
+      // relational view.
+      modesAfterTimer = setTimeout(() => { showStartAction.value = true }, ROTATE_FADE_OUT_MS + 1000)
     }, MODES_HOLD_MS)
   }, CAPTION_DELAY_MS)
 })
@@ -262,17 +262,24 @@ onBeforeUnmount(clearTimers)
     <!-- (The VIEW_3 entry intro caption "This image has been selected." was
          removed — VIEW_3 no longer shows a rotating intro after VIEW_2.) -->
 
+    <!-- Centred 3-sentence rotate-text sequence — all in the .modes-caption
+         style, dead-centre over the central image (pointer-events:none, so
+         clicks pass through to the central slot). Only one is visible at a time:
+           1) ZOOM_ACTION  — from mount, HOLDS until all four quadrants zoom;
+           2) MODES_CAPTION — transient middle beat (the ONLY one mirrored to
+              the project centre caption);
+           3) START_ACTION  — HOLDS until the central image is clicked (advance).
+         Sequencing is driven by the showZoomAction/showModesCaption/
+         showStartAction flags in the allCanvasesZoomed watch. -->
+    <p class="modes-caption" :class="{ visible: showZoomAction }">
+      <span class="caption-text">{{ ZOOM_ACTION }}</span>
+    </p>
     <p class="modes-caption" :class="{ visible: showModesCaption }">
       <span class="caption-text">{{ MODES_CAPTION }}</span>
     </p>
-
-    <!-- Bottom call-to-action prompts (interface-only, not mirrored). The zoom
-         prompt appears after the initial settle beat (crosses appear with
-         it) and hides when all four are zoomed; the start prompt appears just
-         after the modes caption and persists until the advance `+` is clicked
-         (VIEW_3 then unmounts). Only one is ever visible at a time. -->
-    <ActionPrompt :visible="showZoomAction" :text="ZOOM_ACTION" />
-    <ActionPrompt :visible="showStartAction" :text="START_ACTION" />
+    <p class="modes-caption" :class="{ visible: showStartAction }">
+      <span class="caption-text">{{ START_ACTION }}</span>
+    </p>
 
     <!-- Skip-to-relational button: jumps straight to VIEW_4, bypassing the
          four quadrant-cross zooms + the modes-caption. -->
@@ -454,25 +461,26 @@ onBeforeUnmount(clearTimers)
   pointer-events: none;
 }
 /* Once the start prompt shows, the central image is the click target (the
-   VIEW_3 → VIEW_4 trigger). It pulses a blue drop-shadow glow (same
-   --rotate-panel-bg family as the prompts / quadrant text) so it reads as
-   "click me", fading fully in/out. Cleared the instant it's clicked
-   (showStartAction → false). */
+   VIEW_3 → VIEW_4 trigger). It pulses a warm BEIGE drop-shadow glow (the cream
+   #f9ecd0 used by the path/step glows) so it reads as "click me", fading fully
+   in/out. Cleared the instant it's clicked (showStartAction → false). */
 .central-slot.clickable {
   pointer-events: auto;
   cursor: pointer;
-  animation: center-glow-blue 1.8s ease-in-out infinite;
+  animation: center-glow-beige 1.8s ease-in-out infinite;
 }
-@keyframes center-glow-blue {
+@keyframes center-glow-beige {
   0%, 100% {
     filter:
-      drop-shadow(0 0 0 rgba(170, 180, 194, 0))
-      drop-shadow(0 0 0 rgba(170, 180, 194, 0));
+      drop-shadow(0 0 0 rgba(249, 236, 208, 0))
+      drop-shadow(0 0 0 rgba(249, 236, 208, 0))
+      drop-shadow(0 0 0 rgba(249, 236, 208, 0));
   }
   50% {
     filter:
-      drop-shadow(0 0 10px rgba(170, 180, 194, 0.85))
-      drop-shadow(0 0 26px rgba(170, 180, 194, 0.55));
+      drop-shadow(0 0 6px rgba(249, 236, 208, 0.7))
+      drop-shadow(0 0 14px rgba(249, 236, 208, 0.4))
+      drop-shadow(0 0 26px rgba(249, 236, 208, 0.22));
   }
 }
 
@@ -511,7 +519,7 @@ onBeforeUnmount(clearTimers)
      inner .caption-text span, and the shared rotate fade timing so it reveals
      like (and in sync with) the project mirror. */
   font-size: var(--rotate-size);
-  line-height: 1.4;
+  line-height: var(--rotate-line-height);
   color: #595b54;
   pointer-events: none;
   z-index: 11;

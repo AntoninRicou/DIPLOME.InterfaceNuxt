@@ -34,24 +34,52 @@ function onCornerClick(i: number) {
 
 // Clicking the center cross enters the explore-others view. EXPLORE_TEXT shows
 // on the PROJECT centre only (one line) — NOT on the interface. The corner
-// ribbons appear on a timer, 10s after the circle reveals (see scheduleRibbons).
+// ribbons are armed by the first circle hover after the dim lifts (see onCircleHover).
 const EXPLORE_TEXT = 'See how you move across the different proximity maps.'
+// A second sentence shown right after the first, same hold duration. Everything
+// downstream (map keywords, ribbons) is pushed back by one sentence cycle so it
+// still lands after BOTH sentences have played (see advanceToExplore).
+const EXPLORE_TEXT_2 = 'Your journey went through various zone of context'
 // "See how…" appears after the journey sentence leaves / single map reveals
 // (SINGLE_REVEAL_MS 8250). Hand-tuned to 10750ms (+500 over the prior 10250).
 const EXPLORE_DELAY_MS = 10750 // wait before the "See how…" project caption appears
 const EXPLORE_HOLD_MS = 5000
+// Interface darkening while the two project sentences play — same parameters
+// as VIEW_2's narration dim (VIEW2_DIM_LEVEL / VIEW2_DIM_FADE_MS).
+const EXPLORE_DIM_LEVEL = 0.7      // 0 = full brightness, 1 = fully dark
+const EXPLORE_DIM_IN_FADE_MS = 1500 // slower darken-in (the 600ms felt abrupt)
+const EXPLORE_DIM_FADE_MS = 600    // brighten-out fade
+// Empty beat between the two sentences (lets the first fade out before the
+// second drifts in) — matches the rotate-caption fade timing.
+const EXPLORE_SENTENCE_GAP_MS = 600
 // After "See how…" fades out, wait this long before revealing the map keywords.
 const MAPWORDS_AFTER_SEE_HOW_MS = 500
 const ribbonsReady = ref(false)
+// Hovering the final circle is disabled while the interface is darkened (during
+// the narration); it unlocks once the dim lifts (end of the 2nd explore sentence).
+const circleHoverReady = ref(false)
+// Interface-only rotate caption shown the moment the dim deactivates (hover
+// unlocks) — invites the user to hover the circle.
+const EXPLORE_HOVER_HINT_TEXT = 'Hover on your images to find them on the different maps.'
+const EXPLORE_HOVER_HINT_DELAY_MS = 500 // beat after the dim lifts before the hint appears
+const exploreHoverHintVisible = ref(false)
+// Interface-only rotate caption played BEFORE the ribbons (context-setting),
+// holding the standard duration; the ribbon appearance is delayed to fit it.
+const EXPLORE_RIBBONS_INTRO_TEXT = 'Previous user also went through this corpus.'
+const exploreRibbonsIntroVisible = ref(false)
+// Empty beat between the intro caption fading out and the ribbons appearing.
+const EXPLORE_RIBBONS_INTRO_GAP_MS = 600
 // Interface-only rotate caption shown AFTER the ribbons (the ribbons fade in,
 // then 1.5s later the user is told to "look for others").
-const EXPLORE_RIBBONS_TEXT = 'Look around for previous participants journey.'
+const EXPLORE_RIBBONS_TEXT = 'Look around for their unique journey.'
 const exploreRibbonsCaptionVisible = ref(false)
-// Ribbons + "look for others" caption are time-based: the ribbons fade in 11s
-// AFTER the "See how…" caption disappears (not hover-gated), then the caption
-// follows RIBBON_CAPTION_AFTER_RIBBONS_MS later.
-const RIBBONS_AFTER_SEE_HOW_MS = 11000
+// The ribbon sequence is HOVER-gated: 7s after the user FIRST hovers a circle
+// image (which is only possible once the dim has lifted), the "Previous user…"
+// caption plays, then the ribbons, then the "look around…" caption.
+const RIBBONS_AFTER_HOVER_MS = 7000
 const RIBBON_CAPTION_AFTER_RIBBONS_MS = 1000 // caption follows the ribbons by 1s
+// Armed once on the first post-dim circle hover (see onCircleHover).
+let ribbonHoverTimer: ReturnType<typeof setTimeout> | null = null
 // Advance into the explore-others (single-path) view. Runs automatically from
 // startFinaleNarration — the finale goes straight here, no overview dezoom.
 function advanceToExplore() {
@@ -61,12 +89,27 @@ function advanceToExplore() {
   // where #center-caption is normally gated off — `allowSingle` opts this one
   // caption past that guard (and `single-ok` keeps it on one line).
   finaleTimers.push(setTimeout(() => {
-    store.setCenterCaption(EXPLORE_TEXT, 'rotate', true)
+    store.setCenterCaption(EXPLORE_TEXT, 'rotate', true)        // sentence 1 in
     finaleTimers.push(setTimeout(() => {
       store.setCenterCaption('')   // "See how…" begins fading out
-      // …then the map keywords/subjects/years appear 500ms after that fade-out.
-      finaleTimers.push(setTimeout(() => { store.showMapWords() }, MAPWORDS_AFTER_SEE_HOW_MS))
-      scheduleRibbons()            // …ribbons follow 5s later, caption 1s after them
+      // Second sentence drifts in after the fade beat, held the same duration.
+      finaleTimers.push(setTimeout(() => {
+        store.setCenterCaption(EXPLORE_TEXT_2, 'rotate', true)  // sentence 2 in
+        finaleTimers.push(setTimeout(() => {
+          store.setCenterCaption('') // sentence 2 begins fading out
+          store.setInterfaceDim(0, EXPLORE_DIM_FADE_MS)   // interface brightens back
+          circleHoverReady.value = true                   // circle hover unlocks once bright
+          // …and the hover hint appears a beat (500ms) after the brighten, holds, fades.
+          finaleTimers.push(setTimeout(() => {
+            exploreHoverHintVisible.value = true
+            finaleTimers.push(setTimeout(() => { exploreHoverHintVisible.value = false }, EXPLORE_HOLD_MS))
+          }, EXPLORE_HOVER_HINT_DELAY_MS))
+          // …then the map keywords/subjects/years appear 500ms after that fade-out.
+          finaleTimers.push(setTimeout(() => { store.showMapWords() }, MAPWORDS_AFTER_SEE_HOW_MS))
+          // The ribbon sequence is NOT scheduled here anymore — it's armed by
+          // the first circle hover (now possible since the dim just lifted).
+        }, EXPLORE_HOLD_MS))
+      }, EXPLORE_SENTENCE_GAP_MS))
     }, EXPLORE_HOLD_MS))
   }, EXPLORE_DELAY_MS))
 }
@@ -226,7 +269,7 @@ function onCenterAfterLeave() { deckHidden.value = false }
 // project (advanceToExplore drives both the morph and that caption). The old
 // second sentence on the project ("Your images found different neighbors…") was
 // removed.
-const FINAL_INTERFACE_TEXT = 'Your produced a unique journey through your selection.'
+const FINAL_INTERFACE_TEXT = 'You produced a unique journey through your selection.'
 // Journey sentence appears 2.8s AFTER the circle (the transition itself starts
 // with the circle, at t=0 — they're decoupled).
 const JOURNEY_TEXT_DELAY_MS = 2800
@@ -236,6 +279,15 @@ const JOURNEY_TEXT_DELAY_MS = 2800
 const SINGLE_REVEAL_MS = 8250
 const finalCaptionVisible = ref(false) // interface journey sentence
 let finaleTimers: ReturnType<typeof setTimeout>[] = []
+
+// VIEW_4 entry guidance — a centred rotate caption (same .final-caption style)
+// shown once when the relational view is entered (i.e. right after the user
+// clicks the central image in VIEW_3). Fades in after a short settle beat,
+// holds, fades out.
+const RELATIONAL_INTRO_TEXT = 'Explore the different quadrant image by using the click and look up for your past.'
+const RELATIONAL_INTRO_DELAY_MS = 1400 // settle beat before it drifts in
+const RELATIONAL_INTRO_HOLD_MS = 6000  // hold at full opacity before fading out
+const relationalIntroVisible = ref(false)
 
 // "One image left to pick" — a narrative rotate caption (same centred
 // rotate-text style as the finale narration) that plays once the active branch
@@ -273,12 +325,26 @@ function startFinaleNarration() {
   // The interface journey sentence appears 1.5s after the circle, then fades out
   // at the reveal moment so its exit corresponds to the project revealing single.
   finaleTimers.push(setTimeout(() => { finalCaptionVisible.value = true }, JOURNEY_TEXT_DELAY_MS))
-  finaleTimers.push(setTimeout(() => { finalCaptionVisible.value = false }, SINGLE_REVEAL_MS))
+  finaleTimers.push(setTimeout(() => {
+    finalCaptionVisible.value = false
+    // Darken the interface JUST AFTER "You produced…" leaves (same params as
+    // VIEW_2's narration dim, level 0.7 / 600ms). Held through the project
+    // narration ("See how…" + "Your journey…"); lifted at the 2nd sentence's
+    // end, which also unlocks the circle hover.
+    store.setInterfaceDim(EXPLORE_DIM_LEVEL, EXPLORE_DIM_IN_FADE_MS)
+  }, SINGLE_REVEAL_MS))
 }
 
 onMounted(() => {
   updateRibbonViewport()
   window.addEventListener('resize', updateRibbonViewport)
+  // VIEW_4 entry guidance caption: fade in after a settle beat, hold, fade out.
+  finaleTimers.push(setTimeout(() => {
+    relationalIntroVisible.value = true
+    finaleTimers.push(setTimeout(() => {
+      relationalIntroVisible.value = false
+    }, RELATIONAL_INTRO_HOLD_MS))
+  }, RELATIONAL_INTRO_DELAY_MS))
 })
 
 onBeforeUnmount(() => {
@@ -287,6 +353,7 @@ onBeforeUnmount(() => {
   if (oneLeftTimer) { clearTimeout(oneLeftTimer); oneLeftTimer = null }
   window.removeEventListener('resize', updateRibbonViewport)
   store.setCenterCaption('') // don't leave the project sentence lingering
+  store.setInterfaceDim(0, 0) // never leave the interface stuck dim
 })
 
 // ── Overview finale trigger ──
@@ -327,24 +394,38 @@ const centerAnchorStyle = computed(() => {
 // use). Pure perception — does NOT touch the path, focus, or camera, so the
 // contributed path stays frozen exactly as drawn. null on leave clears it.
 function onCircleHover(id: string | null) {
+  // Hover is disabled while the interface is darkened during the narration; it
+  // unlocks once the dim lifts (end of the 2nd explore sentence).
+  if (!circleHoverReady.value) return
   store.setHighlight(id)
-  // Ribbons are no longer armed by hover — they appear on a timer 5s after the
-  // "See how…" caption disappears (see scheduleRibbons). This handler is now
-  // pure highlight forwarding.
+  // The FIRST hover (now that the dim has lifted) arms the ribbon sequence:
+  // RIBBONS_AFTER_HOVER_MS later the "Previous user…" caption plays, then the
+  // ribbons, then "Look around…". Armed once.
+  if (id && ribbonHoverTimer === null) {
+    ribbonHoverTimer = setTimeout(() => { scheduleRibbons() }, RIBBONS_AFTER_HOVER_MS)
+    finaleTimers.push(ribbonHoverTimer)
+  }
 }
 
-// Reveal the explore-others ribbons + "Look around…" caption 5s AFTER the
-// "See how…" caption disappears (time-based, not hover-gated). Called from the
-// "See how…" clear callback in advanceToExplore.
+// Run the explore-others reveal sequence: the "Previous user…" intro caption,
+// then the ribbons, then the "Look around…" caption. Armed by the first
+// post-dim circle hover + RIBBONS_AFTER_HOVER_MS (see onCircleHover).
 function scheduleRibbons() {
+  // Intro caption first ("Previous user also went through this corpus."),
+  // held the standard duration — the ribbons wait for it to play out.
+  exploreRibbonsIntroVisible.value = true
   finaleTimers.push(setTimeout(() => {
-    ribbonsReady.value = true
-    // …then the caption 1s later.
+    exploreRibbonsIntroVisible.value = false
+    // After the intro fades, the ribbons appear…
     finaleTimers.push(setTimeout(() => {
-      exploreRibbonsCaptionVisible.value = true
-      finaleTimers.push(setTimeout(() => { exploreRibbonsCaptionVisible.value = false }, EXPLORE_HOLD_MS))
-    }, RIBBON_CAPTION_AFTER_RIBBONS_MS))
-  }, RIBBONS_AFTER_SEE_HOW_MS))
+      ribbonsReady.value = true
+      // …then the "look around…" caption 1s later.
+      finaleTimers.push(setTimeout(() => {
+        exploreRibbonsCaptionVisible.value = true
+        finaleTimers.push(setTimeout(() => { exploreRibbonsCaptionVisible.value = false }, EXPLORE_HOLD_MS))
+      }, RIBBON_CAPTION_AFTER_RIBBONS_MS))
+    }, EXPLORE_RIBBONS_INTRO_GAP_MS))
+  }, EXPLORE_HOLD_MS))
 }
 
 function dotStateAt(i: number): 'current' | 'past' | 'future' | 'empty' {
@@ -378,6 +459,18 @@ function onStartOver() {
   // (600ms label fade ≈ RESTART_FADE_MS, so it's gone before the reload).
   store.hideMapLabel()
   finaleTimers.push(setTimeout(() => { window.location.reload() }, RESTART_FADE_MS))
+}
+
+// ── Credits / about-the-project panel ──
+// A second end-of-experience control that appears alongside "Start over" in
+// the explore-others (single-path) view. Reproduces the VIEW_4 interpret-
+// control `+`, but opens its OWN centred overlay — the project credits + more
+// information. For now it just duplicates the interpretation-mode credit text
+// (IMAGE_CREDIT_LINES); the overlay is meant to grow into a scrollable grid of
+// all the images. Interface-only — nothing on the wire.
+const creditsOpen = ref(false)
+function toggleCredits() {
+  creditsOpen.value = !creditsOpen.value
 }
 </script>
 
@@ -476,6 +569,7 @@ function onStartOver() {
             :reveal-delay="400"
             :radius-scale="1.05"
             :radius-scale-y="0.85"
+            :interactive="circleHoverReady"
             source="original"
             @update:hovered="store.setCentralHovered"
             @hover="onCircleHover"
@@ -553,6 +647,26 @@ function onStartOver() {
       <span class="caption-text">{{ FINAL_INTERFACE_TEXT }}</span>
     </p>
 
+    <!-- Hover hint — interface centre only, appears as the dim deactivates. -->
+    <p
+      v-if="store.singlePathViewActive"
+      class="final-caption"
+      :class="{ visible: exploreHoverHintVisible }"
+      aria-live="polite"
+    >
+      <span class="caption-text">{{ EXPLORE_HOVER_HINT_TEXT }}</span>
+    </p>
+
+    <!-- Intro caption — interface centre only, plays BEFORE the ribbons. -->
+    <p
+      v-if="store.singlePathViewActive"
+      class="final-caption"
+      :class="{ visible: exploreRibbonsIntroVisible }"
+      aria-live="polite"
+    >
+      <span class="caption-text">{{ EXPLORE_RIBBONS_INTRO_TEXT }}</span>
+    </p>
+
     <!-- "Look for others" prompt — interface centre only, appears WITH the
          corner ribbons (4s after the user starts hovering the circle). -->
     <p
@@ -567,6 +681,17 @@ function onStartOver() {
     <!-- (No center cross anymore — the explore-others view is entered
          automatically once the finale rotate narration finishes; see
          startFinaleNarration → advanceToExplore.) -->
+
+    <!-- VIEW_4 entry guidance — centred rotate caption shown once on entry
+         (right after the central-image click in VIEW_3). Fades in, holds,
+         fades out. -->
+    <p
+      class="final-caption"
+      :class="{ visible: relationalIntroVisible }"
+      aria-live="polite"
+    >
+      <span class="caption-text">{{ RELATIONAL_INTRO_TEXT }}</span>
+    </p>
 
     <!-- "One image left to pick" — narrative rotate caption (same centred
          rotate-text style as the finale narration) played at branch depth 9
@@ -586,9 +711,33 @@ function onStartOver() {
          smooth gradient fade, then restart at VIEW_0. -->
     <SkipButton
       v-if="store.singlePathViewActive && store.replayPickCount >= REPLAY_PICKS_FOR_RESTART"
-      label="Start over"
+      label="Start Over"
       @click="onStartOver"
     />
+
+    <!-- Credits / "about the project" control — appears WITH "Start over"
+         (same gate). Reproduces the VIEW_4 interpret-control `+`; toggles a
+         centred overlay. For now the overlay duplicates the interpretation-
+         mode credit text; it will become a scrollable grid of all images. -->
+    <button
+      v-if="store.singlePathViewActive && store.replayPickCount >= REPLAY_PICKS_FOR_RESTART"
+      class="interpret-control credits-control"
+      :class="{ active: creditsOpen }"
+      :aria-pressed="creditsOpen"
+      aria-label="about the project"
+      @click="toggleCredits"
+    >
+      +
+    </button>
+
+    <div v-if="creditsOpen" class="credits-panel" @click="toggleCredits">
+      <p class="interpret-message visible credits-message">
+        <template v-for="(line, i) in IMAGE_CREDIT_LINES" :key="i">
+          <span :class="{ 'interpret-message-url': i === IMAGE_CREDIT_LINES.length - 1 }">{{ line }}</span>
+          <br v-if="i < IMAGE_CREDIT_LINES.length - 1" />
+        </template>
+      </p>
+    </div>
 
     <nav
       v-if="!store.overviewConfirmed"
@@ -680,10 +829,9 @@ function onStartOver() {
   position: absolute;
   inset: 0;
   z-index: 5;
-  /* Light beige tint — the blur does the heavy lifting for readability; the
-     tint is kept low so the cross (and images) stay faintly visible behind
-     the blur rather than being painted out. */
-  background: rgba(232, 224, 206, 0.32);
+  /* Pure blur, no tint — just a neutral blurry field (no bluish/whitening
+     cast). The blur alone separates the text from the field. */
+  background: transparent;
   backdrop-filter: blur(7px);
   -webkit-backdrop-filter: blur(7px);
   pointer-events: none;
@@ -937,6 +1085,37 @@ function onStartOver() {
   opacity: 0.8;
 }
 
+/* Credits / "about the project" control — reuses the interpret-control `+`
+   glyph styling (transparent, single glyph), pinned top-centre and shown
+   alongside "Start over" in the explore-others view. */
+.credits-control {
+  position: fixed;
+  top: 0.22rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 26;
+}
+
+/* Credits overlay — full-field beige veil hosting the centred credit text
+   (for now the duplicated IMAGE_CREDIT_LINES; later a scrollable image grid).
+   Mirrors the interpretation-mode veil. Click anywhere closes it. */
+.credits-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(232, 224, 206, 0.32);
+  backdrop-filter: blur(7px);
+}
+/* The shared .interpret-message is absolutely centred; inside the flex panel
+   it should flow normally instead. */
+.credits-message {
+  position: static;
+  transform: none;
+}
+
 .overview-control {
   position: absolute;
   bottom: 4.5rem;
@@ -958,7 +1137,7 @@ function onStartOver() {
   max-width: min(46em, 88vw);
   text-align: center;
   font-size: var(--rotate-size);
-  line-height: 1.4;
+  line-height: var(--rotate-line-height);
   color: #595b54;
   pointer-events: none;
   /* Above the centred circle deck (.center-anchor z:60) so the finale

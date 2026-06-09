@@ -7,8 +7,8 @@ import { VIEW1_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 const store = useInteractionStore()
 
 const PANELS = [
-  'Proxima is a tool allowing exploration of a visual corpus through modes of proximity.',
-  'It invites exploration through multiple simultaneous perspectives.',
+  'Proxima is a tool proposing new ways of exploring visual corpus through modes of proximity.',
+  'It allows the user to navigate through multiple simultaneous perspectives in order to create links between images.',
 ]
 // Per-view hold (4s for VIEW_1); the FADE (FADE_OUT_MS) stays shared/locked
 // with the other rotating-text components via `~/utils/rotateText`.
@@ -199,7 +199,7 @@ onBeforeUnmount(() => {
   margin: 0;
   padding: 0;
   font-size: var(--rotate-size);
-  line-height: 1.5;
+  line-height: var(--rotate-line-height);
   text-align: center;
   /* No animation here — Vue <Transition name="caption"> drives every
      fade via the caption-appear/enter/leave classes above. */

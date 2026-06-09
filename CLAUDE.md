@@ -825,6 +825,31 @@ markers in the stylesheet to remove their paint cost while transitions
 are being tuned; uncomment to restore. See *TYPOGRAPHY SYSTEM > Text
 halo* for the shared `--halo` cascade.
 
+> **⚠ TEMPORARY — Proxima title "liquid glass" (work in progress).** The VIEW_0
+> title is currently wrapped in a reusable **`LiquidGlass`** container
+> ([`app/components/LiquidGlass.vue`](app/components/LiquidGlass.vue)) — a glass
+> *container*, not a glyph effect. The glass material lives ONLY on a background
+> shape layer (`.lg-surface`: `backdrop-filter` frost + saturate + an OPTIONAL
+> `feTurbulence`→`feDisplacementMap` backdrop refraction, a diagonal specular
+> sheen `::before`, and inset/outer box-shadows for thickness, on a `radius`
+> capsule). The slotted title text renders in a SEPARATE sharp layer
+> (`.lg-content`) ABOVE the glass and is NEVER filtered/displaced — by
+> construction the backdrop-filter only samples the page behind the shape, so
+> glyphs can't distort. Current `View0Onboarding` usage:
+> `<LiquidGlass class="title-glass" radius="999px" :blur="7" :refraction="14">`
+> with the `.caption` filled **light blueish** `#aebfd4` (was `#565a52`) + a
+> soft darker-blue relief shadow.
+>
+> Caveats / knobs: `backdrop-filter: url(#…)` refraction is **Chromium-only** and
+> can render an opaque black box in some builds (hence `refraction` is a prop,
+> off-able). A `.title-test-bg` element (a real corpus image at `/images/{id}.jpg`
+> behind the title) exists **disabled** (`v-if="false"`) — it only matters for
+> *seeing* the refraction, since a flat gradient has nothing to distort. This is
+> exploratory styling, **not** final design — expect it to change or be removed.
+> (Other approaches were tried and reverted: a glyph-shaped `GlassText` that
+> clipped the backdrop into the letters, a `#glass-refract` bezel-displacement
+> filter on the text, and a 3D extruded text-shadow title.)
+
 ---
 
 ## VIEW_1 — EXPLANATION (interface_nuxt)

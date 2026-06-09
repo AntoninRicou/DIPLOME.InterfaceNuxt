@@ -121,6 +121,19 @@ export function useProjectSocket() {
     return true
   }
 
+  // Luminosity dimmer for the project render window — animates a black overlay
+  // (#render-dim) to `level` (0 = full brightness, 1 = fully dark) over
+  // `duration` ms. Same shape as setMask; a pure perceptual overlay.
+  function setDim(level: number, duration = 600): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-dim', level, duration)
+      return false
+    }
+    socket.emit('message', { type: 'set-dim', payload: { level, duration } })
+    return true
+  }
+
   function setCanvasBg(mode: 'black' | 'gradient'): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
@@ -283,5 +296,5 @@ export function useProjectSocket() {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, pathFadeOut, setMask, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCanvasText, setCenterCaption, setMapLabel, setMapWords, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, pathFadeOut, setMask, setDim, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCanvasText, setCenterCaption, setMapLabel, setMapWords, isConnected }
 }

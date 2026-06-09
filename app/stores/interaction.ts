@@ -87,6 +87,16 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   const canvasBackground = ref<'black' | 'gradient'>('gradient')
 
+  // ── Luminosity dimmers ──
+  // Two independent dim levels (0 = full brightness, 1 = fully dark), one for
+  // each layer. The interface level drives a full-screen black overlay in
+  // app.vue; the project level is mirrored to the project render window via the
+  // `set-dim` wire directive. Fire `setInterfaceDim` / `setProjectDim` at any
+  // scripted moment in the flow. `interfaceDimDuration` carries the fade time
+  // so the overlay's CSS transition matches the requested duration.
+  const interfaceDimLevel = ref(0)
+  const interfaceDimDuration = ref(600)
+
   // Set by `enterRelationalView` when the VIEW_3 → VIEW_4 trigger (the
   // "next" chevron after the four-quadrant zoom-in flow) fires, consumed by
   // View4Relational's reveal-overlay animation.
@@ -228,6 +238,21 @@ export const useInteractionStore = defineStore('interaction', () => {
     for (let i = 0; i < 4; i++) projectSocket.setCanvasText(i, '', '')
   }
 
+  // Reveal/clear a SINGLE quadrant's interpretation text on the project canvas —
+  // mirrors the VIEW_4 corner-label hover (RelationComponent). visible=true
+  // emits that quadrant's title+body; false clears it. (The `+` interpretation
+  // mode still drives all four via toggleView3Interpretation.)
+  function setQuadrantText(canvasIndex: number, visible: boolean) {
+    if (canvasIndex < 0 || canvasIndex > 3) return
+    if (visible) {
+      const componentId = `component_${canvasIndex + 1}` as View3ComponentId
+      const { title, body } = view3Interpretations[componentId]
+      projectSocket.setCanvasText(canvasIndex, title, body)
+    } else {
+      projectSocket.setCanvasText(canvasIndex, '', '')
+    }
+  }
+
   const historyHasPrevious = computed(() => historyIndex.value > 0)
   const historyHasForward = computed(
     () => historyIndex.value >= 0 && historyIndex.value < navigationHistory.value.length - 1,
@@ -259,72 +284,28 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCornerLabels(false)
     for (let i = 0; i < 4; i++) projectSocket.setCanvasText(i, '', '')
     projectSocket.setCenterCaption('')
-    // Hidden-morph on the project screen, revealed IN SYNC with the VIEW_2
-    // disperse spawn. The gradient mask fades to opaque, the single →
-    // overview change is applied INSTANTLY (MORPH_MS = 0) so the four-canvas
-    // grid snaps fully into place behind the opaque mask (the user never
-    // sees the rect-reshape morph), then the mask fades out to reveal the
-    // settled grid — but the reveal is held until the iframe's disperse
-    // burst actually begins, so the standalone project lights up at the same
-    // moment the spawning sprites appear on the interface.
-    //
-    // The reveal fires from `maybeRevealOverview()` only once BOTH are true:
-    //   - the grid has snapped (`overviewSnapDone`) — so the reveal can never
-    //     expose the in-flight snap, even if the iframe bursts very early;
-    //   - the disperse burst has begun (`disperseSpawned`, set by
-    //     `notifyDisperseSpawned()` from the iframe's `view0:dispersed`
-    //     postMessage).
-    // A fallback marks the burst "spawned" after REVEAL_FALLBACK_MS so a
-    // missing signal (embed disabled, load failure) can't hang the reveal.
+    // NOTE: the single → overview morph used to fire HERE (hidden behind the
+    // render-mask, revealed in sync with the disperse burst). It is now
+    // deferred to View2Disperse — fired AFTER the 2nd intro sentence ("It was
+    // structured…"), coordinated with the interface darkening — so the
+    // standalone project stays in `single` through the VIEW_2 intro. See
+    // `morphToOverviewGrid`.
+  }
+
+  // Morph the standalone project single → overview (the 2×2 grid), hidden
+  // behind the render-mask, then reveal it on a simple timer. Called from
+  // View2Disperse after the 2nd intro sentence, coordinated with the interface
+  // darkening (store.setInterfaceDim). Same hidden-snap choreography the old
+  // enterEntryView used, minus the disperse-spawn reveal gating (now timed).
+  function morphToOverviewGrid() {
     const FADE_IN_MS = 250
     const MORPH_DELAY_MS = 80
     const FADE_OUT_MS = 400
-    const REVEAL_FALLBACK_MS = 1800
-
-    overviewSnapDone = false
-    disperseSpawned = false
-    overviewRevealed = false
-    overviewRevealFadeMs = FADE_OUT_MS
-    if (revealFallbackTimer !== null) clearTimeout(revealFallbackTimer)
-
     projectSocket.setMask(1, FADE_IN_MS)
     setTimeout(() => {
-      projectSocket.setState('overview', 0)
-      overviewSnapDone = true
-      maybeRevealOverview()
+      projectSocket.setState('overview', 0) // instant snap behind the opaque mask
+      setTimeout(() => projectSocket.setMask(0, FADE_OUT_MS), MORPH_DELAY_MS)
     }, FADE_IN_MS + MORPH_DELAY_MS)
-    revealFallbackTimer = setTimeout(() => {
-      disperseSpawned = true
-      maybeRevealOverview()
-    }, REVEAL_FALLBACK_MS)
-  }
-
-  // ── VIEW_1 → VIEW_2 overview-reveal coordination ──
-  // The standalone project's overview reveal (mask fade-out) is gated on two
-  // independent events so it lands exactly as the VIEW_2 disperse sprites
-  // spawn — see enterEntryView.
-  let overviewSnapDone = false
-  let disperseSpawned = false
-  let overviewRevealed = false
-  let overviewRevealFadeMs = 400
-  let revealFallbackTimer: ReturnType<typeof setTimeout> | null = null
-
-  function maybeRevealOverview() {
-    if (overviewRevealed) return
-    if (!overviewSnapDone || !disperseSpawned) return
-    overviewRevealed = true
-    if (revealFallbackTimer !== null) {
-      clearTimeout(revealFallbackTimer)
-      revealFallbackTimer = null
-    }
-    projectSocket.setMask(0, overviewRevealFadeMs)
-  }
-
-  // Called by View2Disperse when the iframe posts `view0:dispersed` (the
-  // disperse burst has begun). Triggers the project overview reveal in sync.
-  function notifyDisperseSpawned() {
-    disperseSpawned = true
-    maybeRevealOverview()
   }
 
   function selectImage(id: ImageId) {
@@ -745,6 +726,19 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCanvasBg(mode)
   }
 
+  // Dim the INTERFACE (Nuxt UI layer): drives the full-screen black overlay in
+  // app.vue. level 0 = full brightness, 1 = fully dark; duration is the fade.
+  function setInterfaceDim(level: number, duration = 600) {
+    interfaceDimDuration.value = Math.max(0, duration)
+    interfaceDimLevel.value = Math.max(0, Math.min(1, level))
+  }
+
+  // Dim the PROJECT (Three.js render window): mirrored over the wire to the
+  // #render-dim overlay. Same semantics as setInterfaceDim.
+  function setProjectDim(level: number, duration = 600) {
+    projectSocket.setDim(Math.max(0, Math.min(1, level)), Math.max(0, duration))
+  }
+
   // Mirror VIEW_3's centred modes-caption on the standalone project's
   // viewport. Called from the 1s timer after the fourth quadrant cross.
   // Pass empty string to clear (done in `enterRelationalView` on VIEW_4
@@ -804,12 +798,13 @@ export const useInteractionStore = defineStore('interaction', () => {
     relationsPreRevealed,
     zoomCanvas,
     clearCanvasTexts,
+    setQuadrantText,
     view4HoveredQuadrant,
     setQuadrantHover,
     historyHasPrevious,
     historyHasForward,
     enterEntryView,
-    notifyDisperseSpawned,
+    morphToOverviewGrid,
     selectImage,
     enterRelationalView,
     activateCentral,
@@ -834,6 +829,10 @@ export const useInteractionStore = defineStore('interaction', () => {
     toggleView3Interpretation,
     canvasBackground,
     setCanvasBackground,
+    interfaceDimLevel,
+    interfaceDimDuration,
+    setInterfaceDim,
+    setProjectDim,
     setCenterCaption,
     setHighlight,
     setGhostPath,

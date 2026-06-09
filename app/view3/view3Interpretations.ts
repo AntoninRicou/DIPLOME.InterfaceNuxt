@@ -43,28 +43,31 @@ export const IMAGE_CREDIT_LINES: readonly string[] = [
 ]
 
 export const view3Interpretations: Record<View3ComponentId, View3Interpretation> = {
+  // Bodies break the line before "through" (\n) — honoured on the project via
+  // `white-space: pre-line` on `.canvas-text-body`; the interface collapses the
+  // \n to a space (default white-space), so only the project breaks.
   component_1: {
     title: 'Source tracing',
     body:
-      'These images are organized through shared book sources and subject ' +
-      'metadata derived from the centered image.',
+      'These images are sharing proximity\n' +
+      'through book sources and subject metadatas in relation to the centered image.',
   },
   component_2: {
     title: 'Form mirroring',
     body:
-      'These images are organized through shared visual structural and ' +
-      'compositional relations derived from the centered image.',
+      'These images are sharing proximity\n' +
+      'through visual and compositional connections in relation to the centered image.',
   },
   component_3: {
     title: 'Semantic shifting',
     body:
-      'These images are organized through shared semantic proximity ' +
-      'derived from the centered image.',
+      'These images are sharing proximity\n' +
+      'through semantic connections in relation to the centered image.',
   },
   component_4: {
     title: 'Time drifting',
     body:
-      'These images are organized through temporal proximity across' +
-      'a time-based structure derived from the centered image.',
+      'These images are sharing proximity\n' +
+      'through temporal metadatas in relation to the centered image.',
   },
 }

@@ -65,11 +65,10 @@ const RADIUS_Y_VMIN = 20
 // Set to 1.0 so a ring image renders at the SAME size as the collapsed
 // central-image deck (which draws at natural dims, scale 1) — the circle is
 // the same images as the centre, just in the ring configuration. Overlap on
-// the ring is accepted (the images are full-size). SCALE_HOVER lifts the
-// hovered one slightly for feedback.
+// the ring is accepted (the images are full-size). Hover does NOT scale the
+// image (a zoom reads as "clickable") — it only lifts z + glows.
 const SCALE_OTHER = 0.85
 const SCALE_ACTIVE = 0.85
-const SCALE_HOVER = 0.95
 // Collapsed-deck z for the ACTIVE (current) layer — a high fixed value so it
 // stays on top while leaving a clean band below it (the deck is capped at 10,
 // so non-active layers are z ≤ 10). The Semantic bridge connector sits in that
@@ -195,7 +194,10 @@ function layerStyle(i: number) {
   const angle = -Math.PI / 2 + (i / n) * Math.PI * 2
   const x = Math.cos(angle) * RADIUS_X_VMIN * props.radiusScale
   const y = Math.sin(angle) * RADIUS_Y_VMIN * props.radiusScale * props.radiusScaleY
-  const scale = isHovered ? SCALE_HOVER : isActive ? SCALE_ACTIVE : SCALE_OTHER
+  // No hover zoom on the ring — a scale-up reads as "clickable", which these
+  // images are not. Hover still lifts the layer to top z (below) and glows
+  // (.is-highlighted); only the size stays put.
+  const scale = isActive ? SCALE_ACTIVE : SCALE_OTHER
   // Overlap order on the ring: FIRST image on top, LAST below (z = n - i, so
   // i=0 → highest). No active-on-top lift here (that would put the last
   // selected on top, breaking the order); only the hovered layer lifts above

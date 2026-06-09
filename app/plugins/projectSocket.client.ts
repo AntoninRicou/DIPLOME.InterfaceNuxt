@@ -3,13 +3,16 @@ import { useInteractionStore } from '~/stores/interaction'
 
 export default defineNuxtPlugin(() => {
   const {
-    init, onRegister, setState, pathClear, setMask, setCanvasBg, setCanvasVeil,
+    init, onRegister, setState, pathClear, setMask, setDim, setCanvasBg, setCanvasVeil,
     setCornerLabels, setCanvasText, setCenterCaption, setMarks, setMapLabel, setMapWords,
   } = useProjectSocket()
   onRegister(() => {
     pathClear()
     setState('single')
     setMask(0, 0)
+    // Defensive: luminosity dimmer off on every (re)connect (a reload mid-dim
+    // must not leave the project render window darkened).
+    setDim(0, 0)
     // Defensive: interpretation veil off on every (re)connect.
     setCanvasVeil(false)
     const store = useInteractionStore()

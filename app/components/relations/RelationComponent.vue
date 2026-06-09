@@ -422,16 +422,10 @@ const hoveredTags = computed(() =>
   hoveredCell.value ? (tagSelection.value[hoveredCell.value.id] ?? null) : null,
 )
 
-// ── Radial word layout (Source + Semantic) ──
-// The hover words are spread ALONG the radial line from the centred image out
-// to the hovered cell (same angle the cell sits at) and rotated to follow that
-// line — a "beads on the radius" effect. `--frac` is each word's distance along
-// the centre→cell vector (0 = centre, 1 = cell).
-//   Semantic     → own (inner) · shared (middle) · own (outer)
-//   Source       → central image's subject (inner) · hovered subject (outer)
-//   Time → the common (shared) year, single value at the middle
-const RADIAL_FRACTIONS_3 = [0.32, 0.5, 0.68] // own · shared · own
-const RADIAL_FRACTIONS_2 = [0.4, 0.6] // central subject · hovered subject
+// ── Hover bridge angle ──
+// All components now render the STACKED upright bridge block at the centre→cell
+// midpoint (frac 0.5); the connector line uses the true direction (bridgeLine).
+// `hoveredAngleDeg` is retained only for the `.radial-words` container var.
 
 // On-screen angle of the centre→cell line, in degrees, computed from the real
 // pixel vector (the ellipse semi-axes scale x by vw and y by vh, so the screen
@@ -494,6 +488,11 @@ const bridgePairs = computed<Record<string, { a: string; b: string }>>(() => {
 // nest") — applied to both bridge tags for display.
 const capFirst = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
 
+// Normalise a long Source subject for the bridge: keep up to the first ';'
+// (drops trailing alternate subjects) but keep '--' subdivisions, e.g.
+// "Embryology -- Insects; Embryology" → "Embryology -- Insects".
+const normSubject = (s: string) => capFirst((s ?? '').split(';')[0]!.trim())
+
 // The ordered words for the hovered cell + their radial fraction. Empty →
 // nothing renders. By component:
 //   Semantic (component_3) → image-to-image BRIDGE: central image's top tag
@@ -503,36 +502,37 @@ const capFirst = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
 //   Time                   → the common (shared) year (centred).
 const radialWords = computed<{ key: string; text: string; frac: number; stack?: string[] }[]>(() => {
   if (!hoveredCell.value) return []
+  const id = hoveredCell.value.id
 
-  // Semantic bridge — A (central) → B (hovered neighbour). The two top tags are
-  // STACKED upright (A over B) as a 2-line block, centred at the midpoint
-  // between the centred image and the hovered neighbour. No separator, no
-  // rotation (the `stack` items render via `.radial-bridge`, not the rotated
-  // `.radial-word-inner`).
-  if (props.componentId === 'component_3') {
-    const pair = bridgePairs.value[hoveredCell.value.id]
-    const lines = pair ? [pair.a, pair.b].filter(Boolean).map(capFirst) : []
-    if (lines.length === 0) return []
-    return [{ key: 'bridge', text: '', frac: 0.5, stack: lines }]
+  // Unified bridge for ALL four components: a STACKED upright block (no radial
+  // rotation — reads horizontal and right-side-up in every quadrant) centred at
+  // the midpoint between the centred image and the hovered neighbour, with a
+  // connector line running under both images (see bridgeActive). Only the
+  // content differs:
+  //   Source   (1) → central subject  / hovered subject  (normalised; both kept even if equal)
+  //   Form     (2) → own · shared · own keyword sandwich (3 lines)
+  //   Semantic (3) → central tag      / hovered tag      (bridgePairs)
+  //   Time     (4) → central year     / hovered year
+  let lines: string[] = []
+  if (props.componentId === 'component_2') {
+    lines = (hoveredTags.value ?? []).filter(Boolean).map(capFirst)
+  } else if (props.componentId === 'component_3') {
+    const pair = bridgePairs.value[id]
+    lines = pair ? [pair.a, pair.b].filter(Boolean).map(capFirst) : []
+  } else if (props.componentId === 'component_1') {
+    const both = [data.value?.centralSubject, hoveredSubject.value]
+      .filter(Boolean)
+      .map((s) => normSubject(s as string))
+    // Collapse to ONE line when both subjects are identical (the common case);
+    // show both only when they actually differ.
+    lines = both.length === 2 && both[0] === both[1] ? [both[0]!] : both
+  } else if (props.componentId === 'component_4') {
+    const both = [data.value?.centralYear, data.value?.years?.[id]].filter(Boolean) as string[]
+    // Same as Source: one line when the years match, both when they differ.
+    lines = both.length === 2 && both[0] === both[1] ? [both[0]!] : both
   }
 
-  // Form (and any other tag component): own·shared·own.
-  const tags = hoveredTags.value
-  if (tags?.length) {
-    const fr = tags.length === 3 ? RADIAL_FRACTIONS_3 : tags.map((_, i) => (i + 1) / (tags.length + 1))
-    return tags.map((t, i) => ({ key: `tag-${i}-${t}`, text: t, frac: fr[i] ?? 0.5 }))
-  }
-  const hov = hoveredSubject.value
-  if (hov) {
-    const central = data.value?.centralSubject
-    const words = central ? [central, hov] : [hov]
-    const fr = words.length === 2 ? RADIAL_FRACTIONS_2 : [0.5]
-    return words.map((t, i) => ({ key: `subj-${i}`, text: t, frac: fr[i] ?? 0.5 }))
-  }
-  // Time: the common year (single value, centred on the line).
-  const year = data.value?.years?.[hoveredCell.value.id]
-  if (year) return [{ key: `year-${year}`, text: year, frac: 0.5 }]
-  return []
+  return lines.length ? [{ key: 'bridge', text: '', frac: 0.5, stack: lines }] : []
 })
 
 // ── Semantic bridge connector line ──
@@ -541,9 +541,10 @@ const radialWords = computed<{ key: string; text: string; frac: number; stack?: 
 // images (centre = image A, cell = image B) — making clear which two images the
 // tags relate. `hoveredAngleDeg` is flipped to keep glyphs upright, so the
 // connector needs the TRUE direction + the real px length instead.
-const bridgeActive = computed(
-  () => props.componentId === 'component_3' && radialWords.value.some((w) => w.stack),
-)
+// Bridge connector lines now render for ALL components (every one uses the
+// stacked-bridge layout), so this is true whenever the hovered cell produced a
+// stack block.
+const bridgeActive = computed(() => radialWords.value.some((w) => w.stack))
 // Each leader line spans this fraction of the centre→cell distance. The two
 // segments (centre→A-tag and B-tag→cell) leave a clear gap of (1 − 2·SEG) in
 // the middle for the stacked tags.
@@ -618,6 +619,35 @@ function onMouseEnter(e: MouseEvent) {
   // .rel — would race the sibling-mouseenter on quadrant-to-quadrant.
   store.setQuadrantHover(QUADRANT_INDEX[props.position ?? 'tl'])
 }
+
+// ── Corner-label hover → reveal THIS quadrant's interpretation text ──
+// Hovering the corner label (VIEW_4 only) shows this quadrant's title+body on
+// the interface (the .interpretation-panel) AND mirrors it on the matching
+// project canvas (store.setQuadrantText → set-canvas-text). On leave it hides /
+// clears. Skipped on the project side while the `+` interpretation mode is on
+// (it already drives all four), so the two paths never clobber each other.
+const labelHovered = ref(false)
+function onLabelEnter() {
+  if (props.preview) return
+  labelHovered.value = true
+  if (!store.view3InterpretationMode) {
+    store.setQuadrantText(QUADRANT_INDEX[props.position ?? 'tl'], true)
+  }
+}
+function onLabelLeave() {
+  if (!labelHovered.value) return
+  labelHovered.value = false
+  if (!store.view3InterpretationMode) {
+    store.setQuadrantText(QUADRANT_INDEX[props.position ?? 'tl'], false)
+  }
+}
+// Safety: if the component unmounts while the label is still hovered (e.g. a
+// view transition), clear its project text so it can't linger.
+onUnmounted(() => {
+  if (labelHovered.value && !store.view3InterpretationMode) {
+    store.setQuadrantText(QUADRANT_INDEX[props.position ?? 'tl'], false)
+  }
+})
 </script>
 
 <template>
@@ -638,7 +668,13 @@ function onMouseEnter(e: MouseEvent) {
   >
     <!-- VIEW_3 (preview) owns its own corner labels in View3Transition; this
          component's label is only rendered in the relational view. -->
-    <span v-if="!preview" class="corner-label" :data-position="position ?? 'tl'">{{ label }}</span>
+    <span
+      v-if="!preview"
+      class="corner-label"
+      :data-position="position ?? 'tl'"
+      @mouseenter="onLabelEnter"
+      @mouseleave="onLabelLeave"
+    >{{ label }}</span>
 
     <div v-if="!centralImageId" class="status">no central image</div>
     <!-- Loading is silent — no "querying…" text. The empty branch keeps the
@@ -758,8 +794,19 @@ function onMouseEnter(e: MouseEvent) {
       </div>
     </Teleport>
 
+    <!-- Per-quadrant beige blur veil shown while the corner label is hovered —
+         blurs THIS quadrant's cells/backdrop below the interpretation text
+         (same look as the `+` interpretation veil, scoped to one quadrant). Sits
+         below the text panel (z:6), above the cells (z:1–4). -->
+    <div
+      v-if="!preview"
+      class="quadrant-veil"
+      :class="{ visible: labelHovered && !interpretationActive }"
+      aria-hidden="true"
+    />
+
     <ProximityPanel
-      v-if="interpretationActive && interpretation"
+      v-if="interpretation && (interpretationActive || labelHovered)"
       class="interpretation-panel"
       :data-align="panelAlign"
       :component-id="componentId"
@@ -819,6 +866,9 @@ function onMouseEnter(e: MouseEvent) {
      z: 5) so the Source / Form / Semantic / Time tags stay crisp
      and visible in interpretation mode rather than being blurred away. */
   z-index: 6;
+  /* Hoverable in VIEW_4 (the global `.corner-label` is pointer-events:none):
+     hovering it reveals this quadrant's interpretation text on both screens. */
+  pointer-events: auto;
 }
 
 /* Overview finale `fadeout` phase — the corner labels fade out TOGETHER with
@@ -1152,18 +1202,18 @@ function onMouseEnter(e: MouseEvent) {
   color: #595b54;
   transform: rotate(var(--angle, 0deg));
   transform-origin: center center;
-  /* Opaque blue backing hugging the glyphs — same layered stroke as the
+  /* Opaque beige backing hugging the glyphs — same layered stroke as the
      rotate captions (.final-caption .caption-text in View4Relational). */
   text-shadow:
-    0 0 4px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 6px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 6px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 9px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 9px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 12px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 12px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 15px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 18px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9));
+    0 0 4px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 6px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 6px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 9px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 9px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 12px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 12px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 15px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 18px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9));
 }
 /* Semantic image-to-image bridge — A's top tag and B's top tag STACKED upright
    (A over B) as a 2-line block, centred at the midpoint between the images. No
@@ -1211,13 +1261,13 @@ function onMouseEnter(e: MouseEvent) {
   line-height: 1.1;
   color: #595b54;
   text-shadow:
-    0 0 4px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 6px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 6px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 9px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 9px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 12px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9)),
-    0 0 12px var(--rotate-panel-bg, rgba(170, 180, 194, 0.9));
+    0 0 4px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 6px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 6px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 9px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 9px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 12px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
+    0 0 12px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9));
 }
 
 .subject-fade-enter-active,
@@ -1242,6 +1292,26 @@ function onMouseEnter(e: MouseEvent) {
   transform: translate(-50%, -50%);
   /* above the beige veil (z: 5) so the text reads over the blurred field */
   z-index: 6;
+}
+
+/* Per-quadrant blur veil (corner-label hover). Same recipe as View4's
+   full-field `.interpret-veil`, scoped to this `.rel` (clipped by its
+   overflow:hidden). Below the interpretation text (z:6), above the cells
+   (z:1–4). Fades on opacity so the blur eases in/out. */
+.quadrant-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  /* Pure blur, no tint — neutral blurry field (no bluish/whitening cast). */
+  background: transparent;
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 240ms ease-out;
+}
+.quadrant-veil.visible {
+  opacity: 1;
 }
 
 /* optional alignment override from the data layer; default is centered */
