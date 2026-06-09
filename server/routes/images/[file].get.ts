@@ -10,7 +10,7 @@ import { resolve, relative, basename, extname } from 'node:path'
 const IMAGES_DIR =
   ['project/datas/images', 'feedback-three-map/datas/images']
     .map((p) => resolve(process.cwd(), '..', p))
-    .find((p) => existsSync(p)) ?? resolve(process.cwd(), '..', 'project', 'datas', 'images')
+    .find((p) => existsSync(p)) ?? resolve(process.cwd(), '..', 'DIPLOME.Feedback', 'datas', 'images')
 
 const CONTENT_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',

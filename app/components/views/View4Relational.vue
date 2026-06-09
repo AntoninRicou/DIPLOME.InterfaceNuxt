@@ -35,7 +35,7 @@ function onCornerClick(i: number) {
 // Clicking the center cross enters the explore-others view. EXPLORE_TEXT shows
 // on the PROJECT centre only (one line) — NOT on the interface. The corner
 // ribbons are armed by the first circle hover after the dim lifts (see onCircleHover).
-const EXPLORE_TEXT = 'See how you move across the different proximity maps.'
+const EXPLORE_TEXT = 'See how you move across the different relational maps.'
 // A second sentence shown right after the first, same hold duration. Everything
 // downstream (map keywords, ribbons) is pushed back by one sentence cycle so it
 // still lands after BOTH sentences have played (see advanceToExplore).
