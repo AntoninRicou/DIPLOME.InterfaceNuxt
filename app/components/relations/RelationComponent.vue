@@ -577,6 +577,25 @@ const QUADRANT_INDEX: Record<'tl' | 'tr' | 'bl' | 'br', number> = {
   tl: 0, tr: 1, bl: 2, br: 3,
 }
 
+// Per-quadrant palette. MIRRORS the project path palette QUADRANT_COLORS in
+// DIPLOME.Feedback/src/pathColors.js — KEEP IN LOCKSTEP. Indexed [tl, tr, bl, br]
+// = Source / Form / Semantic / Time: orange / sky-blue / green / pink.
+// `_LINE` (0.85 alpha) colours the bridge connector line; `_SOLID` (full) is
+// the corner-label colour on quadrant hover.
+const QUADRANT_LINE_COLORS = [
+  'rgba(240, 160, 92, 0.85)',  // tl — Source   — pastel orange   (#f0a05c)
+  'rgba(108, 180, 230, 0.85)', // tr — Form     — pastel sky blue (#6cb4e6)
+  'rgba(116, 207, 146, 0.85)', // bl — Semantic — pastel green    (#74cf92)
+  'rgba(239, 130, 172, 0.85)', // br — Time     — pastel pink     (#ef82ac)
+]
+const QUADRANT_SOLID_COLORS = ['#f0a05c', '#6cb4e6', '#74cf92', '#ef82ac']
+const connectorColor = computed(
+  () => QUADRANT_LINE_COLORS[QUADRANT_INDEX[props.position ?? 'tl']],
+)
+const quadrantColor = computed(
+  () => QUADRANT_SOLID_COLORS[QUADRANT_INDEX[props.position ?? 'tl']],
+)
+
 // In preview mode (VIEW_3) the cells stay hidden until this quadrant's cross
 // is clicked (its canvasZoomed flag flips). Outside preview the cells are
 // always "revealed" (their visibility follows the normal latent/hover
@@ -717,7 +736,6 @@ onUnmounted(() => {
           '--cell-w': cellWidthVmin(cell.id),
           '--enter-delay': enterDelay(cell.slotIdx),
         }"
-        :title="cell.id"
         @click="onRelatedClick(cell.id)"
         @mouseenter="onCellHover(cell.id, cell.slotIdx)"
         @mouseleave="onCellLeave"
@@ -744,6 +762,7 @@ onUnmounted(() => {
             '--cell-x': hoveredOffset?.x,
             '--cell-y': hoveredOffset?.y,
             '--angle': `${hoveredAngleDeg}deg`,
+            '--quadrant-color': quadrantColor,
           }"
           aria-hidden="true"
         >
@@ -777,7 +796,7 @@ onUnmounted(() => {
       >
         <span
           class="radial-connector"
-          :style="{ width: `${bridgeLine.dist * BRIDGE_SEG}px`, '--start-frac': 0, '--line-angle': `${bridgeLine.angle}deg` }"
+          :style="{ width: `${bridgeLine.dist * BRIDGE_SEG}px`, '--start-frac': 0, '--line-angle': `${bridgeLine.angle}deg`, '--connector-color': connectorColor }"
         />
       </div>
     </Teleport>
@@ -789,7 +808,7 @@ onUnmounted(() => {
       >
         <span
           class="radial-connector"
-          :style="{ width: `${bridgeLine.dist * BRIDGE_SEG}px`, '--start-frac': 1 - BRIDGE_SEG, '--line-angle': `${bridgeLine.angle}deg` }"
+          :style="{ width: `${bridgeLine.dist * BRIDGE_SEG}px`, '--start-frac': 1 - BRIDGE_SEG, '--line-angle': `${bridgeLine.angle}deg`, '--connector-color': connectorColor }"
         />
       </div>
     </Teleport>
@@ -870,6 +889,9 @@ onUnmounted(() => {
      hovering it reveals this quadrant's interpretation text on both screens. */
   pointer-events: auto;
 }
+/* (Corner labels no longer recolour on quadrant hover — the per-quadrant glow
+   now lives on the hover radial words instead; see .radial-word-inner /
+   .radial-bridge-line.) */
 
 /* Overview finale `fadeout` phase — the corner labels fade out TOGETHER with
    the central deck (`.center-anchor.deck-fadeout`) and the grid cross
@@ -1202,18 +1224,19 @@ onUnmounted(() => {
   color: #595b54;
   transform: rotate(var(--angle, 0deg));
   transform-origin: center center;
-  /* Opaque beige backing hugging the glyphs — same layered stroke as the
-     rotate captions (.final-caption .caption-text in View4Relational). */
+  /* Glyph stroke glows with THIS quadrant's colour (--quadrant-color, bound on
+     the teleported .radial-words container) — the per-quadrant effect that used
+     to live on the corner labels. Falls back to the blue stroke if unset. */
   text-shadow:
-    0 0 4px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 6px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 6px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 9px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 9px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 12px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 12px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 15px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 18px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9));
+    0 0 4px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 6px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 6px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 9px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 9px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 12px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 12px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 15px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 18px var(--quadrant-color, var(--rotate-panel-bg));
 }
 /* Semantic image-to-image bridge — A's top tag and B's top tag STACKED upright
    (A over B) as a 2-line block, centred at the midpoint between the images. No
@@ -1236,7 +1259,9 @@ onUnmounted(() => {
   top: 50%;
   left: 50%;
   height: 1.5px;
-  background: rgba(89, 91, 84, 0.65);
+  /* Per-quadrant colour (bound inline as --connector-color from
+     QUADRANT_LINE_COLORS); falls back to the muted grey if unset. */
+  background: var(--connector-color, rgba(89, 91, 84, 0.65));
   transform-origin: 0 50%;
   transform:
     translate(
@@ -1250,7 +1275,7 @@ onUnmounted(() => {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.15em;
+  gap: 0.02em;
   position: relative;
 }
 .radial-bridge-line {
@@ -1260,14 +1285,15 @@ onUnmounted(() => {
   letter-spacing: 0.015em;
   line-height: 1.1;
   color: #595b54;
+  /* Quadrant-coloured glow (same as .radial-word-inner). */
   text-shadow:
-    0 0 4px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 6px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 6px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 9px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 9px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 12px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9)),
-    0 0 12px var(--rotate-panel-bg, rgba(249, 236, 208, 0.9));
+    0 0 4px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 6px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 6px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 9px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 9px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 12px var(--quadrant-color, var(--rotate-panel-bg)),
+    0 0 12px var(--quadrant-color, var(--rotate-panel-bg));
 }
 
 .subject-fade-enter-active,

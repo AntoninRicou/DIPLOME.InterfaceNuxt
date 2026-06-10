@@ -3,24 +3,27 @@ import { computed, watch, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
 import CentralImage from '~/components/CentralImage.vue'
-import AtlasThumb from '~/components/AtlasThumb.vue'
 import SkipButton from '~/components/SkipButton.vue'
 import { IMAGE_CREDIT_LINES } from '~/view3/view3Interpretations'
+import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 const store = useInteractionStore()
 const { naturalDimsVmin } = useCentralImageDims()
 
 const MAX_BRANCH_DEPTH = 10
 
-// ── "Explore others" corner circles (post-"See your path") ──
-// Four existing Replay-proximity circles, one per quadrant. `x/y` are the
-// quadrant centres (mirroring the VIEW_3 cross spots).
-const CORNERS = [
-  { key: 'tl', x: 18, y: 18 },
-  { key: 'tr', x: 82, y: 18 },
-  { key: 'bl', x: 18, y: 82 },
-  { key: 'br', x: 82, y: 82 },
+// ── "Explore others" side circles (post-"See your path") ──
+// TWO existing Replay-proximity circles, half-visible on each side edge (swipe
+// look): `index` picks which loaded circle, `key` which edge. Click → centre it.
+const SIDE_CIRCLES = [
+  { key: 'left', index: 0 },
+  { key: 'right', index: 1 },
 ] as const
+// Ring size for the side half-circles (CentralImage radius multipliers).
+// radiusScaleY > 1 rounds the default wide oval toward a circle so the
+// half cut by the edge reads as a clean semicircle.
+const SIDE_CIRCLE_RADIUS_SCALE = 1
+const SIDE_CIRCLE_RADIUS_SCALE_Y = 1.3
 
 // Bumped on each corner selection (and on overview confirm) so the centred
 // circle wrapper remounts and the inner CentralImage replays its drift
@@ -44,11 +47,11 @@ const EXPLORE_TEXT_2 = 'Your journey went through various zone of context'
 // (SINGLE_REVEAL_MS 8250). Hand-tuned to 10750ms (+500 over the prior 10250).
 const EXPLORE_DELAY_MS = 10750 // wait before the "See how…" project caption appears
 const EXPLORE_HOLD_MS = 5000
-// Interface darkening while the two project sentences play — same parameters
-// as VIEW_2's narration dim (VIEW2_DIM_LEVEL / VIEW2_DIM_FADE_MS).
+// Interface darkening while the two project sentences play. The fade duration
+// is no longer set here — the store derives it from the opacity delta so this
+// darkening moves at the SAME constant SPEED as VIEW_2's (see
+// store.setInterfaceDim). Only the target level is set here.
 const EXPLORE_DIM_LEVEL = 0.7      // 0 = full brightness, 1 = fully dark
-const EXPLORE_DIM_IN_FADE_MS = 1500 // slower darken-in (the 600ms felt abrupt)
-const EXPLORE_DIM_FADE_MS = 600    // brighten-out fade
 // Empty beat between the two sentences (lets the first fade out before the
 // second drifts in) — matches the rotate-caption fade timing.
 const EXPLORE_SENTENCE_GAP_MS = 600
@@ -60,18 +63,18 @@ const ribbonsReady = ref(false)
 const circleHoverReady = ref(false)
 // Interface-only rotate caption shown the moment the dim deactivates (hover
 // unlocks) — invites the user to hover the circle.
-const EXPLORE_HOVER_HINT_TEXT = 'Hover on your images to find them on the different maps.'
+const EXPLORE_HOVER_HINT_TEXT = 'Hover your images to see how they live in those maps.'
 const EXPLORE_HOVER_HINT_DELAY_MS = 500 // beat after the dim lifts before the hint appears
 const exploreHoverHintVisible = ref(false)
 // Interface-only rotate caption played BEFORE the ribbons (context-setting),
 // holding the standard duration; the ribbon appearance is delayed to fit it.
-const EXPLORE_RIBBONS_INTRO_TEXT = 'Previous user also went through this corpus.'
+const EXPLORE_RIBBONS_INTRO_TEXT = 'Previous user also went through this experience.'
 const exploreRibbonsIntroVisible = ref(false)
 // Empty beat between the intro caption fading out and the ribbons appearing.
 const EXPLORE_RIBBONS_INTRO_GAP_MS = 600
 // Interface-only rotate caption shown AFTER the ribbons (the ribbons fade in,
 // then 1.5s later the user is told to "look for others").
-const EXPLORE_RIBBONS_TEXT = 'Look around for their unique journey.'
+const EXPLORE_RIBBONS_TEXT = 'Click around to see their unique journey.'
 const exploreRibbonsCaptionVisible = ref(false)
 // The ribbon sequence is HOVER-gated: 7s after the user FIRST hovers a circle
 // image (which is only possible once the dim has lifted), the "Previous user…"
@@ -97,12 +100,13 @@ function advanceToExplore() {
         store.setCenterCaption(EXPLORE_TEXT_2, 'rotate', true)  // sentence 2 in
         finaleTimers.push(setTimeout(() => {
           store.setCenterCaption('') // sentence 2 begins fading out
-          store.setInterfaceDim(0, EXPLORE_DIM_FADE_MS)   // interface brightens back
+          store.setInterfaceDim(0)   // interface brightens back (constant-speed fade)
           circleHoverReady.value = true                   // circle hover unlocks once bright
-          // …and the hover hint appears a beat (500ms) after the brighten, holds, fades.
+          // …and the hover hint appears a beat (500ms) after the brighten. It
+          // STAYS until the user actually hovers a circle image — it does NOT
+          // auto-fade (dismissed in onCircleHover on the first real hover).
           finaleTimers.push(setTimeout(() => {
             exploreHoverHintVisible.value = true
-            finaleTimers.push(setTimeout(() => { exploreHoverHintVisible.value = false }, EXPLORE_HOLD_MS))
           }, EXPLORE_HOVER_HINT_DELAY_MS))
           // …then the map keywords/subjects/years appear 500ms after that fade-out.
           finaleTimers.push(setTimeout(() => { store.showMapWords() }, MAPWORDS_AFTER_SEE_HOW_MS))
@@ -284,10 +288,23 @@ let finaleTimers: ReturnType<typeof setTimeout>[] = []
 // shown once when the relational view is entered (i.e. right after the user
 // clicks the central image in VIEW_3). Fades in after a short settle beat,
 // holds, fades out.
-const RELATIONAL_INTRO_TEXT = 'Explore the different quadrant image by using the click and look up for your past.'
+const RELATIONAL_INTRO_TEXT = 'Explore the different images relations living in the four quadrant around.'
 const RELATIONAL_INTRO_DELAY_MS = 1400 // settle beat before it drifts in
 const RELATIONAL_INTRO_HOLD_MS = 6000  // hold at full opacity before fading out
 const relationalIntroVisible = ref(false)
+
+// Second entry caption — names the four proximity modes, each mode word glowing
+// with its quadrant colour (source/form/semantic/time → orange/sky/green/pink,
+// mirroring QUADRANT_SOLID_COLORS in RelationComponent.vue — keep in lockstep).
+// Plays right after RELATIONAL_INTRO_TEXT fades out.
+const RELATIONAL_MODES = [
+  { word: 'Source', color: '#f0a05c' },
+  { word: 'Form', color: '#6cb4e6' },
+  { word: 'Semantic', color: '#74cf92' },
+  { word: 'Time', color: '#ef82ac' },
+] as const
+const RELATIONAL_INTRO2_GAP_MS = 250 // beat between caption 1 fading out and caption 2 drifting in
+const relationalIntro2Visible = ref(false)
 
 // "One image left to pick" — a narrative rotate caption (same centred
 // rotate-text style as the finale narration) that plays once the active branch
@@ -331,7 +348,7 @@ function startFinaleNarration() {
     // VIEW_2's narration dim, level 0.7 / 600ms). Held through the project
     // narration ("See how…" + "Your journey…"); lifted at the 2nd sentence's
     // end, which also unlocks the circle hover.
-    store.setInterfaceDim(EXPLORE_DIM_LEVEL, EXPLORE_DIM_IN_FADE_MS)
+    store.setInterfaceDim(EXPLORE_DIM_LEVEL)
   }, SINGLE_REVEAL_MS))
 }
 
@@ -343,6 +360,13 @@ onMounted(() => {
     relationalIntroVisible.value = true
     finaleTimers.push(setTimeout(() => {
       relationalIntroVisible.value = false
+      // After caption 1 has faded out, drift caption 2 in (names the modes).
+      finaleTimers.push(setTimeout(() => {
+        relationalIntro2Visible.value = true
+        finaleTimers.push(setTimeout(() => {
+          relationalIntro2Visible.value = false
+        }, RELATIONAL_INTRO_HOLD_MS))
+      }, ROTATE_FADE_OUT_MS + RELATIONAL_INTRO2_GAP_MS))
     }, RELATIONAL_INTRO_HOLD_MS))
   }, RELATIONAL_INTRO_DELAY_MS))
 })
@@ -353,7 +377,7 @@ onBeforeUnmount(() => {
   if (oneLeftTimer) { clearTimeout(oneLeftTimer); oneLeftTimer = null }
   window.removeEventListener('resize', updateRibbonViewport)
   store.setCenterCaption('') // don't leave the project sentence lingering
-  store.setInterfaceDim(0, 0) // never leave the interface stuck dim
+  store.setInterfaceDim(0, { instant: true }) // never leave the interface stuck dim
 })
 
 // ── Overview finale trigger ──
@@ -398,6 +422,9 @@ function onCircleHover(id: string | null) {
   // unlocks once the dim lifts (end of the 2nd explore sentence).
   if (!circleHoverReady.value) return
   store.setHighlight(id)
+  // Hovering a circle image dismisses the "Hover your images…" hint (it stayed
+  // up until now instead of auto-fading).
+  if (id) exploreHoverHintVisible.value = false
   // The FIRST hover (now that the dim has lifted) arms the ribbon sequence:
   // RIBBONS_AFTER_HOVER_MS later the "Previous user…" caption plays, then the
   // ribbons, then "Look around…". Armed once.
@@ -590,48 +617,39 @@ function toggleCredits() {
          bend, images touching, in circle order). Clicking one promotes it to
          the centre and redraws the project's single-state path
          (store.centerReplayCircle). -->
-    <TransitionGroup name="ribbon" tag="div" class="ribbon-layer" appear>
-      <button
-        v-for="(circle, i) in (store.singlePathViewActive && ribbonsReady ? store.replayCircles : [])"
-        :key="circle.anchorId"
-        class="corner-ribbon"
-        :data-corner="CORNERS[i]?.key"
-        :aria-label="`focus existing circle ${i + 1}`"
-        @click="onCornerClick(i)"
+    <!-- Explore-others: TWO foreign "replay" circles, one half-visible on each
+         side edge — each circle's CENTRE sits ON the edge so only its inner half
+         (a semicircle of images) shows, like a swipe carousel. The whole
+         half-circle is ONE click target → promotes it to the centre and redraws
+         the project's single-state path (store.centerReplayCircle). Per-image
+         hover stays on the centre circle only. -->
+    <TransitionGroup name="ribbon" tag="div" class="side-circle-layer" appear>
+      <div
+        v-for="side in (store.singlePathViewActive && ribbonsReady ? SIDE_CIRCLES : [])"
+        :key="side.key"
+        class="side-circle"
+        :data-side="side.key"
+        role="button"
+        :aria-label="`focus the ${side.key} existing circle`"
+        @click="onCornerClick(side.index)"
       >
-        <!-- horizontal arm — flush to the top/bottom window edge -->
-        <span
-          v-for="t in ribbonLayouts[i]?.hThumbs ?? []"
-          :key="`h-${t.id}`"
-          class="ribbon-thumb"
-          :style="ribbonThumbStyle(CORNERS[i]?.key ?? 'tl', t, 'h')"
-        >
-          <AtlasThumb :id="t.id" fit="contain" source="original" />
-        </span>
-        <!-- vertical arm — flush to the left/right window edge -->
-        <span
-          v-for="t in ribbonLayouts[i]?.vThumbs ?? []"
-          :key="`v-${t.id}`"
-          class="ribbon-thumb"
-          :style="ribbonThumbStyle(CORNERS[i]?.key ?? 'tl', t, 'v')"
-        >
-          <AtlasThumb :id="t.id" fit="contain" source="original" />
-        </span>
-      </button>
+        <CentralImage
+          :ids="store.replayCircles[side.index]?.ids ?? []"
+          :active-index="-1"
+          expanded
+          :interactive="false"
+          :reveal="false"
+          source="original"
+          :radius-scale="SIDE_CIRCLE_RADIUS_SCALE"
+          :radius-scale-y="SIDE_CIRCLE_RADIUS_SCALE_Y"
+        />
+      </div>
     </TransitionGroup>
 
-    <p
-      v-if="!store.overviewConfirmed"
-      class="interpret-message"
-      :class="{ visible: store.view3InterpretationMode }"
-      aria-live="polite"
-    >
-      <template v-for="(line, i) in IMAGE_CREDIT_LINES" :key="i">
-        <span :class="{ 'interpret-message-url': i === IMAGE_CREDIT_LINES.length - 1 }">{{ line }}</span>
-        <br v-if="i < IMAGE_CREDIT_LINES.length - 1" />
-      </template>
-    </p>
-
+    <!-- The image-credit text no longer shows during interpretation mode (the
+         first `+`). It lives ONLY in the credits `+` menu at the end (the
+         `.credits-panel` below). Interpretation mode now reveals the field +
+         per-quadrant text only; the centre stays blank on both screens. -->
 
     <!-- Post-overview finale journey sentence (interface, centred, rotate
          style). Fades in (gradient) at the same instant the project starts its
@@ -691,6 +709,21 @@ function toggleCredits() {
       aria-live="polite"
     >
       <span class="caption-text">{{ RELATIONAL_INTRO_TEXT }}</span>
+    </p>
+
+    <!-- Second entry caption — names the four proximity modes, each mode word
+         glowing with its quadrant colour. Plays right after the first fades. -->
+    <p
+      class="final-caption"
+      :class="{ visible: relationalIntro2Visible }"
+      aria-live="polite"
+    >
+      <span class="caption-text"
+        >Each sharing proximity with the center image through :<br /><!--
+        --><template v-for="(m, i) in RELATIONAL_MODES" :key="m.word">{{ i === 0 ? '' : i === RELATIONAL_MODES.length - 1 ? ' & ' : ', ' }}<span
+          class="mode-word"
+          :style="{ '--mode-glow': m.color }"
+          >{{ m.word }}</span></template></span>
     </p>
 
     <!-- "One image left to pick" — narrative rotate caption (same centred
@@ -979,59 +1012,36 @@ function toggleCredits() {
   pointer-events: none;
 }
 
-/* Corner "existing circle" — now an L-shaped RIBBON hugging the window's two
-   edges at the corner (no oval). The button is a 0-size anchor at the window
-   corner; each image is absolutely positioned off it (offset + size computed
-   in `ribbonLayout` / `ribbonThumbStyle`, keeping the image's natural ratio +
-   size variation). Single click target → centerReplayCircle. Tune RIBBON_SCALE
-   (image size), RIBBON_EDGE_GAP_VMIN (gap between the two ribbons on an edge)
-   and RIBBON_VERTICAL_COUNT (images per side arm) in <script>. */
-.corner-ribbon {
-  position: absolute;
-  width: 0;
-  height: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
+/* Explore-others SIDE CIRCLES — two foreign replay circles, one half-visible on
+   each side edge. Each `.side-circle` box STRADDLES the edge (its centre lands
+   ON the edge via the translate), so the CentralImage ring centred in the box
+   is cut in half by the viewport → only the inner semicircle of images shows
+   (swipe look). The whole box is ONE click target; low rest opacity, full on
+   hover — the group-lift the old ribbons had. Per-image hover stays on the
+   centre circle. Ring size: SIDE_CIRCLE_RADIUS_SCALE* in <script>. */
+.side-circle-layer {
+  display: contents;
+}
+.side-circle {
+  position: absolute; /* anchors to .view-3 (full viewport), like the old ribbons */
+  top: 50%;
+  width: 64vmin;
+  height: 64vmin;
   cursor: pointer;
   pointer-events: auto;
   z-index: 40;
-}
-.corner-ribbon:focus-visible {
-  outline: none;
-}
-.corner-ribbon[data-corner="tl"] { top: 0; left: 0; }
-.corner-ribbon[data-corner="tr"] { top: 0; right: 0; }
-.corner-ribbon[data-corner="bl"] { bottom: 0; left: 0; }
-.corner-ribbon[data-corner="br"] { bottom: 0; right: 0; }
-
-/* TransitionGroup wrapper — no box of its own (the buttons are absolute and
-   anchor to .view-3); it only carries the fade transitions. */
-.ribbon-layer {
-  display: contents;
-}
-
-/* Each thumb is absolutely placed (top/bottom/left/right + width/height set
-   inline by ribbonThumbStyle). The AtlasThumb fills it (contain → the natural
-   aspect matches the inline w/h, so no letterboxing). Low opacity at rest;
-   hovering ANYWHERE on the ribbon lifts the WHOLE group to full (mimics the
-   relation-field reveal) — no per-image hover on the side (that's reserved for
-   the centre circle). */
-.ribbon-thumb {
-  position: absolute;
-  line-height: 0;
-  opacity: 0.36; /* 10% less than the prior 0.4 rest opacity */
+  opacity: 0.36; /* rest opacity, same as the old ribbons */
   transition: opacity 240ms ease-out;
+  /* Overall size of the half-circle (ring + images together), scaled around the
+     box centre which sits on the edge — so shrinking keeps it edge-anchored. */
+  --side-scale: 0.85;
 }
-.corner-ribbon:hover .ribbon-thumb,
-.corner-ribbon:focus-visible .ribbon-thumb {
+.side-circle:hover {
   opacity: 1;
 }
-.ribbon-thumb :deep(.atlas-thumb) {
-  width: 100%;
-  height: 100%;
-}
+/* left:0 / right:0 + the half-shift puts each box's CENTRE on the edge. */
+.side-circle[data-side="left"]  { left: 0;  transform: translate(-50%, -50%) scale(var(--side-scale)); }
+.side-circle[data-side="right"] { right: 0; transform: translate(50%, -50%) scale(var(--side-scale)); }
 
 /* Fade in/out for the corner ribbons (appear on entering explore-others, and
    swap on each corner pick) and for the centred circle — so nothing pops.
@@ -1093,7 +1103,9 @@ function toggleCredits() {
   top: 0.22rem;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 26;
+  /* Above the centred circle / ribbons in the explore view so it stays
+     clickable (matches the top-controls `+` bump to 120). */
+  z-index: 120;
 }
 
 /* Credits overlay — full-field beige veil hosting the centred credit text
@@ -1151,16 +1163,33 @@ function toggleCredits() {
   opacity: 1;
 }
 .final-caption .caption-text {
+  color: var(--rotate-fill);
   text-shadow:
-    0 0 4px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 15px var(--rotate-panel-bg),
-    0 0 18px var(--rotate-panel-bg);
+    0 0 4px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 15px var(--rotate-stroke),
+    0 0 18px var(--rotate-stroke);
+}
+
+/* Each mode name carries its own quadrant-coloured glow (--mode-glow set
+   inline per word), overriding the neutral blue-grey stroke above. */
+.final-caption .caption-text .mode-word {
+  font-style: italic;
+  text-shadow:
+    0 0 4px var(--mode-glow),
+    0 0 6px var(--mode-glow),
+    0 0 6px var(--mode-glow),
+    0 0 9px var(--mode-glow),
+    0 0 9px var(--mode-glow),
+    0 0 12px var(--mode-glow),
+    0 0 12px var(--mode-glow),
+    0 0 15px var(--mode-glow),
+    0 0 18px var(--mode-glow);
 }
 
 /* "Start over" now reuses the shared SkipButton component (same class +
@@ -1198,7 +1227,13 @@ function toggleCredits() {
   top: 0.22rem;
   left: 0;
   right: 0;
-  z-index: 12;
+  /* Above the hover-lifted quadrants (.rel:hover z 50), the central deck
+     (z 60) and the radial words (z 90) so the top-centre `+` is always
+     clickable. The container itself ignores pointer events (its empty 1fr
+     columns would otherwise block the top strip of the quadrants) — only the
+     buttons catch clicks (pointer-events: auto below). */
+  z-index: 120;
+  pointer-events: none;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
@@ -1209,6 +1244,7 @@ function toggleCredits() {
 .top-controls > .bg-toggle:last-of-type  { justify-self: start; }
 .interpret-control,
 .bg-toggle {
+  pointer-events: auto;   /* container is pointer-events:none — buttons opt back in */
   padding: 0.45rem 0.95rem;
   background: rgba(13, 13, 16, 0.7);
   color: #595b54;
@@ -1392,9 +1428,11 @@ function toggleCredits() {
 .strip-steps li {
   padding: 0.1rem;
   outline: none;
-  cursor: pointer;
-}
-.strip-steps li.empty {
+  /* Timeline is now display-only — the squares still render, glow, and update
+     with navigation, but are no longer clickable (jump-to-history disabled).
+     pointer-events:none also drops the pointer cursor + hover tooltip; the
+     @click/@keydown handlers stay in the template, just never fire. */
+  pointer-events: none;
   cursor: default;
 }
 /* Square step. No border-radius — discrete squares. Every square glows

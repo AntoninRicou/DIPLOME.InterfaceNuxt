@@ -4,7 +4,7 @@ import type { ImageId } from '~/types/interaction'
 import { useInteractionEmitter } from '~/composables/useInteractionEmitter'
 import { useProjectSocket } from '~/composables/useProjectSocket'
 import { useViewStateStore } from '~/stores/viewState'
-import { view3Interpretations, IMAGE_CREDIT_LINES, type View3ComponentId } from '~/view3/view3Interpretations'
+import { view3Interpretations, type View3ComponentId } from '~/view3/view3Interpretations'
 
 const OVERVIEW_THRESHOLD = 10
 
@@ -94,8 +94,16 @@ export const useInteractionStore = defineStore('interaction', () => {
   // `set-dim` wire directive. Fire `setInterfaceDim` / `setProjectDim` at any
   // scripted moment in the flow. `interfaceDimDuration` carries the fade time
   // so the overlay's CSS transition matches the requested duration.
+  //
+  // Constant-SPEED fade: the fade DURATION is derived from the opacity DELTA
+  // (× DIM_FADE_MS_PER_UNIT), so every darken/brighten — VIEW_2 and VIEW_4,
+  // fade-in and fade-out — moves at the SAME rate regardless of the level it
+  // travels (and an interrupted fade keeps that rate). Calibrated to VIEW_2's
+  // reference fade: 600 ms for a 0.7-level change.
+  const DIM_FADE_MS_PER_UNIT = 600 / 0.7 // ≈857 ms for a full 0→1
   const interfaceDimLevel = ref(0)
   const interfaceDimDuration = ref(600)
+  const projectDimLevel = ref(0) // tracked so the project dim fade is speed-based too
 
   // Set by `enterRelationalView` when the VIEW_3 → VIEW_4 trigger (the
   // "next" chevron after the four-quadrant zoom-in flow) fires, consumed by
@@ -151,6 +159,10 @@ export const useInteractionStore = defineStore('interaction', () => {
     const next = canvasIndex
     if (prev === next) return
     view4HoveredQuadrant.value = next
+
+    // (Corner-label hover colouring removed — labels no longer recolour on
+    // quadrant hover, on either screen. The per-quadrant glow now lives on the
+    // interface hover radial words instead.)
 
     // Cancel any pending delayed zoom-in. The canvases it targeted are
     // still in overview project-side (the timer never fired), and
@@ -623,8 +635,12 @@ export const useInteractionStore = defineStore('interaction', () => {
   // `centerReplayCircle` and the (future) restore-to-own-path hook.
   function redrawCircleOnSingle(ids: ImageId[]) {
     projectSocket.pathClear()
+    // Colour the foreign (other-participant) path instead of the muted grey
+    // default — MULTICOLOUR: each segment gets a random palette colour (repeats
+    // are fine). Interface stays colour-blind: it sends a random quadrant index
+    // per segment and project maps it via colorForQuadrant.
     for (let i = 0; i < ids.length - 1; i++) {
-      projectSocket.pathSegment(ids[i]!, ids[i + 1]!)
+      projectSocket.pathSegment(ids[i]!, ids[i + 1]!, Math.floor(Math.random() * 4))
     }
     projectSocket.setMarks([...ids])
   }
@@ -710,12 +726,11 @@ export const useInteractionStore = defineStore('interaction', () => {
         projectSocket.setCanvasText(i, '', '')
       }
     }
-    // Mirror the centred image-credit (the three-line provenance note) on the
-    // project's `#center-caption`, same on/off beat as the quadrant texts.
-    // Joined with newlines; the project caption renders them as three lines.
-    projectSocket.setCenterCaption(
-      view3InterpretationMode.value ? IMAGE_CREDIT_LINES.join('\n') : '',
-    )
+    // The centred image-credit is NO LONGER shown during interpretation mode —
+    // it lives only in the end-of-experience credits `+` menu on the interface.
+    // Keep the project centre caption blank on this beat (both ON and OFF), so
+    // the feedback centre stays empty through relation.
+    projectSocket.setCenterCaption('')
     // Mirror the interface's beige blur veil on the project canvas so the
     // standalone reads the same "field recedes behind the text" effect.
     projectSocket.setCanvasVeil(view3InterpretationMode.value)
@@ -727,16 +742,24 @@ export const useInteractionStore = defineStore('interaction', () => {
   }
 
   // Dim the INTERFACE (Nuxt UI layer): drives the full-screen black overlay in
-  // app.vue. level 0 = full brightness, 1 = fully dark; duration is the fade.
-  function setInterfaceDim(level: number, duration = 600) {
-    interfaceDimDuration.value = Math.max(0, duration)
-    interfaceDimLevel.value = Math.max(0, Math.min(1, level))
+  // app.vue. level 0 = full brightness, 1 = fully dark. The fade DURATION is
+  // derived from the opacity delta so the SPEED is constant (see
+  // DIM_FADE_MS_PER_UNIT); pass { instant: true } to snap with no fade.
+  function setInterfaceDim(level: number, opts: { instant?: boolean } = {}) {
+    const target = Math.max(0, Math.min(1, level))
+    const delta = Math.abs(target - interfaceDimLevel.value)
+    interfaceDimDuration.value = opts.instant ? 0 : Math.round(delta * DIM_FADE_MS_PER_UNIT)
+    interfaceDimLevel.value = target
   }
 
   // Dim the PROJECT (Three.js render window): mirrored over the wire to the
-  // #render-dim overlay. Same semantics as setInterfaceDim.
-  function setProjectDim(level: number, duration = 600) {
-    projectSocket.setDim(Math.max(0, Math.min(1, level)), Math.max(0, duration))
+  // #render-dim overlay. Same constant-SPEED semantics as setInterfaceDim.
+  function setProjectDim(level: number, opts: { instant?: boolean } = {}) {
+    const target = Math.max(0, Math.min(1, level))
+    const delta = Math.abs(target - projectDimLevel.value)
+    const duration = opts.instant ? 0 : Math.round(delta * DIM_FADE_MS_PER_UNIT)
+    projectDimLevel.value = target
+    projectSocket.setDim(target, duration)
   }
 
   // Mirror VIEW_3's centred modes-caption on the standalone project's

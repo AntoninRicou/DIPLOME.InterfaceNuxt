@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 const store = useInteractionStore()
+// True whenever the interface is darkened — drives the centred
+// "Look at the other screen" rotate caption above the dim overlay.
+const dimActive = computed(() => store.interfaceDimLevel > 0)
 </script>
 
 <template>
@@ -9,9 +13,10 @@ const store = useInteractionStore()
     <NuxtPage />
     <!-- Interface luminosity dimmer — a full-screen black overlay above the
          whole UI. opacity = store.interfaceDimLevel (0 = full brightness, 1 =
-         fully dark); fade time = store.interfaceDimDuration. Driven by
-         store.setInterfaceDim(level, duration). pointer-events: none so it
-         never blocks interaction. -->
+         fully dark); fade time = store.interfaceDimDuration (the store derives
+         it from the opacity delta → constant fade SPEED). Driven by
+         store.setInterfaceDim(level). pointer-events: none so it never blocks
+         interaction. -->
     <div
       class="dim-overlay"
       :style="{
@@ -20,6 +25,16 @@ const store = useInteractionStore()
       }"
       aria-hidden="true"
     />
+    <!-- Centred "Look at the second screen" rotate caption — sits ABOVE the dim
+         overlay and fades in/out with the darkening (every time the interface
+         dims, e.g. VIEW_2 project narration + VIEW_3 mirror caption). Opacity
+         tracks the dim with the same fade SPEED. -->
+    <p
+      class="dim-caption"
+      :class="{ visible: dimActive }"
+      :style="{ transition: `opacity ${store.interfaceDimDuration}ms linear` }"
+      aria-hidden="true"
+    >Look at the second screen</p>
   </div>
 </template>
 
@@ -35,6 +50,45 @@ const store = useInteractionStore()
   opacity: 0;
   pointer-events: none;
   z-index: 9999;
+}
+
+/* "Look at the other screen" — centred rotate caption above the dim overlay
+   (z above 9999). Same rotate-caption look as the views' `.caption-text`:
+   --rotate-fill glyphs + the layered --rotate-stroke glow, --rotate-size,
+   italic. Opacity is toggled by `.visible` (bound to dimActive) and the inline
+   transition matches the dim's fade speed, so it appears/disappears with the
+   darkening. */
+.dim-caption {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  z-index: 10000;
+  font-family: 'ABC Otto', serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: var(--rotate-size);
+  line-height: var(--rotate-line-height);
+  letter-spacing: 0.015em;
+  text-align: center;
+  white-space: nowrap;
+  color: var(--rotate-fill);
+  text-shadow:
+    0 0 4px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 15px var(--rotate-stroke),
+    0 0 18px var(--rotate-stroke);
+  opacity: 0;
+  pointer-events: none;
+}
+.dim-caption.visible {
+  opacity: 1;
 }
 
 @font-face {
@@ -104,7 +158,7 @@ const store = useInteractionStore()
      glyphs themselves — a soft organic "stroke" hugging the letterforms via a
      layered `text-shadow` on the inner `.caption-text` span (NOT a rectangle
      behind the line). */
-  --rotate-size: 1.5rem;
+  --rotate-size: 1.65rem;
   /* Shared line-height for all rotating intro/finale captions (VIEW_1/2/3/4).
      Tightened from the old per-view 1.4–1.5 so multi-line captions sit closer. */
   --rotate-line-height: 1.2;
@@ -112,7 +166,17 @@ const store = useInteractionStore()
      (replaces the former blue-grey). Deepened from f9ecd0 — at glow/stroke
      sizes the pale cream washed out to near-white, so a more saturated tan is
      used to actually read as beige. Keep in lockstep with project/src/style.css. */
-  --rotate-panel-bg: rgba(238, 217, 175, 0.92);
+  /* The shared glyph "background effect" (layered text-shadow stroke) for EVERY
+     text type — corner labels, rotate captions, quadrant panel text, bridge
+     tags. Greyish with a small blue lean (was blue, before that beige).
+     Mirrors project/src/style.css. */
+  --rotate-panel-bg: rgba(175, 180, 188, 0.96);
+
+  /* Text glyph fill + stroke. Fill = #595b55 (dark) on every text type;
+     stroke = the shared --rotate-panel-bg above. (VIEW_4 corner-label hover
+     colour overrides the fill per-quadrant via .rel:hover — kept.) */
+  --rotate-fill: #595b55;                  /* dark fill */
+  --rotate-stroke: var(--rotate-panel-bg); /* same greyish stroke as everything else */
 
   /* Project-wide blue-gray text halo. Two-tier composition: 3 tight
      overlapping layers at full alpha build a solid muted blue-gray core
@@ -233,11 +297,22 @@ html {
   color: #595b54;
   padding: 0.75rem 0.95rem;
   pointer-events: none;
+  /* The glyph stroke (text-shadow) transitions on quadrant hover — the halo
+     takes the component colour while the word fill stays #595b55. See
+     RelationComponent .rel:hover. */
+  transition: text-shadow 220ms ease-out;
+  /* Same organic beige glyph stroke the rotating captions wear (the
+     --rotate-panel-bg layered text-shadow), replacing the old cream halo. */
   text-shadow:
-    0 0 8px rgba(255, 252, 230, 1),
-    0 0 20px rgba(255, 248, 220, 0.9),
-    0 0 42px rgba(255, 244, 210, 0.6),
-    0 0 75px rgba(255, 240, 200, 0.3);
+    0 0 4px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 6px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 9px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 12px var(--rotate-panel-bg),
+    0 0 15px var(--rotate-panel-bg),
+    0 0 18px var(--rotate-panel-bg);
 }
 .corner-label[data-position="tl"] { top: 0; left: 0; }
 .corner-label[data-position="tr"] { top: 0; right: 0; }
@@ -263,8 +338,11 @@ html {
      pixel-identical and keeps the body on two lines. Single knob: nudge this
      value if a longer body spills to three lines. Widened from 30em when
      the body grew to --label-size (Otto Medium) so it still wraps to ~2
-     lines; keep in lockstep with `.canvas-text` width in project. */
-  width: 38em;
+     lines. NOTE: interface narrowed to 26em so the body breaks onto two
+     better-balanced lines — this now DIVERGES from project's `.canvas-text`
+     width (kept wider on the canvas), no longer in lockstep. Scaled 26→29em
+     in step with the 1.3rem text bump so the two-line balance is unchanged. */
+  width: 29em;
   padding: 0 1rem;
   text-align: center;
   color: #595b54;
@@ -286,13 +364,23 @@ html {
     0 0 15px var(--rotate-panel-bg),
     0 0 18px var(--rotate-panel-bg);
 }
+/* Semantic (component_3) body is the longest — give it a slightly wider box
+   so it still balances onto two lines. Interface-only (project canvas-text
+   unaffected); attribute selector outranks the base `.proximity-panel` width. */
+.proximity-panel[data-component="component_3"] {
+  width: 33em;
+}
 .proximity-panel-title {
   margin: 0 0 0.4rem;
   /* Mirrors `.corner-label` typography (same family via inheritance, same
      weight 500, same italic, same size + tracking) so the panel title and
      the four corner labels read as the same typographic tier. See
-     [[feedback-label-size-sync]] memory for the contract. */
-  font-size: var(--label-size);
+     [[feedback-label-size-sync]] memory for the contract.
+     NOTE: bumped to 1.3rem (interface quadrant text only) so the block reads
+     slightly bigger — this DECOUPLES the quadrant title from the corner-label
+     `--label-size` tier. Keep in sync with `.proximity-panel-body` below; the
+     `em` box widths scale with it so the two-line balance is preserved. */
+  font-size: 1.3rem;
   font-weight: 500;
   font-style: normal;
   letter-spacing: 0.015em;
@@ -304,7 +392,9 @@ html {
      (--label-size). Mirrors `.canvas-text-body` in project/src/style.css —
      keep family/size/weight/line-height in lockstep. */
   font-family: 'ABC Otto', serif;
-  font-size: var(--label-size);
+  /* 1.3rem — interface quadrant body only (project `.canvas-text-body` keeps
+     --label-size). Kept in sync with `.proximity-panel-title`. */
+  font-size: 1.3rem;
   font-weight: 400;
   font-style: normal;
   line-height: 1.0;

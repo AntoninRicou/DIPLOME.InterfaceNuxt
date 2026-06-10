@@ -49,25 +49,22 @@ export const view3Interpretations: Record<View3ComponentId, View3Interpretation>
   component_1: {
     title: 'Source tracing',
     body:
-      'These images are sharing proximity\n' +
-      'through book sources and subject metadatas in relation to the centered image.',
+      'Images connected through book and subject context around the selected image.',
   },
   component_2: {
     title: 'Form mirroring',
     body:
-      'These images are sharing proximity\n' +
-      'through visual and compositional connections in relation to the centered image.',
+      'Images connected through visual similarity and composition around the selected image.',
   },
   component_3: {
     title: 'Semantic shifting',
     body:
-      'These images are sharing proximity\n' +
-      'through semantic connections in relation to the centered image.',
+      'Images connected through interpreted meanings and language around the selected image.',
   },
   component_4: {
     title: 'Time drifting',
     body:
-      'These images are sharing proximity\n' +
-      'through temporal metadatas in relation to the centered image.',
-  },
+      'Images connected through time-based relationships around the selected image.',
+
+  }
 }

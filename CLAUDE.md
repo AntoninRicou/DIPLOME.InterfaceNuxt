@@ -4471,6 +4471,144 @@ exception #13.
 
 ---
 
+# SESSION CHANGES (visual + flow pass)
+
+A batch of visual / pacing / copy changes layered on top of everything above.
+Where this section conflicts with an older section, **this section wins** — the
+prose above predates it. Tuning values (colours, ms, dim levels) are the current
+state, not contracts.
+
+## Directory rename (IMPORTANT — doc still uses old names)
+
+The top-level folders were renamed; **every path in the prose above is stale** —
+translate when reading:
+
+| Old (in prose above) | Current folder |
+| --- | --- |
+| `interface_nuxt` | `DIPLOME.InterfaceNuxt` |
+| `project` | `DIPLOME.Feedback` (e.g. `DIPLOME.Feedback/src/{pathColors,style,commands,stateManager}.js`) |
+| `server` | `DIPLOME.Server` |
+| `interface` | `DIPLOME.Interface` |
+| `process` | `DIPLOME.ProcessData` |
+
+Project fonts live in `DIPLOME.Feedback/static/fonts/`; interface fonts in
+`DIPLOME.InterfaceNuxt/public/fonts/`. A leftover empty `project/` dir may exist.
+
+## Luminosity dimmers (project-side exception #18)
+
+- Wire: `set-dim({ level, duration })` → project `#render-dim` black overlay
+  (z 2000, above mask/veil/captions). Boot handshake emits `set-dim(0,0)`.
+- Interface: `.dim-overlay` in `app.vue` (z 9999, `pointer-events:none`), opacity
+  + transition bound to `store.interfaceDimLevel` / `interfaceDimDuration`.
+- Store: `setInterfaceDim(level, {instant?})` / `setProjectDim(level, {instant?})`.
+  **Constant-SPEED** fade — duration = opacity-delta × `DIM_FADE_MS_PER_UNIT`
+  (≈857ms/unit = 600ms for a 0.7 change), so every darken/brighten moves at the
+  same rate. `{instant:true}` snaps (used for skip/reset/unmount).
+- Used by: VIEW_2 narration darkening, VIEW_3 MIRROR-caption darkening, VIEW_4
+  explore-narration darkening.
+- A centred **"Look at the other screen"** rotate caption (`.dim-caption` in
+  `app.vue`) sits ABOVE the dim overlay and fades in/out with it (`dimActive =
+  interfaceDimLevel > 0`), so whenever the interface darkens the user is pointed
+  to the feedback screen.
+
+## Per-quadrant path + connector colours
+
+- `DIComponent`… i.e. `DIPLOME.Feedback/src/pathColors.js`: `OVERRIDE_COLOR = null`
+  (the per-quadrant palette is now ACTIVE). `QUADRANT_COLORS` = Source **orange**
+  `0xff7e29` / Form **turquoise** `0x41c8c4` / Semantic **green** `0x2fdd6a` /
+  Time **purple** `0xa25ec9`. `DEFAULT_COLOR = 0x595b55` (grey) — the fallback for
+  no-quadrant segments. `PATH_LINEWIDTH` 1.6 → **1.2** (thinner coloured core; the
+  white glow trail is unchanged).
+- Interface bridge connector line (`.radial-connector`) is coloured per quadrant
+  via `QUADRANT_LINE_COLORS` (rgba @0.85) in `RelationComponent.vue` — KEEP IN
+  LOCKSTEP with `pathColors.js`. A solid `QUADRANT_SOLID_COLORS` array also exists
+  (used by the radial-word hover glow).
+- Explore-others foreign path (`redrawCircleOnSingle`) is now **multicolour** —
+  a random quadrant index per segment (interface stays colour-blind), not grey.
+
+## Text "background effect" (glyph stroke) — now greyish
+
+- `--rotate-panel-bg` (the shared layered-`text-shadow` stroke behind ALL text:
+  corner labels, rotate captions, quadrant panels, canvas-text, map-words) was
+  beige → blue → now **greyish** `rgba(175, 180, 188, 0.96)` in BOTH `app.vue`
+  and project `style.css`.
+- `--rotate-fill: #595b55` (dark glyph fill) + `--rotate-stroke: var(--rotate-panel-bg)`
+  drive the rotate captions. (An interim "reverse" experiment — beige fill + dark
+  stroke — was tried and reverted.) Note: a near-opaque stacked stroke can read as
+  a faint filled rectangle behind a line of text — that's the blurred halo
+  compounding, not a real background.
+- Typeface: a global swap to Neue Kabel was tried and **reverted** — back to
+  ABC Otto everywhere (no net change).
+
+## Corner-label hover (VIEW_4)
+
+- Hovering a corner label reveals **that quadrant's interpretation text** on both
+  screens — interface `.interpretation-panel` (`labelHovered`) + project via
+  `store.setQuadrantText(i, on)` (`set-canvas-text`) — plus a per-quadrant blur
+  veil (`.quadrant-veil`) on the interface (pure-blur, neutral).
+- The corner labels themselves **no longer recolour on quadrant hover** (that
+  effect was removed on both screens). The per-quadrant colour glow now lives on
+  the **hover radial words** (keywords / year / subject / bridge tags):
+  `.radial-word-inner` / `.radial-bridge-line` use `var(--quadrant-color)` (bound
+  on the teleported `.radial-words`). Interface-only.
+
+## VIEW_2 restructure (the single→overview morph moved)
+
+- The `single → overview` morph is **no longer in `enterEntryView`**. It now fires
+  from `View2Disperse` via **`store.morphToOverviewGrid()`**, AFTER the 2nd intro
+  sentence, coordinated with an interface darkening. The standalone stays in
+  `single` through the whole VIEW_2 intro. The old disperse-synced reveal
+  (`notifyDisperseSpawned` / `maybeRevealOverview` / the flags) was **removed**,
+  and the iframe `view0:dispersed` handler with it.
+- `PROJECT_PANELS` **auto-play** after the morph (no longer hover-triggered).
+  Hover/picking unlocks when the 2nd project sentence appears; the interface stays
+  dark through it and brightens at its end.
+- `CLICK_ACTION` ("Select an image…/Click an image…") is now a centred **rotate
+  caption** (`.entry-caption` style), not a bottom prompt; a `HOVER_ACTION` rotate
+  caption ("Move your mouse…") precedes it. The old bottom `ActionPrompt`s + the
+  "Explore the images…" prompt were removed.
+
+## VIEW_3 changes
+
+- `MODES_CAPTION` ("This screen suggests…") is **INTERFACE-ONLY** (no longer
+  mirrored to the project centre). It appears `CAPTION_DELAY_MS` (now **8000ms**)
+  after the 4th quadrant is hovered; the whole MIRROR→START chain nests inside
+  that timer, so the delay pushes everything back. **The quadrant texts fade out
+  at the moment the modes caption appears** (interface `.quadrant-text.dissolving`
+  + project `clearCanvasTexts()`).
+- `MIRROR_CAPTION` ("This screen … spatial proximity / your journey") is
+  **FEEDBACK-ONLY** (project centre via `set-center-caption`) with the **interface
+  darkened** (`MIRROR_DIM_LEVEL = 0.7`) — no interface text for it.
+- `ZOOM_ACTION` / `MODES_CAPTION` / `START_ACTION` are a centred **3-sentence
+  rotate sequence** (`.modes-caption`); the old bottom `ActionPrompt`s were
+  removed. The advance is still the central-image click.
+- Central-image clickable pulse recoloured to a warm **beige** glow, dialled
+  lighter.
+
+## VIEW_4 additions
+
+- A credits **`+` control** (reuses the `.interpret-control` glyph) appears with
+  "Start over"; toggles a centred overlay (currently dupes the image-credit text;
+  intended to become a scrollable image grid).
+- A VIEW_4 **entry caption** ("Explore the different quadrant image…") on mount.
+- Interface→project **hover highlight** bumped (the `big` preset `scale` 2.8 → 3.4
+  in `pointsManager.js`).
+- Explore-others: a **2-sentence** flow — "Previous user also went through this
+  corpus." (before the ribbons) then "Look around for their unique journey."
+
+## Project camera / drift (DIPLOME.Feedback `stateManager.js`)
+
+- **Map margin:** overview/grid camera pulled back ~8% — `OVERVIEW_Z =
+  OVERVIEW_FIT_Z × 1.08` — so grid maps don't stick to the canvas edges (matches
+  the `single` view's breathing room; also aligns with the VIEW_4 hover-unzoom
+  `OVERVIEW_CAMERA_Z = 3.5`).
+- **Drift fix:** the leave-`single` map restore is now **unconditional**
+  (`morphTo(host.mapType, 0)` on every single→other transition), cancelling any
+  in-flight demo-cycle morph — fixes the intermittent "a map drifts before
+  centring" when the cycle was mid-morph back to the canonical map.
+
+---
+
 # CURRENT DEVELOPMENT SCOPE
 
 Current phase:
@@ -4480,7 +4618,7 @@ For now, only work inside:
 
 interface_nuxt
 
-Do not modify project, **with seventeen explicit exceptions**:
+Do not modify project, **with eighteen explicit exceptions**:
 
 1. The user-driven path-rendering directive surface inside `project` —
    `path-segment`, `path-truncate`, and the `pathTrace` primitive they
@@ -4709,7 +4847,30 @@ Do not modify project, **with seventeen explicit exceptions**:
     session starts at full opacity. `app.js` exposes `fadeOutPath()` which
     delegates to `pathTrace.fadeOut(0.6)`.
 
-All seventeen exceptions are scoped tightly: pure rendering / configuration
+18. The **luminosity dimmer surface** — `set-dim({ level, duration })`,
+    `actions.setDim` in `commands.js`, the `<div id="render-dim">` overlay at
+    body level in `project/index.html`, and its `#render-dim` rule in
+    `project/src/style.css` (plain black, `z-index: 2000` ABOVE everything incl.
+    mask/veil/captions, `opacity` the only animated property). Darkens the whole
+    project render window; `level 0` = full brightness, `1` = fully black. Same
+    opacity-tween shape as `set-mask`. Driven by `store.setProjectDim`; cleared
+    defensively with `set-dim(0, 0)` on every register in the boot handshake. The
+    INTERFACE has its own parallel `.dim-overlay` in `app.vue` (not on the wire),
+    driven by `store.setInterfaceDim`. Both dims use a **constant-SPEED** fade:
+    the store derives the transition duration from the opacity delta
+    (`DIM_FADE_MS_PER_UNIT ≈ 857` = 600ms for a 0.7 change), so darken/brighten
+    move at the same rate regardless of level; `{ instant: true }` snaps. See
+    *SESSION CHANGES › Luminosity dimmers*. Pure DOM/CSS overlay — no render-loop,
+    state-machine, or interaction-logic participation.
+
+> **`set-corner-label-hover` exists but is currently UNUSED.** A `set-corner-
+> label-hover({ index })` directive + `actions.setCornerLabelHover` were added to
+> recolour the hovered quadrant's corner label on the canvas, but the per-quadrant
+> hover colouring was later moved off the corner labels onto the interface hover
+> radial words — the store no longer emits it. The project handler/registration
+> remain in place as dead code (harmless). See *SESSION CHANGES*.
+
+All eighteen exceptions are scoped tightly: pure rendering / configuration
 surfaces driven by explicit `interface_nuxt` directives (or, in the
 VIEW_2 embed case, by an out-of-band `postMessage` channel for the
 canvas-pick input). No project-side interpretation, derivation, or

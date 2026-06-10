@@ -232,6 +232,15 @@ export function useProjectSocket() {
     return true
   }
 
+  // Colour the hovered quadrant's corner label on the canvas (or clear all with
+  // null) — project maps the index to its quadrant colour. VIEW_4 hover only.
+  function setCornerLabelHover(index: number | null): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) return false
+    socket.emit('message', { type: 'set-corner-label-hover', payload: { index } })
+    return true
+  }
+
   function setCanvasText(canvasIndex: number, title: string, body: string): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
@@ -296,5 +305,5 @@ export function useProjectSocket() {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, pathFadeOut, setMask, setDim, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCanvasText, setCenterCaption, setMapLabel, setMapWords, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, pathFadeOut, setMask, setDim, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCornerLabelHover, setCanvasText, setCenterCaption, setMapLabel, setMapWords, isConnected }
 }

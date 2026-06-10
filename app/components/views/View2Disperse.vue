@@ -8,9 +8,9 @@ import { VIEW2_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 // Rotating intro caption — same Vue <Transition> + shared --rotate-*
 // timing as View1Explanation `.caption` and View3Transition
-// `.intro-caption`. Two sentences cycle every ENTRY_PANEL_MS (6000ms); on the
-// last sentence the timer stops and the caption sits visible until
-// the user clicks a sprite in the iframe. The click triggers a
+// `.intro-caption`. Two sentences are scheduled per-sentence (ENTRY_HOLDS — 7s
+// full-opacity each); on the last sentence the rotation stops and the caption
+// fades, then the morph + project narration begin. The click triggers a
 // smooth fade-out (entryCaptionVisible → false) before viewState
 // advances to VIEW_3.
 //
@@ -30,32 +30,63 @@ import { VIEW2_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 // Explicit line breaks (\n, honoured via `white-space: pre-line` on
 // .entry-caption): sentence 1 breaks after "books", sentence 2 after "vision".
 const ENTRY_PANELS = [
-  'This corpus sample comes from scientific and encyclopedic books\npublished between the 18th and 20th centuries.',
-  'It was structured within a single dominant Western system\nof vision to produce and classify knowledge.',
+  'This corpus brings together thousands of images.',
+
+  'Part of historical publications, they were bound to a linear view.',
+ 
+   'Today you will simultaneously explore these images through different angles.',
 ]
 // Project-ONLY centred narration, played (2s after the user's first hover) via
 // set-center-caption with the same rotate params. Each sentence fades in,
-// holds ENTRY_PANEL_MS, fades out — sequenced by playProjectNarration().
+// holds PROJECT_HOLDS[i], fades out — sequenced by playProjectNarration().
 const PROJECT_PANELS = [
-  'This same corpus is organized into four distinct maps, each based on a unique principle.',
-  'Those configurations create different structures of relations, revealing image proximity.',
+  'You can see here the same images,\ndisplayed into four distinct maps.',
+  'Each map organizes them according\nto different scopes.',
 ]
 // CLICK_ACTION is a centred ROTATE caption (same `.entry-caption` style/timing
 // as the intro narration), drifting in after the project narration once the
 // interface has brightened back up (see playProjectNarration). (The earlier
 // "Explore the images…" HOVER_ACTION bottom prompt was removed.)
-const CLICK_ACTION = 'Explore images and select one to start your journey.'
+const CLICK_ACTION = 'Select an image to launch the interface.'
+// HOVER_ACTION is a centred ROTATE caption shown BEFORE the click action — it
+// invites the user to move the mouse / explore once hover unlocks; it then
+// fades and swaps to CLICK_ACTION (which is what also unlocks selection).
+const HOVER_ACTION = 'Move your mouse to explore the images.'
+const hoverCaptionVisible = ref(false)
+// Armed once the caption has shown for its minimum hold (HOVER_CAPTION_HOLD_MS):
+// from then on the FIRST real hover of an image dismisses it (→ click caption).
+// Until the user moves the mouse onto a sprite, the caption STAYS — so an idle
+// user keeps reading "Move your mouse…". See dismissHoverCaption().
+const hoverDismissArmed = ref(false)
+// Delay after the project narration fades before the "Move your mouse…" caption
+// appears (and hover/picking unlocks at that exact moment).
+const HOVER_CAPTION_DELAY_MS = 1000
+// Minimum time the "Move your mouse…" caption is shown before it can be
+// dismissed by a hover (one rotate-caption beat, same as the narration).
+const HOVER_CAPTION_HOLD_MS = VIEW2_PANEL_MS
 const clickCaptionVisible = ref(false)
 const entryIndex = ref(0)
 const entryCaptionVisible = ref(false) // gated by setTimeout below — see comment block
 // Iframe handle — used to post `view0:enable-hover` when phase 2 begins so the
 // embedded canvas un-hides its cursor and enables picking.
 const frameEl = ref<HTMLIFrameElement | null>(null)
-// Per-sentence hold for the interface intro narration.
-const ENTRY_PANEL_MS = VIEW2_PANEL_MS
-// Per-sentence hold for the project narration ("This same corpus…" / "Those
-// configurations…") — 6s each, independent of the interface intro hold.
-const PROJECT_PANEL_MS = 6000
+// Per-sentence FULL-OPACITY hold (ms) for the interface intro — the time each
+// sentence actually sits at opacity 1. The scheduler in onMounted adds the
+// appear-delay / fade overhead on top (FIRST_APPEAR_MS / GAP_MS below) so the
+// on-screen hold matches these exactly. All three sentences → 7s each.
+const ENTRY_HOLDS = [5000, 5000, 6000]
+// Mirror of the --rotate-* vars in app.vue :root (appear-delay 1400 · empty-beat
+// 200 · fade 400). FIRST_APPEAR_MS = mount → sentence 1 fully visible; GAP_MS =
+// trigger → next sentence fully visible under <Transition mode="out-in">.
+const FIRST_APPEAR_MS = 1400 + ROTATE_FADE_OUT_MS
+const GAP_MS = ROTATE_FADE_OUT_MS + 200 + ROTATE_FADE_OUT_MS
+// Per-sentence FULL-OPACITY hold (ms) for the project narration — the time each
+// sentence actually sits at opacity 1 on the feedback screen. The project
+// caption's fade-in eats PROJECT_FADEIN_MS (empty-beat + fade ≈ 600ms), which
+// the sequencer adds on top, so the on-screen hold matches these exactly and
+// both sentences are equal. Independent of the interface intro hold.
+const PROJECT_HOLDS = [7000, 7000]
+const PROJECT_FADEIN_MS = 200 + ROTATE_FADE_OUT_MS
 // ── VIEW_2 morph + darkening choreography ──
 // After the 2nd intro sentence ("It was structured…") fades, the INTERFACE
 // darkens and — coordinated with it — the standalone project morphs single →
@@ -64,12 +95,13 @@ const PROJECT_PANEL_MS = 6000
 // configurations…") APPEARS, but the interface stays dark through that whole
 // sentence and only brightens back up when it ENDS.
 const VIEW2_DIM_LEVEL = 0.7   // 0 = full brightness, 1 = fully dark
-const VIEW2_DIM_FADE_MS = 600 // dim in/out fade time
+// (Fade duration is no longer set here — the store derives it from the opacity
+// delta so all darkenings share one constant SPEED. See store.setInterfaceDim.)
 // Wait after "It was structured…" has faded before the darken + morph beat.
 const MORPH_AFTER_SENTENCE_MS = ROTATE_FADE_OUT_MS
 // Wait after the darken + morph before the project narration begins (lets the
 // hidden morph settle + the dark beat land first).
-const NARRATION_AFTER_MORPH_MS = 1200
+const NARRATION_AFTER_MORPH_MS = 2200
 // On image click, the disperse field (iframe sprites) fades out smoothly
 // BEFORE the view advances to VIEW_3, so the swap happens from a calm
 // gradient instead of cross-fading busy moving sprites into VIEW_3's layout
@@ -85,7 +117,9 @@ const ENTRY_EXIT_MS = 500
 //    unlocks and CLICK_ACTION replaces HOVER_ACTION.
 const hoverEnabled = ref(false)
 const clickEnabled = ref(false)
-let entryTimer: ReturnType<typeof setInterval> | null = null
+// Per-sentence rotation timeouts (replaces the old uniform setInterval so each
+// sentence can hold its own FULL-OPACITY duration — see ENTRY_HOLDS).
+let entryRotationTimers: ReturnType<typeof setTimeout>[] = []
 let entryFirstShowTimer: ReturnType<typeof setTimeout> | null = null
 // Fires the post-intro morph + narration beat (the last-sentence branch of the
 // rotation timer schedules it); cancelled on skip/unmount via clearEntryTimer.
@@ -95,10 +129,8 @@ let hoverRevealTimer: ReturnType<typeof setTimeout> | null = null
 let projectNarrationTimers: ReturnType<typeof setTimeout>[] = []
 
 function clearEntryTimer() {
-  if (entryTimer) {
-    clearInterval(entryTimer)
-    entryTimer = null
-  }
+  for (const t of entryRotationTimers) clearTimeout(t)
+  entryRotationTimers = []
   if (entryFirstShowTimer) {
     clearTimeout(entryFirstShowTimer)
     entryFirstShowTimer = null
@@ -127,11 +159,24 @@ function armHover() {
   )
 }
 
+// Dismiss the "Move your mouse…" caption once the user actually hovers an image
+// (only after its minimum hold has armed it — hoverDismissArmed). Fades it out,
+// then swaps to the "Select an image…" caption + unlocks selection. Idempotent.
+function dismissHoverCaption() {
+  if (!hoverDismissArmed.value || !hoverCaptionVisible.value) return
+  hoverDismissArmed.value = false
+  hoverCaptionVisible.value = false
+  projectNarrationTimers.push(setTimeout(() => {
+    clickCaptionVisible.value = true
+    clickEnabled.value = true
+  }, ROTATE_FADE_OUT_MS + 2500))
+}
+
 // Coordinated beat AFTER the 2nd intro sentence ("It was structured…"):
 // darken the interface + morph the project single → overview grid together,
 // then auto-play the project narration once the morph has settled.
 function startMorphAndNarration() {
-  store.setInterfaceDim(VIEW2_DIM_LEVEL, VIEW2_DIM_FADE_MS) // interface darkens
+  store.setInterfaceDim(VIEW2_DIM_LEVEL) // interface darkens (constant-speed fade)
   if (!overviewMorphed) {
     overviewMorphed = true
     store.morphToOverviewGrid()                            // project morph (mask-hidden)
@@ -147,11 +192,12 @@ function startMorphAndNarration() {
 function playProjectNarration() {
   let i = 0
   const showSentence = () => {
+    const sentenceIndex = i
     store.setCenterCaption(PROJECT_PANELS[i] ?? '', 'rotate')
     if (i === 1) {
-      // 2nd sentence appears → hover/picking unlocks. The interface stays DARK
-      // through this sentence and only brightens when it ends (else branch).
-      armHover()
+      // 2nd sentence appears → interface brightens at its END (else branch).
+      // Hover/picking is NOT armed here — it only unlocks when the
+      // "Move your mouse…" caption appears (see armHover() below).
     }
     projectNarrationTimers.push(setTimeout(() => {
       store.setCenterCaption('') // fade current sentence out
@@ -161,14 +207,24 @@ function playProjectNarration() {
       } else {
         // End of the 2nd sentence "Those configurations…" → the interface
         // brightens back up (the darkening held through the whole sentence).
-        store.setInterfaceDim(0, VIEW2_DIM_FADE_MS)
-        // Narration done: "Select an image…" rotate caption + unlock selection.
+        store.setInterfaceDim(0)
+        // Narration done: 1s later the "Move your mouse…" rotate caption appears
+        // AND hover/picking unlocks at that exact moment (not before). After its
+        // minimum hold the caption does NOT auto-swap — it STAYS until the user
+        // actually hovers an image, which dismisses it (→ click caption). So an
+        // idle user keeps reading the prompt. See dismissHoverCaption().
         projectNarrationTimers.push(setTimeout(() => {
-          clickCaptionVisible.value = true
-          clickEnabled.value = true
-        }, ROTATE_FADE_OUT_MS))
+          hoverCaptionVisible.value = true
+          armHover()
+          projectNarrationTimers.push(setTimeout(() => {
+            hoverDismissArmed.value = true
+            // If the user is already hovering a sprite when the hold ends, no new
+            // hover event will fire — dismiss right away in that case.
+            if (lastHoverId != null) dismissHoverCaption()
+          }, HOVER_CAPTION_HOLD_MS))
+        }, HOVER_CAPTION_DELAY_MS))
       }
-    }, PROJECT_PANEL_MS))
+    }, (PROJECT_HOLDS[sentenceIndex] ?? 0) + PROJECT_FADEIN_MS))
   }
   showSentence()
 }
@@ -289,6 +345,9 @@ function onMessage(event: MessageEvent) {
     // before that this early-returns even if the iframe posts hover events.
     if (!hoverEnabled.value) return
     const next = typeof data.imageId === 'string' ? data.imageId : null
+    // The user moved onto a sprite → dismiss the "Move your mouse…" prompt (if its
+    // hold has armed it). No-op until armed, so an idle user keeps the prompt.
+    if (next != null) dismissHoverCaption()
     // Hover lights the CORRESPONDING IMAGE on the standalone project (the iframe
     // lights its own sprite locally). The project narration is NOT hover-driven
     // anymore — it auto-plays after the morph (see startMorphAndNarration).
@@ -322,6 +381,8 @@ function onMessage(event: MessageEvent) {
     // field out together, then advance once the field has calmed. The clicked
     // image's pinned preview stays visible as an anchor through the swap.
     entryCaptionVisible.value = false
+    hoverCaptionVisible.value = false
+    hoverDismissArmed.value = false
     clickCaptionVisible.value = false
     // Clear any project caption still mirrored on the feedback screen.
     store.setCenterCaption('')
@@ -339,7 +400,9 @@ function skipToPick() {
   if (clickEnabled.value || entryExiting.value) return
   clearEntryTimer()
   entryCaptionVisible.value = false     // drop the intro caption if still up
-  store.setInterfaceDim(0, 0)           // drop any in-flight dim (skip bypasses narration)
+  hoverCaptionVisible.value = false     // drop the "Move your mouse…" caption if up
+  hoverDismissArmed.value = false
+  store.setInterfaceDim(0, { instant: true }) // drop any in-flight dim (skip bypasses narration)
   store.setCenterCaption('')            // clear any in-flight project narration
   // Guarantee the project reached the overview grid — VIEW_3 expects it. If the
   // user skipped before the morph beat, fire it now (instant-ish, no dark beat).
@@ -367,32 +430,26 @@ onMounted(() => {
     entryCaptionVisible.value = true
     entryFirstShowTimer = null
   }, firstShowWait)
-  // Rotation timer — same tick rhythm as VIEW_1's panel timer.
-  // Advances entryIndex through ENTRY_PANELS, and on the tick AFTER
-  // the last sentence arrives (i.e. once the last sentence has had
-  // its full 5000ms display time) fires its fade-out by
-  // flipping entryCaptionVisible to false. The view itself doesn't
-  // auto-advance — the user still needs to click a sprite — but the
-  // caption clears the way so the canvas reads cleanly.
-  entryTimer = setInterval(() => {
-    if (entryIndex.value >= ENTRY_PANELS.length - 1) {
-      if (entryTimer) {
-        clearInterval(entryTimer)
-        entryTimer = null
-      }
-      entryCaptionVisible.value = false
-      // Once "It was structured…" has faded (ROTATE_FADE_OUT_MS = the leave-fade
-      // duration): darken the interface + morph the project single → overview
-      // grid, then auto-play the project narration. Hover/picking stays gated
-      // until the 2nd project sentence (armHover, inside playProjectNarration).
-      hoverRevealTimer = setTimeout(() => {
-        startMorphAndNarration()
-        hoverRevealTimer = null
-      }, MORPH_AFTER_SENTENCE_MS)
-      return
-    }
-    entryIndex.value += 1
-  }, ENTRY_PANEL_MS) /* VIEW_2 hold per sentence; fade stays shared --rotate-fade-ms */
+  // Per-sentence rotation, scheduled (relative to mount) so each sentence's
+  // FULL-OPACITY hold equals ENTRY_HOLDS[i]. Sentence 1 is fully visible at
+  // FIRST_APPEAR_MS; we flip to the next index after its hold, and each later
+  // sentence becomes fully visible GAP_MS after the flip. After the LAST
+  // sentence's hold, fade it out, then (ROTATE_FADE_OUT_MS later) darken the
+  // interface + morph single → overview + auto-play the project narration —
+  // unchanged choreography. The view doesn't auto-advance; the user still picks.
+  let t = FIRST_APPEAR_MS + (ENTRY_HOLDS[0] ?? 0)
+  for (let i = 1; i < ENTRY_PANELS.length; i++) {
+    const next = i
+    entryRotationTimers.push(setTimeout(() => { entryIndex.value = next }, t))
+    t += GAP_MS + (ENTRY_HOLDS[i] ?? 0)
+  }
+  entryRotationTimers.push(setTimeout(() => {
+    entryCaptionVisible.value = false
+    hoverRevealTimer = setTimeout(() => {
+      startMorphAndNarration()
+      hoverRevealTimer = null
+    }, MORPH_AFTER_SENTENCE_MS)
+  }, t))
 })
 // NOTE: the interface narration is no longer mirrored to project. The project
 // shows its OWN centred narration (PROJECT_PANELS), played by
@@ -405,7 +462,7 @@ onBeforeUnmount(() => {
   store.setCenterCaption('')
   // Lift any active interface dim so it can't carry into VIEW_3 (e.g. the user
   // clicks to advance while the narration dim is still up).
-  store.setInterfaceDim(0, VIEW2_DIM_FADE_MS)
+  store.setInterfaceDim(0)
 })
 </script>
 
@@ -432,6 +489,18 @@ onBeforeUnmount(() => {
         class="entry-caption"
       >
         <span class="caption-text">{{ ENTRY_PANELS[entryIndex] }}</span>
+      </p>
+    </Transition>
+
+    <!-- "Move your mouse…" — a centred ROTATE caption shown first (once hover is
+         armed), inviting exploration before the selection prompt appears. -->
+    <Transition name="entry" mode="out-in">
+      <p
+        v-if="hoverCaptionVisible"
+        key="hover-action"
+        class="entry-caption"
+      >
+        <span class="caption-text">{{ HOVER_ACTION }}</span>
       </p>
     </Transition>
 
@@ -563,16 +632,17 @@ onBeforeUnmount(() => {
    rectangle. Matches VIEW_1 `.caption-text` / VIEW_3 `.intro-caption
    .caption-text`. */
 .entry-caption .caption-text {
+  color: var(--rotate-fill);
   text-shadow:
-    0 0 4px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 15px var(--rotate-panel-bg),
-    0 0 18px var(--rotate-panel-bg);
+    0 0 4px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 15px var(--rotate-stroke),
+    0 0 18px var(--rotate-stroke);
 }
 
 /* Vue <Transition name="entry"> CSS hooks — opacity-only fades using

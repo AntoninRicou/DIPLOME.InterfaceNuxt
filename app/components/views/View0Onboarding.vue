@@ -30,12 +30,8 @@ function handleClick() {
          "Click to launch" prompt were removed). Clicking anywhere on this group
          advances to VIEW_1. -->
     <div class="title-group" role="button" tabindex="0" @click="handleClick" @keydown.enter="handleClick" @keydown.space.prevent="handleClick">
-      <!-- #2 — 3D-extruded relief, WITHOUT the glass (capsule/blob removed) —
-           pure text relief, above the current title for comparison. -->
-      <p class="caption caption-3d title-glass">Proxima</p>
-
-      <!-- Version A — current SVG-shape system: glass clipped to the font-derived
-           blob mask (proxima_shadow_mask.svg). -->
+      <!-- Title — SVG-shape glass clipped to the font-derived blob
+           (proxima_shadow_mask.svg = the shadow background), #595b55 fill. -->
       <LiquidGlass
         class="title-glass"
         shape="/image/proxima_shadow_mask.svg"
@@ -45,23 +41,6 @@ function handleClick() {
         pad-y="1rem"
       >
         <p class="caption caption-fill">Proxima</p>
-      </LiquidGlass>
-
-      <!-- #3 — high-quality CURVED capsule glass: pure-CSS capsule (border-radius)
-           with rim lighting + specular sweep + depth. No SVG/mask, and refraction
-           off (no experimental url() backdrop interaction) for cross-browser
-           stability. Blur 10 / saturate 1.2. -->
-      <LiquidGlass
-        class="title-glass"
-        radius="999px"
-        :blur="7"
-        :saturate="1.2"
-        :refraction="0"
-        pad-x="3.4rem"
-        pad-y="1.8rem"
-        tint="transparent"
-      >
-        <p class="caption caption-hollow">Proxima</p>
       </LiquidGlass>
     </div>
 
@@ -252,22 +231,27 @@ function handleClick() {
   mask: url('/image/Proxima_shape.svg') center / contain no-repeat;
 }
 
-/* Subtitle: ABC Otto italic Medium. Light blueish fill (matching the title),
-   wearing the soft `--rotate-panel-bg` glyph halo backing. */
+/* Subtitle — rotate-caption text style: dark `--rotate-fill` glyphs wearing the
+   blue `--rotate-stroke` glyph backing (same as the VIEW_1/2 rotate captions),
+   at `--rotate-size`. Italic kept. */
 .hint {
   font-family: 'ABC Otto', serif;
-  font-size: 1.4rem;
+  font-size: var(--rotate-size);
   font-weight: 500;
   font-style: italic;
   letter-spacing: 0.015em;
   margin: 0;
-  /* Light-blue fill (matching the title) — but with NO glass behind it here, so
-     a thin dark edge + soft relief give it contrast on the light gradient. */
-  color: #aebfd4;
-  -webkit-text-stroke: 0.4px rgba(58, 70, 94, 0.55);
+  color: var(--rotate-fill);
   text-shadow:
-    0 1px 2px rgba(48, 58, 80, 0.35),
-    0 0 8px rgba(170, 180, 194, 0.2);
+    0 0 4px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 15px var(--rotate-stroke),
+    0 0 18px var(--rotate-stroke);
 }
 
 /* Smooth exit toward VIEW_1: when the click handler sets fadingOut

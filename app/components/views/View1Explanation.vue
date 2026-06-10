@@ -2,30 +2,44 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import SkipButton from '~/components/SkipButton.vue'
-import { VIEW1_PANEL_MS, ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
+import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 const store = useInteractionStore()
 
 const PANELS = [
-  'Proxima is a tool proposing new ways of exploring visual corpus through modes of proximity.',
-  'It allows the user to navigate through multiple simultaneous perspectives in order to create links between images.',
+  'You just entered Proxima.',
+  'A dual screen interface for navigating into large corpus of images.',
 ]
-// Per-view hold (4s for VIEW_1); the FADE (FADE_OUT_MS) stays shared/locked
-// with the other rotating-text components via `~/utils/rotateText`.
-// See feedback_rotate_text_sync.md.
-const PANEL_MS = VIEW1_PANEL_MS
 const FADE_OUT_MS = ROTATE_FADE_OUT_MS
+
+// Per-sentence FULL-OPACITY hold (ms): the time each sentence actually sits at
+// opacity 1, NOT counting the appear-delay / fade overhead. The scheduler below
+// adds that overhead on top so the on-screen hold matches these exactly.
+//   sentence 1 → 2s, sentence 2 → 5s
+const HOLDS = [2000, 5000]
+
+// Mirror of the --rotate-* vars in app.vue :root (kept in sync there):
+//   --rotate-appear-delay 1400 · --rotate-empty-beat 200 · --rotate-fade-ms 400.
+// FIRST_APPEAR_MS = mount → sentence 1 fully visible (appear-delay + fade).
+// GAP_MS          = trigger → next sentence fully visible (leave fade + empty
+//                   beat + enter fade), under <Transition mode="out-in">.
+const APPEAR_DELAY_MS = 1400
+const EMPTY_BEAT_MS = 200
+const FIRST_APPEAR_MS = APPEAR_DELAY_MS + FADE_OUT_MS
+const GAP_MS = FADE_OUT_MS + EMPTY_BEAT_MS + FADE_OUT_MS
 
 const index = ref(0)
 const captionVisible = ref(true)
-const crossDurationMs = computed(() => PANELS.length * PANEL_MS)
-let timer: ReturnType<typeof setInterval> | null = null
+// The cross draws over the whole runtime (mount → advance) so it finishes as the
+// last sentence ends: FIRST_APPEAR + Σ holds + one GAP per sentence change.
+const crossDurationMs = computed(() =>
+  FIRST_APPEAR_MS + HOLDS.reduce((a, b) => a + b, 0) + GAP_MS * (PANELS.length - 1),
+)
+let timers: ReturnType<typeof setTimeout>[] = []
 
 function clearTimer() {
-  if (timer) {
-    clearInterval(timer)
-    timer = null
-  }
+  for (const t of timers) clearTimeout(t)
+  timers = []
 }
 
 // Smooth handoff to VIEW_2: hide the caption (v-if=false) so Vue's
@@ -45,13 +59,17 @@ function skip() {
 }
 
 onMounted(() => {
-  timer = setInterval(() => {
-    if (index.value >= PANELS.length - 1) {
-      advance()
-      return
-    }
-    index.value += 1
-  }, PANEL_MS)
+  // Per-sentence schedule (relative to mount). Sentence 1 is fully visible at
+  // FIRST_APPEAR_MS; we flip to the next index after its HOLD, and each later
+  // sentence becomes fully visible GAP_MS after the flip. After the last hold,
+  // run the smooth exit.
+  let t = FIRST_APPEAR_MS + (HOLDS[0] ?? 0)
+  for (let i = 1; i < PANELS.length; i++) {
+    const next = i
+    timers.push(setTimeout(() => { index.value = next }, t))
+    t += GAP_MS + (HOLDS[i] ?? 0)
+  }
+  timers.push(setTimeout(() => advance(), t))
 })
 
 onBeforeUnmount(() => {
@@ -193,9 +211,12 @@ onBeforeUnmount(() => {
      transitions. */
   top: 50%;
   transform: translate(-50%, -50%);
-  /* One line per sentence: no wrap, width grows to the text. */
-  max-width: none;
-  white-space: nowrap;
+  /* Wrap each sentence onto ~two lines (centred) — wide enough that even the
+     long-word panel ("simultaneous perspectives") stays within two lines. */
+  max-width: min(52rem, 90vw);
+  /* pre-line honors the explicit `\n` in PANELS as a hard break while still
+     wrapping long lines. (`normal` collapsed the newline into a space.) */
+  white-space: pre-line;
   margin: 0;
   padding: 0;
   font-size: var(--rotate-size);
@@ -211,16 +232,17 @@ onBeforeUnmount(() => {
    fill reads as part of the text shape rather than a rectangle behind the
    line. Tight inner layers give it body; the wider layers feather out. */
 .caption-text {
+  color: var(--rotate-fill);
   text-shadow:
-    0 0 4px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 15px var(--rotate-panel-bg),
-    0 0 18px var(--rotate-panel-bg);
+    0 0 4px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 15px var(--rotate-stroke),
+    0 0 18px var(--rotate-stroke);
 }
 
 </style>

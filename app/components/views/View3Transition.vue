@@ -29,23 +29,36 @@ const QUADRANTS: Quadrant[] = [
 ]
 
 // After the last quadrant is hovered (`allCanvasesZoomed` flips true), the
-// "Four modes of proximity…" middle caption fades in CAPTION_DELAY_MS later,
-// then START_ACTION ("Click on your image…") follows once it fades out.
-const CAPTION_DELAY_MS = 1500
+// "This screen suggests…" modes caption fades in CAPTION_DELAY_MS later. The
+// whole rest of the sequence (MIRROR caption → START prompt) is nested inside
+// this timer, so raising it delays everything that follows too. 8s wait.
+const CAPTION_DELAY_MS = 13000
 // Middle NARRATION shown after zooming (mirrored to project). Uses the shared
 // rotate-text params (--rotate-size + fade timing + blue-grey stroke), same as
 // the rotating intro narration — see `.modes-caption` styles.
-const MODES_CAPTION = 'Four modes of proximity each suggesting new images relationing differently with the center image'
+const MODES_CAPTION = 'This interactive screen suggests images based on each quadrant’s relation mode.'
 // CALL-TO-ACTION sentences (interface-only) — now rendered as CENTRED rotate
 // text (the .modes-caption style), the 1st and 3rd of a 3-sentence sequence
 // with MODES_CAPTION in between. ZOOM_ACTION appears after the initial settle
 // beat (with the crosses) and HOLDS until all four quadrants are zoomed;
 // START_ACTION appears after the middle caption and HOLDS until the user clicks
 // the central image into the relational view.
-const ZOOM_ACTION = 'Activate the four modes of proximity to start the journey.'
-const START_ACTION = 'Click on your image to find new relations.'
+const ZOOM_ACTION = 'Activate the four quadrants across both screens.'
+// MIRROR sentence — a transient rotate caption shown AFTER the modes caption
+// and BEFORE the start prompt. FEEDBACK (project) centre ONLY (mirrored via
+// set-center-caption), with the INTERFACE darkened while it plays — no
+// interface text for this one.
+const MIRROR_CAPTION = 'This feedback screen provides a trace of your journey by showing suggested images through spatial proximity.'
+const MIRROR_DIM_LEVEL = 0.7 // interface darkening while the MIRROR caption plays on the feedback
+const START_ACTION = 'Click on the image to find new relations.'
 const showZoomAction = ref(false)
 const showStartAction = ref(false)
+// Full-opacity hold for the MIRROR sentence (~6s). The `.modes-caption` fade-in
+// eats ROTATE_FADE_OUT_MS, which is added on top so the on-screen hold is ~6s.
+const MIRROR_HOLD_MS = 6000 + ROTATE_FADE_OUT_MS
+let mirrorShowTimer: ReturnType<typeof setTimeout> | null = null
+let mirrorHoldTimer: ReturnType<typeof setTimeout> | null = null
+let mirrorClearTimer: ReturnType<typeof setTimeout> | null = null
 
 // ── Central-image click (VIEW_3 → VIEW_4 trigger) ──
 // The advance `+` is gone from VIEW_3 (the top cross only lives in VIEW_4 now).
@@ -57,20 +70,25 @@ const showStartAction = ref(false)
 // suggestion images stay at their latent opacity and carry into VIEW_4. The
 // central image + corner labels are untouched and carry over too.
 const dissolving = ref(false)
+const advancing = ref(false)
 let dissolveTimer: ReturnType<typeof setTimeout> | null = null
-// Quadrant-text fade window before advancing — the gentle 500ms `ease` fade on
-// both `.quadrant-text.dissolving` (interface) and `.canvas-text` (project),
-// plus a small buffer so the fade fully completes before VIEW_4 mounts.
-const TEXT_FADE_MS = 600
+// Lead gaps around the MIRROR caption (see the watch below):
+//  - MIRROR_LEAD_MS: after the quadrant texts dissolve + the interface darkens
+//    (both at once), wait this long before the MIRROR caption shows on feedback.
+//  - START_LEAD_MS: after the interface brightens back up, wait this long before
+//    the START_ACTION prompt shows on the interface.
+const MIRROR_LEAD_MS = 2000
+const START_LEAD_MS = 2000
 function onCenterClick() {
-  // Armed only while the start prompt is up; ignore re-clicks once it begins.
-  if (!showStartAction.value || dissolving.value) return
+  // Armed only while the start prompt is up; ignore re-clicks once advancing.
+  // (The quadrant texts already dissolved earlier — before the MIRROR caption —
+  // so this only hides the prompt and advances.)
+  if (!showStartAction.value || advancing.value) return
+  advancing.value = true
   showStartAction.value = false      // hide prompt + stop the central pulse + disarm
-  dissolving.value = true            // fade out the interface quadrant texts
-  store.clearCanvasTexts()           // fade out the project quadrant texts at the same beat
   dissolveTimer = setTimeout(() => {
     store.enterRelationalView('skip')
-  }, TEXT_FADE_MS)
+  }, ROTATE_FADE_OUT_MS)
 }
 
 // "Next" skip button — jumps straight to the relational view (VIEW_4),
@@ -143,6 +161,9 @@ function clearTimers() {
   if (captionTimer) { clearTimeout(captionTimer); captionTimer = null }
   if (modesHoldTimer) { clearTimeout(modesHoldTimer); modesHoldTimer = null }
   if (modesAfterTimer) { clearTimeout(modesAfterTimer); modesAfterTimer = null }
+  if (mirrorShowTimer) { clearTimeout(mirrorShowTimer); mirrorShowTimer = null }
+  if (mirrorHoldTimer) { clearTimeout(mirrorHoldTimer); mirrorHoldTimer = null }
+  if (mirrorClearTimer) { clearTimeout(mirrorClearTimer); mirrorClearTimer = null }
   if (dissolveTimer) { clearTimeout(dissolveTimer); dissolveTimer = null }
   if (crossesReadyTimer) { clearTimeout(crossesReadyTimer); crossesReadyTimer = null }
 }
@@ -177,27 +198,49 @@ watch(() => store.allCanvasesZoomed, (zoomed) => {
   showZoomAction.value = false
   captionTimer = setTimeout(() => {
     showModesCaption.value = true
-    // Mirror the centred modes-caption (middle NARRATION) on the standalone
-    // project at the same beat — both screens fade the sentence in together.
-    // (Corner labels are NOT revealed here — they reveal per-quadrant on each
-    // cross click, both screens; see CORNERS + store.zoomCanvas.)
-    store.setCenterCaption(MODES_CAPTION, 'rotate')
-    // Hold one rotate panel, then fade the narration OUT (over --rotate-fade-ms)
-    // on BOTH screens — exactly like any rotate-text sentence.
+    // INTERFACE-ONLY caption (no longer mirrored to the project centre). AT THE
+    // SAME MOMENT it appears, fade the quadrant texts out on BOTH screens —
+    // interface `.quadrant-text.dissolving` (500ms ease) + project `.canvas-text`
+    // via clearCanvasTexts() — so the per-quadrant texts clear as the summary
+    // caption arrives.
+    dissolving.value = true
+    store.clearCanvasTexts()
+    // Hold one rotate panel, then fade the narration OUT (over --rotate-fade-ms).
     modesHoldTimer = setTimeout(() => {
       showModesCaption.value = false
-      store.setCenterCaption('')
       // (hold = MODES_HOLD_MS = VIEW3_PANEL_MS − 2s)
-      // Once it has faded out, wait one extra second, then reveal the
-      // START_ACTION rotate sentence (3rd of the sequence) + the central-image
-      // pulse. They persist until the user clicks the central image into the
-      // relational view.
-      modesAfterTimer = setTimeout(() => { showStartAction.value = true }, ROTATE_FADE_OUT_MS + 1000)
+      // Once it has faded out, wait one extra second, then reveal the MIRROR
+      // sentence (interface-only) for ~6s, fade it out, and only THEN reveal the
+      // START_ACTION rotate sentence + the central-image pulse (which persist
+      // until the user clicks the central image into the relational view).
+      mirrorShowTimer = setTimeout(() => {
+        // Darken the interface for the MIRROR caption. (The quadrant texts
+        // already faded out earlier — when the modes caption appeared.)
+        store.setInterfaceDim(MIRROR_DIM_LEVEL)
+        // Wait MIRROR_LEAD_MS (1s) more, then show the MIRROR sentence on the
+        // project centre (interface stays dark, no interface text).
+        mirrorHoldTimer = setTimeout(() => {
+          store.setCenterCaption(MIRROR_CAPTION, 'rotate')
+          mirrorClearTimer = setTimeout(() => {
+            store.setCenterCaption('')   // clear the project caption
+            store.setInterfaceDim(0)     // brighten the interface back up
+            // Wait START_LEAD_MS (1s) more after brightening, then reveal the
+            // START_ACTION prompt + central-image pulse on the interface.
+            modesAfterTimer = setTimeout(() => { showStartAction.value = true }, START_LEAD_MS)
+          }, MIRROR_HOLD_MS)
+        }, MIRROR_LEAD_MS)
+      }, ROTATE_FADE_OUT_MS + 1000)
     }, MODES_HOLD_MS)
   }, CAPTION_DELAY_MS)
 })
 
-onBeforeUnmount(clearTimers)
+onBeforeUnmount(() => {
+  clearTimers()
+  // If the view leaves mid-MIRROR (e.g. skip), don't carry its feedback caption
+  // or the interface darkening into VIEW_4.
+  store.setCenterCaption('')
+  store.setInterfaceDim(0, { instant: true })
+})
 </script>
 
 <template>
@@ -277,6 +320,8 @@ onBeforeUnmount(clearTimers)
     <p class="modes-caption" :class="{ visible: showModesCaption }">
       <span class="caption-text">{{ MODES_CAPTION }}</span>
     </p>
+    <!-- (MIRROR sentence is FEEDBACK-only now — shown on the project centre
+         caption with the interface darkened; no interface element here.) -->
     <p class="modes-caption" :class="{ visible: showStartAction }">
       <span class="caption-text">{{ START_ACTION }}</span>
     </p>
@@ -488,16 +533,17 @@ onBeforeUnmount(clearTimers)
    so the modes line reads in the rotate-caption style. (The intro-caption that
    also used this was removed.) */
 .caption-text {
+  color: var(--rotate-fill);
   text-shadow:
-    0 0 4px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 15px var(--rotate-panel-bg),
-    0 0 18px var(--rotate-panel-bg);
+    0 0 4px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 15px var(--rotate-stroke),
+    0 0 18px var(--rotate-stroke);
 }
 
 /* Modes caption — anchored at the viewport centre (50%/50%) and centred
@@ -528,6 +574,11 @@ onBeforeUnmount(clearTimers)
 }
 .modes-caption.visible {
   opacity: 1;
+}
+/* Multi-line variant — honours the explicit `\n` (the base rule is nowrap) so
+   the MIRROR sentence breaks where written, each half centred. */
+.modes-caption.multiline {
+  white-space: pre-line;
 }
 
 /* Shared glow pulse — applied to every `.cross-button` (the four quadrant
