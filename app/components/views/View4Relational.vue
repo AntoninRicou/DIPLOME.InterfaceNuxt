@@ -33,19 +33,33 @@ const centerKey = ref(0)
 function onCornerClick(i: number) {
   centerKey.value++
   store.centerReplayCircle(i)
+  // The FIRST side-circle click drives the rest of the end sequence (once):
+  if (!endSequenceStarted) {
+    endSequenceStarted = true
+    // The "Previous participants…" intro gives way to "Click around…", held 5s.
+    exploreRibbonsIntroVisible.value = false
+    exploreRibbonsCaptionVisible.value = true
+    finaleTimers.push(setTimeout(() => {
+      exploreRibbonsCaptionVisible.value = false
+    }, CLICK_AROUND_HOLD_MS))
+    // After the click, reveal the end controls (Start over + About).
+    finaleTimers.push(setTimeout(() => {
+      endControlsReady.value = true
+    }, END_CONTROLS_AFTER_CLICK_MS))
+  }
 }
 
 // Clicking the center cross enters the explore-others view. EXPLORE_TEXT shows
 // on the PROJECT centre only (one line) — NOT on the interface. The corner
 // ribbons are armed by the first circle hover after the dim lifts (see onCircleHover).
-const EXPLORE_TEXT = 'See how you move across the different relational maps.'
+const EXPLORE_TEXT = 'See how you traveled.'
 // A second sentence shown right after the first, same hold duration. Everything
 // downstream (map keywords, ribbons) is pushed back by one sentence cycle so it
 // still lands after BOTH sentences have played (see advanceToExplore).
-const EXPLORE_TEXT_2 = 'Your journey went through various zone of context'
+const EXPLORE_TEXT_2 = 'Your journey cross different areas of the maps.'
 // "See how…" appears after the journey sentence leaves / single map reveals
 // (SINGLE_REVEAL_MS 8250). Hand-tuned to 10750ms (+500 over the prior 10250).
-const EXPLORE_DELAY_MS = 10750 // wait before the "See how…" project caption appears
+const EXPLORE_DELAY_MS = 11750 // wait before the "See how…" project caption appears
 const EXPLORE_HOLD_MS = 5000
 // Interface darkening while the two project sentences play. The fade duration
 // is no longer set here — the store derives it from the opacity delta so this
@@ -63,24 +77,38 @@ const ribbonsReady = ref(false)
 const circleHoverReady = ref(false)
 // Interface-only rotate caption shown the moment the dim deactivates (hover
 // unlocks) — invites the user to hover the circle.
-const EXPLORE_HOVER_HINT_TEXT = 'Hover your images to see how they live in those maps.'
-const EXPLORE_HOVER_HINT_DELAY_MS = 500 // beat after the dim lifts before the hint appears
+const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to see where they live.'
+const EXPLORE_HOVER_HINT_DELAY_MS = 4000 // beat after the dim lifts before the hint appears
 const exploreHoverHintVisible = ref(false)
-// Interface-only rotate caption played BEFORE the ribbons (context-setting),
-// holding the standard duration; the ribbon appearance is delayed to fit it.
-const EXPLORE_RIBBONS_INTRO_TEXT = 'Previous user also went through this experience.'
+// True once the user has hovered a circle image. If they hover BEFORE the hint's
+// delay elapses, the hint never appears (no point prompting them to do something
+// they're already doing). See onCircleHover + the hint timer.
+const hasHoveredCircle = ref(false)
+// Interface-only rotate caption shown BEFORE the ribbons (context-setting). It
+// STAYS visible (no auto-fade) until the user clicks a side circle.
+const EXPLORE_RIBBONS_INTRO_TEXT = 'Previous participants have also wandered through Proxima.'
+// "Proxima" italicised (rendered via v-html — static trusted constant).
+const exploreRibbonsIntroHtml = computed(() => EXPLORE_RIBBONS_INTRO_TEXT.replace('Proxima', '<i>Proxima</i>'))
 const exploreRibbonsIntroVisible = ref(false)
-// Empty beat between the intro caption fading out and the ribbons appearing.
-const EXPLORE_RIBBONS_INTRO_GAP_MS = 600
-// Interface-only rotate caption shown AFTER the ribbons (the ribbons fade in,
-// then 1.5s later the user is told to "look for others").
-const EXPLORE_RIBBONS_TEXT = 'Click around to see their unique journey.'
+// The ribbons appear this long after the intro caption shows.
+const RIBBONS_AFTER_INTRO_MS = 1500
+// Interface-only rotate caption shown WHEN the user clicks a side circle —
+// invites them to keep exploring. Holds CLICK_AROUND_HOLD_MS, then fades.
+const EXPLORE_RIBBONS_TEXT = 'Click around to discover their explorations.'
 const exploreRibbonsCaptionVisible = ref(false)
-// The ribbon sequence is HOVER-gated: 7s after the user FIRST hovers a circle
-// image (which is only possible once the dim has lifted), the "Previous user…"
-// caption plays, then the ribbons, then the "look around…" caption.
+const CLICK_AROUND_HOLD_MS = 5000
+// The end controls (Start over + About) appear END_CONTROLS_AFTER_CLICK_MS after
+// the FIRST side-circle click.
+const END_CONTROLS_AFTER_CLICK_MS = 14000
+// True once the end controls (Start over + credits) should appear. Gates BOTH
+// the controls and the end caption (replaces the old replay-pick-count gate).
+const endControlsReady = ref(false)
+// Guards the once-only end sequence so it fires on the FIRST side-circle click.
+let endSequenceStarted = false
+// The ribbon sequence is HOVER-gated: RIBBONS_AFTER_HOVER_MS after the user FIRST
+// hovers a circle image, the "Previous participants…" caption appears (and stays),
+// and the ribbons appear RIBBONS_AFTER_INTRO_MS later.
 const RIBBONS_AFTER_HOVER_MS = 7000
-const RIBBON_CAPTION_AFTER_RIBBONS_MS = 1000 // caption follows the ribbons by 1s
 // Armed once on the first post-dim circle hover (see onCircleHover).
 let ribbonHoverTimer: ReturnType<typeof setTimeout> | null = null
 // Advance into the explore-others (single-path) view. Runs automatically from
@@ -102,11 +130,12 @@ function advanceToExplore() {
           store.setCenterCaption('') // sentence 2 begins fading out
           store.setInterfaceDim(0)   // interface brightens back (constant-speed fade)
           circleHoverReady.value = true                   // circle hover unlocks once bright
-          // …and the hover hint appears a beat (500ms) after the brighten. It
-          // STAYS until the user actually hovers a circle image — it does NOT
-          // auto-fade (dismissed in onCircleHover on the first real hover).
+          // …and the hover hint appears after the brighten — but ONLY if the
+          // user hasn't already started hovering the circle by then (no point
+          // telling them to do what they're doing). It STAYS until the first
+          // real hover (dismissed in onCircleHover), and does NOT auto-fade.
           finaleTimers.push(setTimeout(() => {
-            exploreHoverHintVisible.value = true
+            if (!hasHoveredCircle.value) exploreHoverHintVisible.value = true
           }, EXPLORE_HOVER_HINT_DELAY_MS))
           // …then the map keywords/subjects/years appear 500ms after that fade-out.
           finaleTimers.push(setTimeout(() => { store.showMapWords() }, MAPWORDS_AFTER_SEE_HOW_MS))
@@ -261,7 +290,7 @@ watch(() => store.overviewConfirmed, (v) => { if (v) { centerKey.value++; startF
 const deckHidden = ref(false)
 // Fade the centred deck out simultaneously with the full-opacity cells (the
 // `dissolve` phase), not a step later on `fadeout`.
-watch(() => store.overviewFinalePhase, (p) => { if (p === 'dissolve') deckHidden.value = true })
+watch(() => store.overviewFinalePhase, (p) => { if (p === 'transition') deckHidden.value = true })
 function onCenterAfterLeave() { deckHidden.value = false }
 
 // ── Post-overview finale narration ──
@@ -273,10 +302,11 @@ function onCenterAfterLeave() { deckHidden.value = false }
 // project (advanceToExplore drives both the morph and that caption). The old
 // second sentence on the project ("Your images found different neighbors…") was
 // removed.
-const FINAL_INTERFACE_TEXT = 'You produced a unique journey through your selection.'
-// Journey sentence appears 2.8s AFTER the circle (the transition itself starts
-// with the circle, at t=0 — they're decoupled).
-const JOURNEY_TEXT_DELAY_MS = 2800
+const FINAL_INTERFACE_TEXT = 'Your selection formed a unique path through your journey.'
+// Journey sentence appears 1.8s AFTER the circle (the transition itself starts
+// with the circle, at t=0 — they're decoupled). Brought 1s earlier so it holds
+// 1s longer; its fade-out still lands at SINGLE_REVEAL_MS (project reveal).
+const JOURNEY_TEXT_DELAY_MS = 1800
 // …and fades out at the project's mask-reveal moment (enterSinglePathView:
 // FADE_IN 250 + MORPH 0 + HOLD 8000 = 8250) so the interface text leaving and
 // the project reveal correspond.
@@ -288,7 +318,7 @@ let finaleTimers: ReturnType<typeof setTimeout>[] = []
 // shown once when the relational view is entered (i.e. right after the user
 // clicks the central image in VIEW_3). Fades in after a short settle beat,
 // holds, fades out.
-const RELATIONAL_INTRO_TEXT = 'Explore the different images relations living in the four quadrant around.'
+const RELATIONAL_INTRO_TEXT = '	You can now explore the corpus through the centered image.'
 const RELATIONAL_INTRO_DELAY_MS = 1400 // settle beat before it drifts in
 const RELATIONAL_INTRO_HOLD_MS = 6000  // hold at full opacity before fading out
 const relationalIntroVisible = ref(false)
@@ -355,16 +385,30 @@ function startFinaleNarration() {
 onMounted(() => {
   updateRibbonViewport()
   window.addEventListener('resize', updateRibbonViewport)
-  // VIEW_4 entry guidance caption: fade in after a settle beat, hold, fade out.
+  // VIEW_3's bottom Skip button bypasses the quadrant zooms AND this VIEW_4
+  // entry narration: when its flag is set, skip both intro sentences and leave
+  // selection unlocked immediately. (Consume the flag so it's one-shot.)
+  if (store.bypassRelationalIntro) {
+    store.bypassRelationalIntro = false
+    store.relationalSelectionLocked = false
+    return
+  }
+  // Lock image selection until the entry narration finishes (released when the
+  // 2nd caption "You can now explore…" fades out below).
+  store.relationalSelectionLocked = true
+  // VIEW_4 entry guidance — INVERTED order: the mode-words caption ("Your
+  // selected image shares proximity…") plays FIRST, then "You can now explore…".
   finaleTimers.push(setTimeout(() => {
-    relationalIntroVisible.value = true
+    relationalIntro2Visible.value = true
     finaleTimers.push(setTimeout(() => {
-      relationalIntroVisible.value = false
-      // After caption 1 has faded out, drift caption 2 in (names the modes).
+      relationalIntro2Visible.value = false
+      // After the mode-words caption fades, drift "You can now explore…" in.
       finaleTimers.push(setTimeout(() => {
-        relationalIntro2Visible.value = true
+        relationalIntroVisible.value = true
         finaleTimers.push(setTimeout(() => {
-          relationalIntro2Visible.value = false
+          relationalIntroVisible.value = false
+          // 2nd caption fades out → selection unlocks.
+          store.relationalSelectionLocked = false
         }, RELATIONAL_INTRO_HOLD_MS))
       }, ROTATE_FADE_OUT_MS + RELATIONAL_INTRO2_GAP_MS))
     }, RELATIONAL_INTRO_HOLD_MS))
@@ -422,9 +466,13 @@ function onCircleHover(id: string | null) {
   // unlocks once the dim lifts (end of the 2nd explore sentence).
   if (!circleHoverReady.value) return
   store.setHighlight(id)
-  // Hovering a circle image dismisses the "Hover your images…" hint (it stayed
-  // up until now instead of auto-fading).
-  if (id) exploreHoverHintVisible.value = false
+  // Hovering a circle image dismisses the "Hover over images…" hint (and marks
+  // that the user hovered, so the hint's delayed reveal is suppressed if they
+  // hovered before it would have appeared).
+  if (id) {
+    hasHoveredCircle.value = true
+    exploreHoverHintVisible.value = false
+  }
   // The FIRST hover (now that the dim has lifted) arms the ribbon sequence:
   // RIBBONS_AFTER_HOVER_MS later the "Previous user…" caption plays, then the
   // ribbons, then "Look around…". Armed once.
@@ -438,21 +486,14 @@ function onCircleHover(id: string | null) {
 // then the ribbons, then the "Look around…" caption. Armed by the first
 // post-dim circle hover + RIBBONS_AFTER_HOVER_MS (see onCircleHover).
 function scheduleRibbons() {
-  // Intro caption first ("Previous user also went through this corpus."),
-  // held the standard duration — the ribbons wait for it to play out.
+  // Intro caption ("Previous participants…") — STAYS until the user clicks a
+  // side circle (hidden in onCornerClick). The ribbons appear
+  // RIBBONS_AFTER_INTRO_MS after it shows; the rest of the sequence ("Click
+  // around…" + the end controls) is driven by the first side-circle click.
   exploreRibbonsIntroVisible.value = true
   finaleTimers.push(setTimeout(() => {
-    exploreRibbonsIntroVisible.value = false
-    // After the intro fades, the ribbons appear…
-    finaleTimers.push(setTimeout(() => {
-      ribbonsReady.value = true
-      // …then the "look around…" caption 1s later.
-      finaleTimers.push(setTimeout(() => {
-        exploreRibbonsCaptionVisible.value = true
-        finaleTimers.push(setTimeout(() => { exploreRibbonsCaptionVisible.value = false }, EXPLORE_HOLD_MS))
-      }, RIBBON_CAPTION_AFTER_RIBBONS_MS))
-    }, EXPLORE_RIBBONS_INTRO_GAP_MS))
-  }, EXPLORE_HOLD_MS))
+    ribbonsReady.value = true
+  }, RIBBONS_AFTER_INTRO_MS))
 }
 
 function dotStateAt(i: number): 'current' | 'past' | 'future' | 'empty' {
@@ -465,11 +506,6 @@ function dotStateAt(i: number): 'current' | 'past' | 'future' | 'empty' {
 function onDotClick(i: number) {
   if (i < store.navigationHistory.length) store.jumpToHistory(i)
 }
-
-// "Start over" appears only after the user has explored at least this many
-// corner ribbons (each pick refreshes the corners, so every pick is a
-// different ribbon).
-const REPLAY_PICKS_FOR_RESTART = 3
 
 // Restart the whole experience from VIEW_0. A full reload is the clean reset
 // (re-boots at VIEW_0 + re-registers the socket so the boot handshake wipes
@@ -499,6 +535,22 @@ const creditsOpen = ref(false)
 function toggleCredits() {
   creditsOpen.value = !creditsOpen.value
 }
+
+// Credits panel copy. IMAGE_CREDIT_LINES (view3Interpretations.ts) supplies the
+// "Source of images" block so it stays the single source of truth shared with
+// interpretation mode; everything else lives here.
+const CREDITS_TITLE = 'Proxima'
+const CREDITS_SUBTITLE = 'No image belongs to one place'
+const CREDITS_AUTHOR = 'by Antonin Ricou'
+const CREDITS_ABOUT: readonly string[] = [
+  'Proxima is a tool for exploring visual corpus through different spaces of reading. It allows users to navigate images through multiple forms of relation shaped by spatial proximity. Each path produces a visual trajectory where meaning emerges through experience rather than a single fixed structure.',
+  'It questions contemporary archives by showing how images can exist in multiple relational positions at once. Once fixed within scientific and encyclopedic publications, these images now circulate, shift in meaning, and reconfigure through new connections.',
+  'Proxima opens a space where users explore a large corpus of images, originally fixed within a single archival context, through alternative perspectives and leave traces of their journey.',
+]
+const CREDITS_TYPOGRAPHY: readonly string[] = [
+  'ABC Otto by DINAMO',
+  'Neue Kabel by Marc Schütz',
+]
 </script>
 
 <template>
@@ -507,9 +559,9 @@ function toggleCredits() {
     :class="[`bg-${store.canvasBackground}`, {
       minimal: store.overviewConfirmed,
       interpreting: store.view3InterpretationMode,
-      // Cross + corner labels fade on `dissolve` too (not a step later) so they
-      // leave at the SAME moment as the cells, deck and the project mask.
-      'finale-fadeout': store.overviewFinalePhase === 'dissolve' || store.overviewFinalePhase === 'fadeout',
+      // The grid cross is part of the rest — it fades once the last quadrant
+      // is gone (the rest phase), together with the corner labels.
+      'finale-fadeout': store.overviewFinalePhase === 'rest' || store.overviewFinalePhase === 'transition',
       'is-restarting': restarting,
     }]"
   >
@@ -534,6 +586,7 @@ function toggleCredits() {
       v-if="store.view3InterpretationMode && !store.overviewConfirmed"
       class="interpret-veil"
       aria-hidden="true"
+      @click="store.toggleView3Interpretation()"
     />
 
     <div v-if="!store.overviewConfirmed" class="grid">
@@ -682,11 +735,11 @@ function toggleCredits() {
       :class="{ visible: exploreRibbonsIntroVisible }"
       aria-live="polite"
     >
-      <span class="caption-text">{{ EXPLORE_RIBBONS_INTRO_TEXT }}</span>
+      <span class="caption-text" v-html="exploreRibbonsIntroHtml"></span>
     </p>
 
-    <!-- "Look for others" prompt — interface centre only, appears WITH the
-         corner ribbons (4s after the user starts hovering the circle). -->
+    <!-- "Click around…" prompt — interface centre only, shown for 5s when the
+         user clicks a side circle. -->
     <p
       v-if="store.singlePathViewActive"
       class="final-caption"
@@ -719,7 +772,7 @@ function toggleCredits() {
       aria-live="polite"
     >
       <span class="caption-text"
-        >Each sharing proximity with the center image through :<br /><!--
+        >Your selected image shares proximity with surrounding images through:<br /><!--
         --><template v-for="(m, i) in RELATIONAL_MODES" :key="m.word">{{ i === 0 ? '' : i === RELATIONAL_MODES.length - 1 ? ' & ' : ', ' }}<span
           class="mode-word"
           :style="{ '--mode-glow': m.color }"
@@ -737,39 +790,57 @@ function toggleCredits() {
     >
       <span class="caption-text">{{ ONE_LEFT_TEXT }}</span>
     </p>
-    <!-- Single "Start over" control at the top — appears only after the user
-         has picked at least REPLAY_PICKS_FOR_RESTART different ribbons. Reuses
-         the shared SkipButton (same class + parameters as the skip/next
-         control), top-placed so it aligns with the top corner labels. Click →
-         smooth gradient fade, then restart at VIEW_0. -->
+    <!-- "Start over" control at the BOTTOM — appears with the end caption
+         (endControlsReady, 10s after the first side-circle click). Reuses the
+         shared SkipButton (default bottom placement, aligned to the bottom
+         corner labels). Click → smooth gradient fade, then restart at VIEW_0. -->
     <SkipButton
-      v-if="store.singlePathViewActive && store.replayPickCount >= REPLAY_PICKS_FOR_RESTART"
+      v-if="store.singlePathViewActive && endControlsReady"
       label="Start Over"
       @click="onStartOver"
     />
 
     <!-- Credits / "about the project" control — appears WITH "Start over"
-         (same gate). Reproduces the VIEW_4 interpret-control `+`; toggles a
-         centred overlay. For now the overlay duplicates the interpretation-
-         mode credit text; it will become a scrollable grid of all images. -->
-    <button
-      v-if="store.singlePathViewActive && store.replayPickCount >= REPLAY_PICKS_FOR_RESTART"
-      class="interpret-control credits-control"
-      :class="{ active: creditsOpen }"
-      :aria-pressed="creditsOpen"
-      aria-label="about the project"
+         (same gate: endControlsReady). Same shared SkipButton look as "Start
+         over", top-placed (aligns with the top corner labels). Toggles a centred
+         overlay; for now it duplicates the interpretation-mode credit text. -->
+    <SkipButton
+      v-if="store.singlePathViewActive && endControlsReady"
+      label="About"
+      placement="top"
       @click="toggleCredits"
-    >
-      +
-    </button>
+    />
 
     <div v-if="creditsOpen" class="credits-panel" @click="toggleCredits">
-      <p class="interpret-message visible credits-message">
-        <template v-for="(line, i) in IMAGE_CREDIT_LINES" :key="i">
-          <span :class="{ 'interpret-message-url': i === IMAGE_CREDIT_LINES.length - 1 }">{{ line }}</span>
-          <br v-if="i < IMAGE_CREDIT_LINES.length - 1" />
-        </template>
-      </p>
+      <!-- Click anywhere (backdrop or content) closes — clicks bubble up to
+           the panel's @click. -->
+      <div class="credits-content">
+        <header class="credits-head">
+          <h1 class="credits-title">{{ CREDITS_TITLE }}</h1>
+          <p class="credits-subtitle">{{ CREDITS_SUBTITLE }}</p>
+          <p class="credits-author">{{ CREDITS_AUTHOR }}</p>
+        </header>
+
+        <section class="credits-section">
+          <p class="credits-label">About</p>
+          <p v-for="(para, i) in CREDITS_ABOUT" :key="i" class="credits-para">{{ para }}</p>
+        </section>
+
+        <section class="credits-section">
+          <p class="credits-label">Source of images</p>
+          <p
+            v-for="(line, i) in IMAGE_CREDIT_LINES"
+            :key="i"
+            class="credits-para credits-source"
+            :class="{ 'credits-url': i === IMAGE_CREDIT_LINES.length - 1 }"
+          >{{ line }}</p>
+        </section>
+
+        <section class="credits-section">
+          <p class="credits-label">Typography in use</p>
+          <p v-for="(line, i) in CREDITS_TYPOGRAPHY" :key="i" class="credits-para credits-source">{{ line }}</p>
+        </section>
+      </div>
     </div>
 
     <nav
@@ -822,7 +893,7 @@ function toggleCredits() {
      interpretation mode the cross gets its OWN blur (see `.interpreting`
      below) so it stays a soft, discreet cross instead of vanishing. */
   z-index: 6;
-  transition: filter 240ms ease-out, opacity 700ms ease-out;
+  transition: filter 240ms ease-out, opacity 200ms ease-out;
   background:
     linear-gradient(to bottom,
       transparent calc(50% - 0.5px),
@@ -867,7 +938,12 @@ function toggleCredits() {
   background: transparent;
   backdrop-filter: blur(7px);
   -webkit-backdrop-filter: blur(7px);
-  pointer-events: none;
+  /* Clickable so a click on the blurred field exits interpretation mode
+     (no need to click the `+` again). The interactive surfaces that sit
+     ABOVE the veil — central deck (z:10), corner labels / text panels (z:6),
+     the `+` and bg dots (top-controls) — keep their own clicks. */
+  pointer-events: auto;
+  cursor: pointer;
 }
 /* Canvas-background modes live globally in app.vue (`.bg-black` /
    `.bg-gradient`) — shared across all views. .view-3 just applies the
@@ -966,7 +1042,7 @@ function toggleCredits() {
    opacity transition. */
 .center-anchor.deck-fadeout {
   opacity: 0;
-  transition: opacity 700ms ease-out;
+  transition: opacity 200ms ease-out;
 }
 /* Hover halo — warm beige glow matching the system palette
    (history-strip `.current` step, contribute button bloom). Targets
@@ -1108,24 +1184,95 @@ function toggleCredits() {
   z-index: 120;
 }
 
-/* Credits overlay — full-field beige veil hosting the centred credit text
-   (for now the duplicated IMAGE_CREDIT_LINES; later a scrollable image grid).
-   Mirrors the interpretation-mode veil. Click anywhere closes it. */
+/* Credits overlay — pure blurred field (same system as the interpretation-mode
+   `.interpret-veil`: transparent + blur, no beige tint). Sits ABOVE the explore
+   circle / ribbons (z bumped past them) so the text reads on top, not under the
+   images. Content is anchored to the TOP and sized to fit the window — no
+   scroll. Click anywhere closes it. */
 .credits-panel {
   position: fixed;
   inset: 0;
-  z-index: 25;
+  z-index: 130;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  background: rgba(232, 224, 206, 0.32);
+  background: transparent;
   backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
 }
-/* The shared .interpret-message is absolutely centred; inside the flex panel
-   it should flow normally instead. */
-.credits-message {
-  position: static;
-  transform: none;
+
+/* Structured credits content — top-anchored column, no scroll, fits the
+   window. Body text (ABC Otto) uses the interface quadrant-text size (1.3rem);
+   the title uses the Neue Kabel skip-button size (1.05rem). Vertical spacing is
+   tight so the whole block clears the window height without scrolling. */
+.credits-content {
+  max-width: min(46em, 88vw);
+  max-height: 100vh;
+  padding: 2.4vh 1rem;
+  text-align: center;
+  color: #595b54;
+}
+
+.credits-head {
+  margin-bottom: 2vh;
+}
+/* Title — Neue Kabel at the skip-button size (1.05rem). */
+.credits-title {
+  margin: 0;
+  font-family: 'Neue Kabel', sans-serif;
+  font-weight: 500;
+  font-size: 1.05rem;
+  letter-spacing: 0.015em;
+  line-height: 1.15;
+}
+.credits-subtitle {
+  margin: 0.35rem 0 0;
+  font-style: italic;
+  font-size: 1.05rem;
+}
+.credits-author {
+  margin: 0.5rem 0 0;
+  font-family: 'Neue Kabel', sans-serif;
+  font-size: 0.95rem;
+  opacity: 0.85;
+}
+
+.credits-section {
+  margin-bottom: 2vh;
+}
+.credits-section:last-child {
+  margin-bottom: 0;
+}
+/* Section heading (About / Source of images / Typography) — Neue Kabel. */
+.credits-label {
+  margin: 0 0 0.5rem;
+  font-family: 'Neue Kabel', sans-serif;
+  font-weight: 500;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+/* Body paragraphs (ABC Otto) at the interface quadrant-text size. */
+.credits-para {
+  margin: 0 auto 0.5rem;
+  max-width: 42em;
+  font-size: 1.3rem;
+  line-height: 1.28;
+  text-wrap: pretty;
+}
+.credits-para:last-child {
+  margin-bottom: 0;
+}
+/* Source-of-images + typography lines — same Otto quadrant size, quieter. */
+.credits-source {
+  margin-bottom: 0.15rem;
+  font-size: 1.3rem;
+  line-height: 1.25;
+  opacity: 0.9;
+}
+.credits-url {
+  opacity: 0.7;
+  word-break: break-all;
 }
 
 .overview-control {
@@ -1146,7 +1293,10 @@ function toggleCredits() {
   transform: translate(-50%, -50%);
   margin: 0;
   padding: 0 1rem;
-  max-width: min(46em, 88vw);
+  /* Wide enough that the entry caption's first line ("…images through:") keeps
+     "through:" on line 1 before its explicit <br/>. Shorter captions don't reach
+     this, so they're unaffected. */
+  max-width: min(52em, 92vw);
   text-align: center;
   font-size: var(--rotate-size);
   line-height: var(--rotate-line-height);

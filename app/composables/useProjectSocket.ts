@@ -174,6 +174,18 @@ export function useProjectSocket() {
     return true
   }
 
+  // Dim non-marked sprites (explore-single view) so the marked circle/path
+  // images stand out; false restores full opacity (Start over).
+  function setMarkDim(active: boolean): boolean {
+    if (import.meta.server) return false
+    if (!socket || !socket.connected) {
+      console.warn('[socket] not connected; dropping set-mark-dim', active)
+      return false
+    }
+    socket.emit('message', { type: 'set-mark-dim', payload: { active } })
+    return true
+  }
+
   function setGhostPath(fromId: string | null, toId: string | null): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
@@ -305,5 +317,5 @@ export function useProjectSocket() {
     return Boolean(socket && socket.connected)
   }
 
-  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, pathFadeOut, setMask, setDim, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCornerLabelHover, setCanvasText, setCenterCaption, setMapLabel, setMapWords, isConnected }
+  return { init, onRegister, focus, setState, pathSegment, pathTruncate, pathClear, pathFadeOut, setMask, setDim, setCanvasBg, setCanvasVeil, setHighlight, setMarks, setMarkDim, setGhostPath, setCanvasZoom, setCanvasOverview, setCornerLabels, setCornerLabel, setCornerLabelHover, setCanvasText, setCenterCaption, setMapLabel, setMapWords, isConnected }
 }

@@ -330,6 +330,17 @@ function onCellLeave() {
   hoveredCell.value = null
 }
 
+// When the last image is selected, the overview finale freezes the cells
+// (`is-frozen` → pointer-events: none). That can swallow the cell's `mouseleave`,
+// so `onCellLeave` never fires and the hover overlay — radial words (keywords),
+// the bridge connector line, the ghost path + highlight — stays on screen while
+// everything else fades out. Clear it deterministically on the `dissolve` beat
+// (when the cells fade out) so it fades at the SAME moment. (Idempotent if the
+// mouseleave already fired and `hoveredCell` is null.)
+watch(() => store.overviewFinalePhase, (phase) => {
+  if (phase === 'clockwise' && hoveredCell.value) onCellLeave()
+})
+
 // ── Hover state ──
 // The currently-hovered cell (id + slot), its subject (Source), and its radial
 // offset. These feed the radial word layout below (see `radialWords`).
@@ -577,6 +588,20 @@ const QUADRANT_INDEX: Record<'tl' | 'tr' | 'bl' | 'br', number> = {
   tl: 0, tr: 1, bl: 2, br: 3,
 }
 
+// Overview-finale clockwise fade order: tl → tr → br → bl (distinct from
+// QUADRANT_INDEX, which is the component-id order with bl=2 / br=3). Each
+// quadrant's cells fade with a `transition-delay` of index × step, so the four
+// quadrants disappear one after another. FINALE_CLOCKWISE_STEP_MS mirrors
+// CLOCKWISE_STEP_MS in interaction.ts — KEEP IN SYNC (the CSS fade duration on
+// `.finale-clockwise .cell` mirrors CELL_FADE_MS there).
+const FINALE_CLOCKWISE_INDEX: Record<'tl' | 'tr' | 'bl' | 'br', number> = {
+  tl: 0, tr: 1, br: 2, bl: 3,
+}
+const FINALE_CLOCKWISE_STEP_MS = 450
+const finaleClockwiseDelay = computed(
+  () => `${FINALE_CLOCKWISE_INDEX[props.position ?? 'tl'] * FINALE_CLOCKWISE_STEP_MS}ms`,
+)
+
 // Per-quadrant palette. MIRRORS the project path palette QUADRANT_COLORS in
 // DIPLOME.Feedback/src/pathColors.js — KEEP IN LOCKSTEP. Indexed [tl, tr, bl, br]
 // = Source / Form / Semantic / Time: orange / sky-blue / green / pink.
@@ -674,10 +699,13 @@ onUnmounted(() => {
     class="rel"
     :class="{
       'is-inert': interpretationActive,
-      'is-frozen': store.overviewFinaleActive,
-      // Corner labels fade on `dissolve` too (not a step later) so they leave at
-      // the SAME moment as the cells, deck, cross and the project mask.
-      'finale-fadeout': store.overviewFinalePhase === 'dissolve' || store.overviewFinalePhase === 'fadeout',
+      // Frozen (pointer-events off — no hover, no select) during the overview
+      // finale AND during the VIEW_4 entry narration (relationalSelectionLocked),
+      // so nothing reacts until the 2nd entry caption fades out.
+      'is-frozen': store.overviewFinaleActive || store.relationalSelectionLocked,
+      // Corner labels are part of the rest — they fade once the last quadrant
+      // (bl) is gone, on the rest phase (and stay gone through transition).
+      'finale-fadeout': store.overviewFinalePhase === 'rest' || store.overviewFinalePhase === 'transition',
       'is-preview': preview,
       'no-entrance': suppressMountReveal,
     }"
@@ -714,13 +742,18 @@ onUnmounted(() => {
       name="cell-fade"
       tag="div"
       class="constellation"
+      :style="{ '--finale-clockwise-delay': finaleClockwiseDelay }"
       :class="{
         suppressed: interpretationActive,
         hidden: store.overviewConfirmed,
         'central-revealed': store.centralHovered,
+        // Cells revealed (full opacity) during `bright`, then fade out clockwise
+        // during `clockwise`; they stay gone through `rest` / `transition`.
         'finale-bright': store.overviewFinalePhase === 'bright',
-        'finale-dissolve':
-          store.overviewFinalePhase === 'dissolve' || store.overviewFinalePhase === 'fadeout',
+        'finale-clockwise':
+          store.overviewFinalePhase === 'clockwise'
+          || store.overviewFinalePhase === 'rest'
+          || store.overviewFinalePhase === 'transition',
         'is-preview': preview,
         'preview-revealed': preview && revealed,
         'no-entrance': suppressMountReveal,
@@ -788,29 +821,35 @@ onUnmounted(() => {
            sandwiched UNDER the current image, OVER the older stacked ones.
          · cell segment → `#bridge-line-layer` (z 0): BELOW the suggestion cells.
          Both leave a gap in the middle for the stacked tags (body overlay). -->
-    <Teleport v-if="bridgeActive" to="#bridge-line-mid">
-      <div
-        class="bridge-line-set"
-        :style="{ '--cell-x': hoveredOffset?.x, '--cell-y': hoveredOffset?.y }"
-        aria-hidden="true"
-      >
-        <span
-          class="radial-connector"
-          :style="{ width: `${bridgeLine.dist * BRIDGE_SEG}px`, '--start-frac': 0, '--line-angle': `${bridgeLine.angle}deg`, '--connector-color': connectorColor }"
-        />
-      </div>
+    <Teleport v-if="!preview" to="#bridge-line-mid">
+      <Transition name="subject-fade">
+        <div
+          v-if="bridgeActive"
+          class="bridge-line-set"
+          :style="{ '--cell-x': hoveredOffset?.x, '--cell-y': hoveredOffset?.y }"
+          aria-hidden="true"
+        >
+          <span
+            class="radial-connector"
+            :style="{ width: `${bridgeLine.dist * BRIDGE_SEG}px`, '--start-frac': 0, '--line-angle': `${bridgeLine.angle}deg`, '--connector-color': connectorColor }"
+          />
+        </div>
+      </Transition>
     </Teleport>
-    <Teleport v-if="bridgeActive" to="#bridge-line-layer">
-      <div
-        class="bridge-line-set"
-        :style="{ '--cell-x': hoveredOffset?.x, '--cell-y': hoveredOffset?.y }"
-        aria-hidden="true"
-      >
-        <span
-          class="radial-connector"
-          :style="{ width: `${bridgeLine.dist * BRIDGE_SEG}px`, '--start-frac': 1 - BRIDGE_SEG, '--line-angle': `${bridgeLine.angle}deg`, '--connector-color': connectorColor }"
-        />
-      </div>
+    <Teleport v-if="!preview" to="#bridge-line-layer">
+      <Transition name="subject-fade">
+        <div
+          v-if="bridgeActive"
+          class="bridge-line-set"
+          :style="{ '--cell-x': hoveredOffset?.x, '--cell-y': hoveredOffset?.y }"
+          aria-hidden="true"
+        >
+          <span
+            class="radial-connector"
+            :style="{ width: `${bridgeLine.dist * BRIDGE_SEG}px`, '--start-frac': 1 - BRIDGE_SEG, '--line-angle': `${bridgeLine.angle}deg`, '--connector-color': connectorColor }"
+          />
+        </div>
+      </Transition>
     </Teleport>
 
     <!-- Per-quadrant beige blur veil shown while the corner label is hovered —
@@ -900,7 +939,7 @@ onUnmounted(() => {
    the three leave in lockstep, before the grid is unmounted at confirm. */
 .rel.finale-fadeout .corner-label {
   opacity: 0;
-  transition: opacity 700ms ease-out;
+  transition: opacity 200ms ease-out;
 }
 
 .status {
@@ -962,16 +1001,19 @@ onUnmounted(() => {
    reveals. Overrides the latent/hover opacity; interaction is frozen via
    `.rel.is-frozen`. Pure appearance — these only touch opacity, the cells'
    geometry/transform is untouched. */
+/* Overview finale, beat 1 — the suggestion cells become fully visible (a brief
+   reveal) so the clockwise fade that follows is legible. */
 .constellation.finale-bright .cell {
   opacity: 1;
-  transition: opacity 250ms ease-out;
+  transition: opacity 300ms ease-out;
 }
-.constellation.finale-dissolve .cell {
+/* Beat 2 — the cells fade out ONE QUADRANT AT A TIME, clockwise tl → tr → br →
+   bl. The per-quadrant stagger is `--finale-clockwise-delay` (bound inline from
+   FINALE_CLOCKWISE_INDEX × step); the duration mirrors CELL_FADE_MS in
+   interaction.ts. They stay at 0 through `rest` / `transition`. */
+.constellation.finale-clockwise .cell {
   opacity: 0;
-  /* Uniform fade to 0 (no per-cell delay). Duration matches
-     OVERVIEW_DISSOLVE_MS in interaction.ts so the cells are fully gone when
-     the deck/cross/labels fadeout begins. */
-  transition: opacity 600ms ease-out;
+  transition: opacity 550ms ease-out var(--finale-clockwise-delay, 0ms);
 }
 
 .cell {

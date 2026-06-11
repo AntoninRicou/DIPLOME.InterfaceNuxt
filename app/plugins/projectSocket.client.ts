@@ -4,7 +4,7 @@ import { useInteractionStore } from '~/stores/interaction'
 export default defineNuxtPlugin(() => {
   const {
     init, onRegister, setState, pathClear, setMask, setDim, setCanvasBg, setCanvasVeil,
-    setCornerLabels, setCanvasText, setCenterCaption, setMarks, setMapLabel, setMapWords,
+    setCornerLabels, setCanvasText, setCenterCaption, setMarks, setMarkDim, setMapLabel, setMapWords,
   } = useProjectSocket()
   onRegister(() => {
     pathClear()
@@ -20,6 +20,9 @@ export default defineNuxtPlugin(() => {
     // Clear any persistent path marks — a reload/reconnect must not carry
     // over a stale lit set from a previous session's overview.
     setMarks([])
+    // Mark-dim off on every (re)connect — a reload mid-explore must not boot
+    // the fresh single state with non-marked sprites still dimmed.
+    setMarkDim(false)
     // Component-title hygiene — none of these may carry over a stale
     // reveal across a session/reload boundary. Defensive: the CSS
     // `:not([data-state="single"])` guard already prevents visible

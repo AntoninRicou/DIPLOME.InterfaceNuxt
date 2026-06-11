@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 const store = useInteractionStore()
-// True whenever the interface is darkened — drives the centred
-// "Look at the other screen" rotate caption above the dim overlay.
-const dimActive = computed(() => store.interfaceDimLevel > 0)
+// The "Look at the second screen" caption visibility is owned by the store
+// (interfaceDimCaptionVisible) — it's offset to appear AFTER the darkening
+// starts (DIM_CAPTION_OFFSET_MS) and hides on brighten. See setInterfaceDim.
 </script>
 
 <template>
@@ -25,16 +24,16 @@ const dimActive = computed(() => store.interfaceDimLevel > 0)
       }"
       aria-hidden="true"
     />
-    <!-- Centred "Look at the second screen" rotate caption — sits ABOVE the dim
+    <!-- Centred "Look at the projection above" rotate caption — sits ABOVE the dim
          overlay and fades in/out with the darkening (every time the interface
          dims, e.g. VIEW_2 project narration + VIEW_3 mirror caption). Opacity
          tracks the dim with the same fade SPEED. -->
     <p
       class="dim-caption"
-      :class="{ visible: dimActive }"
+      :class="{ visible: store.interfaceDimCaptionVisible }"
       :style="{ transition: `opacity ${store.interfaceDimDuration}ms linear` }"
       aria-hidden="true"
-    >Look at the second screen</p>
+    >Look at the projection above</p>
   </div>
 </template>
 
@@ -55,9 +54,9 @@ const dimActive = computed(() => store.interfaceDimLevel > 0)
 /* "Look at the other screen" — centred rotate caption above the dim overlay
    (z above 9999). Same rotate-caption look as the views' `.caption-text`:
    --rotate-fill glyphs + the layered --rotate-stroke glow, --rotate-size,
-   italic. Opacity is toggled by `.visible` (bound to dimActive) and the inline
-   transition matches the dim's fade speed, so it appears/disappears with the
-   darkening. */
+   italic. Opacity is toggled by `.visible` (bound to store.interfaceDimCaptionVisible,
+   which appears DIM_CAPTION_OFFSET_MS after the darkening starts) and the inline
+   transition matches the dim's fade speed. */
 .dim-caption {
   position: fixed;
   top: 50%;
@@ -144,8 +143,11 @@ const dimActive = computed(() => store.interfaceDimLevel > 0)
      NOTE: the rotating intro captions (.caption / .entry-caption /
      .intro-caption) used to share this size, but were DECOUPLED — they now
      use --rotate-size (below) so they can be sized + panelled independently
-     of the corner labels/titles. */
-  --label-size: 1.15rem;
+     of the corner labels/titles.
+     Raised 1.15rem → 1.3rem so the interface corner labels match the quadrant
+     text size (.proximity-panel-title/-body, hardcoded 1.3rem). The only
+     interface consumer of --label-size now is `.corner-label`. */
+  --label-size: 1.3rem;
 
   /* Rotating intro caption presentation — single source of truth for the
      centred, panelled rotating text in VIEW_1 (.caption), VIEW_2
@@ -160,8 +162,9 @@ const dimActive = computed(() => store.interfaceDimLevel > 0)
      behind the line). */
   --rotate-size: 1.65rem;
   /* Shared line-height for all rotating intro/finale captions (VIEW_1/2/3/4).
-     Tightened from the old per-view 1.4–1.5 so multi-line captions sit closer. */
-  --rotate-line-height: 1.2;
+     Tightened from the old per-view 1.4–1.5 (then 1.2) so multi-line captions
+     sit closer. */
+  --rotate-line-height: 1.05;
   /* Warm beige stroke behind rotate text + quadrant text + centre caption
      (replaces the former blue-grey). Deepened from f9ecd0 — at glow/stroke
      sizes the pale cream washed out to near-white, so a more saturated tan is

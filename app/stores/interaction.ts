@@ -103,12 +103,30 @@ export const useInteractionStore = defineStore('interaction', () => {
   const DIM_FADE_MS_PER_UNIT = 600 / 0.7 // ≈857 ms for a full 0→1
   const interfaceDimLevel = ref(0)
   const interfaceDimDuration = ref(600)
+  // Locks related-image selection (activateCentral) during the VIEW_4 entry
+  // narration. View4Relational sets it true on mount and false once the 2nd
+  // entry caption fades out — so the user can't select before reading the intro.
+  const relationalSelectionLocked = ref(false)
   const projectDimLevel = ref(0) // tracked so the project dim fade is speed-based too
+  // "Look at the second screen" caption over the dim overlay (app.vue). Offset
+  // from the darkening: it fades IN DIM_CAPTION_OFFSET_MS AFTER the screen starts
+  // darkening (so the darkening lands first), and hides immediately on brighten.
+  // Applied to every darkening event via setInterfaceDim.
+  const interfaceDimCaptionVisible = ref(false)
+  const DIM_CAPTION_OFFSET_MS = 1500
+  let dimCaptionTimer: ReturnType<typeof setTimeout> | null = null
+  let dimCaptionShowTimer: ReturnType<typeof setTimeout> | null = null
+  let dimBrightenTimer: ReturnType<typeof setTimeout> | null = null
 
   // Set by `enterRelationalView` when the VIEW_3 → VIEW_4 trigger (the
   // "next" chevron after the four-quadrant zoom-in flow) fires, consumed by
   // View4Relational's reveal-overlay animation.
   const view2ExitReason = ref<'auto' | 'skip' | null>(null)
+  // Set true ONLY by VIEW_3's bottom Skip button (not the central-image click),
+  // consumed once by VIEW_4's onMounted: when true, VIEW_4 skips its two-sentence
+  // entry narration and unlocks selection immediately. The skip already bypasses
+  // the quadrant zooms; this also bypasses the VIEW_4 intro.
+  const bypassRelationalIntro = ref(false)
 
   // Per-canvas zoom-in tracking for VIEW_3. Each entry flips to `true` once
   // the user clicks the corresponding quadrant cross — that emits
@@ -154,6 +172,9 @@ export const useInteractionStore = defineStore('interaction', () => {
     if (overviewConfirmed.value) return
     // Central image is frozen during the overview finale — no hover-zoom.
     if (overviewFinaleActive.value) return
+    // Also frozen during the VIEW_4 entry narration (nothing reacts before the
+    // 2nd entry caption fades out).
+    if (relationalSelectionLocked.value) return
     if (canvasIndex !== null && (canvasIndex < 0 || canvasIndex > 3)) return
     const prev = view4HoveredQuadrant.value
     const next = canvasIndex
@@ -371,6 +392,14 @@ export const useInteractionStore = defineStore('interaction', () => {
     // pan-on-focus behavior project needs for VIEW_4's history nav and
     // relational clicks.
     projectSocket.setState('split', 0)
+    // Persistently MARK the path's first image (navigationHistory[0]) so it
+    // stays lit on the feedback throughout VIEW_4 — alongside the focus glow on
+    // the current/last pick (project lights marks ∪ focus). Emitted BEFORE focus
+    // because setMarks drops the focus anchor; the focus below re-asserts it on
+    // the current image. The mark persists until confirmOverview replaces it with
+    // the whole path. So the feedback always shows the first + the last image.
+    const firstPathId = navigationHistory.value[0]
+    if (firstPathId) projectSocket.setMarks([firstPathId])
     if (activeCentralImageId.value) projectSocket.focus(activeCentralImageId.value)
     // Reset per-canvas zoom flags so a future return to VIEW_3 starts
     // clean. (No backward navigation today, but cheap and defensive.)
@@ -397,6 +426,10 @@ export const useInteractionStore = defineStore('interaction', () => {
   // colour the new segment by quadrant (see project/src/pathColors.js).
   function activateCentral(id: ImageId, quadrant?: number) {
     if (!viewState.is('RELATIONAL')) return
+    // Selection is locked during the VIEW_4 entry narration — released by
+    // View4Relational when the 2nd entry caption ("Each sharing proximity…")
+    // fades out. Blocks image selection before the user has read the intro.
+    if (relationalSelectionLocked.value) return
     if (activeCentralImageId.value === id) return
 
     // ── HARD GUARD — terminal OVERVIEW state. No store mutation below. ──
@@ -450,28 +483,35 @@ export const useInteractionStore = defineStore('interaction', () => {
   }
 
   // ── Overview finale sequence (replaces the old tick-ring loader) ──
-  // When the 10th image is reached, the four quadrants' suggestion images
-  // flash to full opacity, hold, then fade out — ALL CELLS TOGETHER (the old
-  // clockwise sweep was removed) — only then does confirmOverview fire (→ the
-  // circle of 10 reveals). The central image + all interaction are frozen for
-  // the duration. The cells' fade lives in CSS (`.finale-dissolve .cell` →
-  // opacity 600ms, uniform), matched here by OVERVIEW_DISSOLVE_MS. The central
-  // DECK fades out simultaneously with the cells (it starts on the `dissolve`
-  // phase — see View4's deckHidden watch). The grid cross + corner labels fade
-  // a step later, on the `fadeout` phase (`.view-3.finale-fadeout` rules).
-  const OVERVIEW_BRIGHT_MS = 2300
-  // Uniform fade-out duration for the finale cells (the clockwise sweep was
-  // removed). All cells fade to 0 together over this window — matches the
-  // `.finale-dissolve .cell` CSS in RelationComponent (600ms).
-  const OVERVIEW_DISSOLVE_MS = 600
-  // After the quadrants have disappeared, the central deck + cross + corner
-  // labels fade out together over this window (matches the 700ms CSS fades on
-  // `.center-anchor.deck-fadeout`, `.view-3.finale-fadeout::before`, and
-  // `.rel.finale-fadeout .corner-label`) before confirmOverview fires.
-  const OVERVIEW_FADEOUT_MS = 700
+  // When the 10th image is reached, the finale runs in four beats:
+  //   1. `bright`     — the suggestion cells become fully visible (a brief
+  //                     reveal so the clockwise fade is legible).
+  //   2. `clockwise`  — the cells fade out ONE QUADRANT AT A TIME, clockwise:
+  //                     tl → tr → br → bl. The per-quadrant stagger lives in
+  //                     CSS (`.finale-clockwise .cell` in RelationComponent),
+  //                     keyed by CLOCKWISE_STEP_MS / CELL_FADE_MS — KEEP IN
+  //                     SYNC with the mirror constants there.
+  //   3. `rest`       — the moment the LAST quadrant (bl) is gone, EVERYTHING
+  //                     ELSE (grid cross + corner labels) fades together. The
+  //                     central image stays. Held CENTER_HOLD_MS so the
+  //                     selected image sits alone for ~1s.
+  //   4. `transition` — the central deck fades + the project mask fades to
+  //                     gradient, then confirmOverview fires (→ circle of 10).
+  // All interaction is frozen for the whole sequence (overviewFinaleActive).
+  const BRIGHT_MS = 800            // cells visible before the clockwise fade
+  const CLOCKWISE_STEP_MS = 450    // gap between each quadrant starting to fade (mirror in RelationComponent)
+  const CELL_FADE_MS = 550         // each quadrant's fade duration            (mirror in RelationComponent)
+  // Total time for the clockwise sweep: last quadrant (index 3) starts at
+  // 3·STEP and finishes CELL_FADE_MS later.
+  const CLOCKWISE_TOTAL_MS = 3 * CLOCKWISE_STEP_MS + CELL_FADE_MS
+  const CENTER_HOLD_MS = 1000      // selected image stays alone this long after "the rest" leaves
+  // Gradient hand-off — short so the move to the gradient + circle reveal is
+  // snappy. Matches the 200ms CSS fades on `.center-anchor.deck-fadeout`,
+  // `.view-3.finale-fadeout::before`, and `.rel.finale-fadeout .corner-label`.
+  const GRADIENT_MS = 200
   // "See your path" appears this long after the circle has revealed.
   const SEE_YOUR_PATH_DELAY_MS = 6000
-  const overviewFinalePhase = ref<'idle' | 'bright' | 'dissolve' | 'fadeout'>('idle')
+  const overviewFinalePhase = ref<'idle' | 'bright' | 'clockwise' | 'rest' | 'transition'>('idle')
   const overviewFinaleActive = computed(() => overviewFinalePhase.value !== 'idle')
   // Gates the post-confirm "See your path" control behind a delay.
   const overviewControlsReady = ref(false)
@@ -480,27 +520,26 @@ export const useInteractionStore = defineStore('interaction', () => {
   function startOverviewFinale() {
     if (!overviewEligible.value) return
     if (overviewFinalePhase.value !== 'idle') return
-    // Fadeout begins once the cells have fully faded (bright + dissolve), so
-    // the deck/cross/labels start leaving right as the cells finish.
-    const fadeoutStart = OVERVIEW_BRIGHT_MS + OVERVIEW_DISSOLVE_MS
+    const clockwiseStart = BRIGHT_MS
+    const restStart = clockwiseStart + CLOCKWISE_TOTAL_MS   // last quadrant gone
+    const transitionStart = restStart + CENTER_HOLD_MS      // selected image held ~1s alone
     overviewFinalePhase.value = 'bright'
     finaleTimers.push(setTimeout(() => {
-      overviewFinalePhase.value = 'dissolve'
-      // EVERYTHING fades out at this one moment: the interface cells, deck,
-      // cross and corner labels all fade on the `dissolve` phase now (View4's
-      // finale-fadeout class is bound to dissolve||fadeout), and this fades the
-      // project's render mask in over the SAME duration so both screens go to
-      // gradient together. Mask is opaque well before confirmOverview, so the
-      // setMask(1) in enterSinglePathView is a no-op re-assert.
-      projectSocket.setMask(1, OVERVIEW_FADEOUT_MS)
-    }, OVERVIEW_BRIGHT_MS))
+      overviewFinalePhase.value = 'clockwise'  // cells fade tl → tr → br → bl
+    }, clockwiseStart))
     finaleTimers.push(setTimeout(() => {
-      overviewFinalePhase.value = 'fadeout'
-    }, fadeoutStart))
+      overviewFinalePhase.value = 'rest'       // grid cross + corner labels fade; central image stays
+    }, restStart))
+    finaleTimers.push(setTimeout(() => {
+      overviewFinalePhase.value = 'transition'
+      // Central deck fades (View4 deckHidden) + project mask fades to gradient,
+      // both over GRADIENT_MS, so both screens reach the gradient together.
+      projectSocket.setMask(1, GRADIENT_MS)
+    }, transitionStart))
     finaleTimers.push(setTimeout(() => {
       confirmOverview()
       overviewFinalePhase.value = 'idle'
-    }, fadeoutStart + OVERVIEW_FADEOUT_MS))
+    }, transitionStart + GRADIENT_MS))
   }
 
   function confirmOverview() {
@@ -573,6 +612,11 @@ export const useInteractionStore = defineStore('interaction', () => {
       // Arm the top-left map label so it names the auto-cycling map as the
       // single explore view appears (fades in with the mask reveal).
       projectSocket.setMapLabel(true)
+      // Dim the non-marked sprites so the marked circle/path images stand out
+      // on the single map (applied behind the mask, so the reveal is already
+      // dimmed). Re-applies automatically when a different circle is centred
+      // (centerReplayCircle → set-marks). Cleared on Start over.
+      projectSocket.setMarkDim(true)
     }, FADE_IN_MS)
     setTimeout(() => projectSocket.setMask(0, FADE_OUT_MS), FADE_IN_MS + MORPH_MS + HOLD_MS)
   }
@@ -581,6 +625,8 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setMapLabel(false)
     projectSocket.pathFadeOut()
     projectSocket.setMapWords({ form: [], source: [], semantic: [], time: [] })
+    // Restore the dimmed (non-marked) sprites to full opacity on Start over.
+    projectSocket.setMarkDim(false)
   }
 
   // Fetch four corner circles, each a random Replay-proximity neighbourhood
@@ -750,6 +796,18 @@ export const useInteractionStore = defineStore('interaction', () => {
     const delta = Math.abs(target - interfaceDimLevel.value)
     interfaceDimDuration.value = opts.instant ? 0 : Math.round(delta * DIM_FADE_MS_PER_UNIT)
     interfaceDimLevel.value = target
+    // "Look at the second screen" caption: on darken, reveal it only AFTER
+    // DIM_CAPTION_OFFSET_MS (so the darkening happens first); on brighten, hide
+    // it immediately. Pending timer is cancelled on every dim change.
+    if (dimCaptionTimer) { clearTimeout(dimCaptionTimer); dimCaptionTimer = null }
+    if (target > 0) {
+      dimCaptionTimer = setTimeout(() => {
+        interfaceDimCaptionVisible.value = true
+        dimCaptionTimer = null
+      }, opts.instant ? 0 : DIM_CAPTION_OFFSET_MS)
+    } else {
+      interfaceDimCaptionVisible.value = false
+    }
   }
 
   // Dim the PROJECT (Three.js render window): mirrored over the wire to the
@@ -816,6 +874,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     overviewConfirmed,
     overviewEligible,
     view2ExitReason,
+    bypassRelationalIntro,
     canvasZoomed,
     allCanvasesZoomed,
     relationsPreRevealed,
@@ -854,6 +913,8 @@ export const useInteractionStore = defineStore('interaction', () => {
     setCanvasBackground,
     interfaceDimLevel,
     interfaceDimDuration,
+    interfaceDimCaptionVisible,
+    relationalSelectionLocked,
     setInterfaceDim,
     setProjectDim,
     setCenterCaption,

@@ -7,8 +7,8 @@ import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 const store = useInteractionStore()
 
 const PANELS = [
-  'You just entered Proxima.',
-  'A dual screen interface for navigating into large corpus of images.',
+  'Welcome to Proxima.',
+  'A dual-view experience for exploring large corpus of images.',
 ]
 const FADE_OUT_MS = ROTATE_FADE_OUT_MS
 
@@ -30,6 +30,9 @@ const GAP_MS = FADE_OUT_MS + EMPTY_BEAT_MS + FADE_OUT_MS
 
 const index = ref(0)
 const captionVisible = ref(true)
+// Current sentence with "Proxima" italicised (rendered via v-html — the panels
+// are static trusted constants, so no XSS surface).
+const panelHtml = computed(() => (PANELS[index.value] ?? '').replace('Proxima', '<i>Proxima</i>'))
 // The cross draws over the whole runtime (mount → advance) so it finishes as the
 // last sentence ends: FIRST_APPEAR + Σ holds + one GAP per sentence change.
 const crossDurationMs = computed(() =>
@@ -93,7 +96,7 @@ onBeforeUnmount(() => {
          duration; only the appear adds its 1400ms hold and the enter
          adds its 600ms empty-beat delay. -->
     <Transition name="caption" mode="out-in" appear>
-      <p v-if="captionVisible" :key="index" class="caption"><span class="caption-text">{{ PANELS[index] }}</span></p>
+      <p v-if="captionVisible" :key="index" class="caption"><span class="caption-text" v-html="panelHtml"></span></p>
     </Transition>
   </section>
 </template>

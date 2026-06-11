@@ -28,34 +28,51 @@ const QUADRANTS: Quadrant[] = [
   { index: 3, x: '75%', y: '75%', componentId: 'component_4' },
 ]
 
-// After the last quadrant is hovered (`allCanvasesZoomed` flips true), the
-// "This screen suggests…" modes caption fades in CAPTION_DELAY_MS later. The
-// whole rest of the sequence (MIRROR caption → START prompt) is nested inside
-// this timer, so raising it delays everything that follows too. 8s wait.
-const CAPTION_DELAY_MS = 13000
+// After the last quadrant is activated (`allCanvasesZoomed` flips true), wait
+// CAPTION_DELAY_MS, then the START_ACTION prompt ("Click on your image…") +
+// central-image pulse appear. (The map-view/action-view narration now plays
+// BEFORE the quadrants — in onMounted, after "You picked this image." — not
+// here.) The quadrant texts stay visible until the central-image click.
+const CAPTION_DELAY_MS = 2000
 // Middle NARRATION shown after zooming (mirrored to project). Uses the shared
 // rotate-text params (--rotate-size + fade timing + blue-grey stroke), same as
 // the rotating intro narration — see `.modes-caption` styles.
-const MODES_CAPTION = 'This interactive screen suggests images based on each quadrant’s relation mode.'
+const MODES_CAPTION = '	This action-view display images on where you can explore next.'
 // CALL-TO-ACTION sentences (interface-only) — now rendered as CENTRED rotate
 // text (the .modes-caption style), the 1st and 3rd of a 3-sentence sequence
 // with MODES_CAPTION in between. ZOOM_ACTION appears after the initial settle
 // beat (with the crosses) and HOLDS until all four quadrants are zoomed;
 // START_ACTION appears after the middle caption and HOLDS until the user clicks
 // the central image into the relational view.
+// PICKED — a short intro sentence shown FIRST (after the settle beat), before
+// ZOOM_ACTION. Same fade-in + settle delay as ZOOM_ACTION (the `.modes-caption`
+// style + `--rotate-appear-delay`). It holds PICKED_HOLD_MS, fades out, and only
+// THEN does ZOOM_ACTION appear + the crosses arm (activation possible).
+const PICKED_TEXT = 'You picked this image.'
+const showPickedCaption = ref(false)
+const PICKED_HOLD_MS = 4000
+let pickedHoldTimer: ReturnType<typeof setTimeout> | null = null
+let pickedAfterTimer: ReturnType<typeof setTimeout> | null = null
+// CONNECT — a short sentence shown AFTER the action-view (MODES) caption and
+// BEFORE ZOOM_ACTION, linking the two screens.
+const CONNECT_TEXT = 'Both views are directly connected.'
+const showConnectCaption = ref(false)
+const CONNECT_HOLD_MS = 4000
+let connectShowTimer: ReturnType<typeof setTimeout> | null = null
+let connectHoldTimer: ReturnType<typeof setTimeout> | null = null
 const ZOOM_ACTION = 'Activate the four quadrants across both screens.'
 // MIRROR sentence — a transient rotate caption shown AFTER the modes caption
 // and BEFORE the start prompt. FEEDBACK (project) centre ONLY (mirrored via
 // set-center-caption), with the INTERFACE darkened while it plays — no
 // interface text for this one.
-const MIRROR_CAPTION = 'This feedback screen provides a trace of your journey by showing suggested images through spatial proximity.'
+const MIRROR_CAPTION = 'This map-view provides a trace of images you encounter.'
 const MIRROR_DIM_LEVEL = 0.7 // interface darkening while the MIRROR caption plays on the feedback
-const START_ACTION = 'Click on the image to find new relations.'
+const START_ACTION = 'Click on your image to start.'
 const showZoomAction = ref(false)
 const showStartAction = ref(false)
-// Full-opacity hold for the MIRROR sentence (~6s). The `.modes-caption` fade-in
-// eats ROTATE_FADE_OUT_MS, which is added on top so the on-screen hold is ~6s.
-const MIRROR_HOLD_MS = 6000 + ROTATE_FADE_OUT_MS
+// Full-opacity hold for the MIRROR sentence (~7s). The `.modes-caption` fade-in
+// eats ROTATE_FADE_OUT_MS, which is added on top so the on-screen hold is ~7s.
+const MIRROR_HOLD_MS = 7000 + ROTATE_FADE_OUT_MS
 let mirrorShowTimer: ReturnType<typeof setTimeout> | null = null
 let mirrorHoldTimer: ReturnType<typeof setTimeout> | null = null
 let mirrorClearTimer: ReturnType<typeof setTimeout> | null = null
@@ -77,15 +94,20 @@ let dissolveTimer: ReturnType<typeof setTimeout> | null = null
 //    (both at once), wait this long before the MIRROR caption shows on feedback.
 //  - START_LEAD_MS: after the interface brightens back up, wait this long before
 //    the START_ACTION prompt shows on the interface.
-const MIRROR_LEAD_MS = 2000
-const START_LEAD_MS = 2000
+const MIRROR_LEAD_MS = 3000
+// Gap after the interface brightens (post map-view) before the "This action-view…"
+// MODES caption appears on the interface. (+1s → 3000.)
+const START_LEAD_MS = 3000
 function onCenterClick() {
   // Armed only while the start prompt is up; ignore re-clicks once advancing.
-  // (The quadrant texts already dissolved earlier — before the MIRROR caption —
-  // so this only hides the prompt and advances.)
   if (!showStartAction.value || advancing.value) return
   advancing.value = true
   showStartAction.value = false      // hide prompt + stop the central pulse + disarm
+  // NOW fade the quadrant texts out — on BOTH screens, same beat: interface
+  // `.quadrant-text.dissolving` (500ms ease) + project `.canvas-text` via
+  // clearCanvasTexts(). They stayed visible through the whole rotate sequence.
+  dissolving.value = true
+  store.clearCanvasTexts()
   dissolveTimer = setTimeout(() => {
     store.enterRelationalView('skip')
   }, ROTATE_FADE_OUT_MS)
@@ -95,8 +117,11 @@ function onCenterClick() {
 // bypassing the four quadrant-cross zooms + the modes-caption. No
 // flash/dissolve animation: it advances immediately via enterRelationalView,
 // which flips project to `split` and reveals the corner labels (see the
-// all-on re-assert inside enterRelationalView).
+// all-on re-assert inside enterRelationalView). It ALSO bypasses VIEW_4's
+// two-sentence entry narration (bypassRelationalIntro) so the user lands
+// directly in the interactive relational view with selection unlocked.
 function skipToRelational() {
+  store.bypassRelationalIntro = true
   store.enterRelationalView('skip')
 }
 
@@ -150,9 +175,9 @@ let crossesReadyTimer: ReturnType<typeof setTimeout> | null = null
 // HOLDS (one rotate panel), then fades OUT over --rotate-fade-ms — after which
 // the advance `+` (top cross) + the bottom start prompt appear.
 const showModesCaption = ref(false)
-// How long the "Four modes of proximity…" caption holds at full opacity —
-// 2s shorter than a standard rotate panel (it was reading too long).
-const MODES_HOLD_MS = VIEW3_PANEL_MS - 2000
+// How long the "This action-view…" caption holds at full opacity — a full
+// standard rotate panel (was VIEW3_PANEL_MS − 1s; +1s now).
+const MODES_HOLD_MS = VIEW3_PANEL_MS
 let captionTimer: ReturnType<typeof setTimeout> | null = null
 let modesHoldTimer: ReturnType<typeof setTimeout> | null = null
 let modesAfterTimer: ReturnType<typeof setTimeout> | null = null
@@ -166,6 +191,10 @@ function clearTimers() {
   if (mirrorClearTimer) { clearTimeout(mirrorClearTimer); mirrorClearTimer = null }
   if (dissolveTimer) { clearTimeout(dissolveTimer); dissolveTimer = null }
   if (crossesReadyTimer) { clearTimeout(crossesReadyTimer); crossesReadyTimer = null }
+  if (pickedHoldTimer) { clearTimeout(pickedHoldTimer); pickedHoldTimer = null }
+  if (pickedAfterTimer) { clearTimeout(pickedAfterTimer); pickedAfterTimer = null }
+  if (connectShowTimer) { clearTimeout(connectShowTimer); connectShowTimer = null }
+  if (connectHoldTimer) { clearTimeout(connectHoldTimer); connectHoldTimer = null }
 }
 
 // Reads a CSS custom property as milliseconds. Falls back to 0 if the
@@ -185,52 +214,57 @@ onMounted(() => {
   // doesn't auto-advance — progress is user-driven via the crosses.
   const appearDelayMs = readMsVar('--rotate-appear-delay')
   crossesReadyTimer = setTimeout(() => {
-    crossesReady.value = true
-    showZoomAction.value = true
+    // 1) "You picked this image." drifts in, holds, fades.
+    showPickedCaption.value = true
     crossesReadyTimer = null
+    pickedHoldTimer = setTimeout(() => {
+      showPickedCaption.value = false   // PICKED fades out
+      // 2) After PICKED fades: darken the interface + "This map-view…" on the
+      // FEEDBACK centre, then brighten + "This action view…" (MODES) on the
+      // INTERFACE — the whole narration plays BEFORE the quadrants can be
+      // activated.
+      pickedAfterTimer = setTimeout(() => {
+        store.setInterfaceDim(MIRROR_DIM_LEVEL)
+        mirrorShowTimer = setTimeout(() => {
+          store.setCenterCaption(MIRROR_CAPTION, 'rotate')   // feedback "map view"
+          mirrorHoldTimer = setTimeout(() => {
+            store.setCenterCaption('')   // clear the feedback caption
+            store.setInterfaceDim(0)     // brighten the interface back up
+            mirrorClearTimer = setTimeout(() => {
+              showModesCaption.value = true   // interface "action view"
+              modesHoldTimer = setTimeout(() => {
+                showModesCaption.value = false
+                // 3) "Both maps are directly connected." after the action-view fades.
+                connectShowTimer = setTimeout(() => {
+                  showConnectCaption.value = true
+                  connectHoldTimer = setTimeout(() => {
+                    showConnectCaption.value = false
+                    // 4) THEN: "Activate the four quadrants…" appears + the crosses
+                    // arm, so the user can now reach into the quadrants.
+                    modesAfterTimer = setTimeout(() => {
+                      showZoomAction.value = true
+                      crossesReady.value = true
+                    }, ROTATE_FADE_OUT_MS + 1000)
+                  }, CONNECT_HOLD_MS)
+                }, ROTATE_FADE_OUT_MS + 1000)
+              }, MODES_HOLD_MS)
+            }, START_LEAD_MS)
+          }, MIRROR_HOLD_MS)
+        }, MIRROR_LEAD_MS)
+      }, ROTATE_FADE_OUT_MS)
+    }, PICKED_HOLD_MS)
   }, appearDelayMs)
 })
 
 watch(() => store.allCanvasesZoomed, (zoomed) => {
   if (!zoomed) return
-  // User zoomed all 4 quadrants — the zoom action is done: fade the ZOOM_ACTION
-  // rotate sentence out, then schedule the middle modes-caption reveal.
+  // 4) User activated all 4 quadrants → fade ZOOM_ACTION out, then 5) reveal the
+  // START_ACTION prompt + central-image pulse (which persist until the user
+  // clicks the central image into VIEW_4). The quadrant texts STAY until that
+  // click, when onCenterClick dissolves them.
   showZoomAction.value = false
   captionTimer = setTimeout(() => {
-    showModesCaption.value = true
-    // INTERFACE-ONLY caption (no longer mirrored to the project centre). AT THE
-    // SAME MOMENT it appears, fade the quadrant texts out on BOTH screens —
-    // interface `.quadrant-text.dissolving` (500ms ease) + project `.canvas-text`
-    // via clearCanvasTexts() — so the per-quadrant texts clear as the summary
-    // caption arrives.
-    dissolving.value = true
-    store.clearCanvasTexts()
-    // Hold one rotate panel, then fade the narration OUT (over --rotate-fade-ms).
-    modesHoldTimer = setTimeout(() => {
-      showModesCaption.value = false
-      // (hold = MODES_HOLD_MS = VIEW3_PANEL_MS − 2s)
-      // Once it has faded out, wait one extra second, then reveal the MIRROR
-      // sentence (interface-only) for ~6s, fade it out, and only THEN reveal the
-      // START_ACTION rotate sentence + the central-image pulse (which persist
-      // until the user clicks the central image into the relational view).
-      mirrorShowTimer = setTimeout(() => {
-        // Darken the interface for the MIRROR caption. (The quadrant texts
-        // already faded out earlier — when the modes caption appeared.)
-        store.setInterfaceDim(MIRROR_DIM_LEVEL)
-        // Wait MIRROR_LEAD_MS (1s) more, then show the MIRROR sentence on the
-        // project centre (interface stays dark, no interface text).
-        mirrorHoldTimer = setTimeout(() => {
-          store.setCenterCaption(MIRROR_CAPTION, 'rotate')
-          mirrorClearTimer = setTimeout(() => {
-            store.setCenterCaption('')   // clear the project caption
-            store.setInterfaceDim(0)     // brighten the interface back up
-            // Wait START_LEAD_MS (1s) more after brightening, then reveal the
-            // START_ACTION prompt + central-image pulse on the interface.
-            modesAfterTimer = setTimeout(() => { showStartAction.value = true }, START_LEAD_MS)
-          }, MIRROR_HOLD_MS)
-        }, MIRROR_LEAD_MS)
-      }, ROTATE_FADE_OUT_MS + 1000)
-    }, MODES_HOLD_MS)
+    showStartAction.value = true
   }, CAPTION_DELAY_MS)
 })
 
@@ -314,11 +348,17 @@ onBeforeUnmount(() => {
            3) START_ACTION  — HOLDS until the central image is clicked (advance).
          Sequencing is driven by the showZoomAction/showModesCaption/
          showStartAction flags in the allCanvasesZoomed watch. -->
+    <p class="modes-caption" :class="{ visible: showPickedCaption }">
+      <span class="caption-text">{{ PICKED_TEXT }}</span>
+    </p>
     <p class="modes-caption" :class="{ visible: showZoomAction }">
       <span class="caption-text">{{ ZOOM_ACTION }}</span>
     </p>
     <p class="modes-caption" :class="{ visible: showModesCaption }">
       <span class="caption-text">{{ MODES_CAPTION }}</span>
+    </p>
+    <p class="modes-caption" :class="{ visible: showConnectCaption }">
+      <span class="caption-text">{{ CONNECT_TEXT }}</span>
     </p>
     <!-- (MIRROR sentence is FEEDBACK-only now — shown on the project centre
          caption with the interface darkened; no interface element here.) -->

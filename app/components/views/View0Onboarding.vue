@@ -147,9 +147,22 @@ function handleClick() {
     0 2px 12px rgba(89, 91, 85, 0.3);
 }
 
-/* Version A (shadow-svg blob title) — try a #595b55 solid fill. */
+/* Version A (shadow-svg blob title) — #595b55 fill, and the SAME blue glyph
+   backing the subtitle (.hint) wears: the layered `--rotate-stroke` glow hugging
+   the letterforms. Scaled up (~2×) from the subtitle so it reads on the large
+   11rem glyphs. Overrides the base `.caption` beige relief text-shadow. */
 .caption-fill {
   color: #595b55;
+  text-shadow:
+    0 0 8px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 18px var(--rotate-stroke),
+    0 0 18px var(--rotate-stroke),
+    0 0 24px var(--rotate-stroke),
+    0 0 24px var(--rotate-stroke),
+    0 0 30px var(--rotate-stroke),
+    0 0 36px var(--rotate-stroke);
 }
 
 /* Hollow type — transparent letters (glass shows through), with ONLY a subtle
@@ -240,7 +253,8 @@ function handleClick() {
   font-weight: 500;
   font-style: italic;
   letter-spacing: 0.015em;
-  margin: 0;
+  /* Nudge the subtitle up a bit (closer to the title). */
+  margin: -1rem 0 0;
   color: var(--rotate-fill);
   text-shadow:
     0 0 4px var(--rotate-stroke),
