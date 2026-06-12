@@ -37,8 +37,8 @@ export interface View3Interpretation {
 // per-quadrant `set-canvas-text` mirror. The last line (URL) is rendered at
 // 80% opacity on the interface.
 export const IMAGE_CREDIT_LINES: readonly string[] = [
-  'Images digitized from historical books (18th–20th century) via the Internet Archive.',
-  'Extracted and redistributed through the Internet Archive Book Images dataset on Flickr.',
+  'Images digitized from historical books via the Internet Archive.',
+  'Extracted & redistributed by Kalev Leetaru (2014).', 'Available on the Internet Archive Book Images collection on Flickr.',
   'https://www.flickr.com/photos/internetarchivebookimages/',
 ]
 

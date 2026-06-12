@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useViewStateStore } from '~/stores/viewState'
-import LiquidGlass from '~/components/LiquidGlass.vue'
 
 const viewState = useViewStateStore()
 
@@ -30,18 +29,10 @@ function handleClick() {
          "Click to launch" prompt were removed). Clicking anywhere on this group
          advances to VIEW_1. -->
     <div class="title-group" role="button" tabindex="0" @click="handleClick" @keydown.enter="handleClick" @keydown.space.prevent="handleClick">
-      <!-- Title — SVG-shape glass clipped to the font-derived blob
-           (proxima_shadow_mask.svg = the shadow background), #595b55 fill. -->
-      <LiquidGlass
-        class="title-glass"
-        shape="/image/proxima_shadow_mask.svg"
-        :blur="7"
-        :refraction="14"
-        pad-x="1.3rem"
-        pad-y="1rem"
-      >
-        <p class="caption caption-fill">Proxima</p>
-      </LiquidGlass>
+      <!-- Title — #595b55 glyphs wearing the same blue-grey `--rotate-stroke`
+           glyph backing as the rotate captions (scaled up for the big title).
+           The old SVG-shape glass (proxima_shadow_mask.svg) was removed. -->
+      <p class="caption caption-fill">Proxima</p>
     </div>
 
     <!-- Transparent "type curved in glass" (masked backdrop-filter on the
@@ -154,15 +145,15 @@ function handleClick() {
 .caption-fill {
   color: #595b55;
   text-shadow:
-    0 0 8px var(--rotate-stroke),
-    0 0 12px var(--rotate-stroke),
-    0 0 12px var(--rotate-stroke),
-    0 0 18px var(--rotate-stroke),
-    0 0 18px var(--rotate-stroke),
+    0 0 10px var(--rotate-stroke),
+    0 0 16px var(--rotate-stroke),
+    0 0 16px var(--rotate-stroke),
     0 0 24px var(--rotate-stroke),
     0 0 24px var(--rotate-stroke),
-    0 0 30px var(--rotate-stroke),
-    0 0 36px var(--rotate-stroke);
+    0 0 32px var(--rotate-stroke),
+    0 0 32px var(--rotate-stroke),
+    0 0 42px var(--rotate-stroke),
+    0 0 52px var(--rotate-stroke);
 }
 
 /* Hollow type — transparent letters (glass shows through), with ONLY a subtle
@@ -248,6 +239,10 @@ function handleClick() {
    blue `--rotate-stroke` glyph backing (same as the VIEW_1/2 rotate captions),
    at `--rotate-size`. Italic kept. */
 .hint {
+  /* Above the title so the title's large glyph glow can't paint over the
+     subtitle (the title's .caption is positioned at z-index 1). */
+  position: relative;
+  z-index: 2;
   font-family: 'ABC Otto', serif;
   font-size: var(--rotate-size);
   font-weight: 500;
@@ -276,7 +271,7 @@ function handleClick() {
    fully invisible. The 4px upward drift mirrors the caption leaves in
    View1/View3 for visual continuity across the view chain. */
 /* The whole glass title (slab + text) and the subtitle fade out together. */
-.view-0.fading-out .title-glass,
+.view-0.fading-out .caption,
 .view-0.fading-out .title-shape-glass,
 .view-0.fading-out .hint {
   animation: view0-fade-out 500ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;

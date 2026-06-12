@@ -1,15 +1,157 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
+import { useViewStateStore } from '~/stores/viewState'
+import { IMAGE_CREDIT_LINES } from '~/view3/view3Interpretations'
 const store = useInteractionStore()
+const viewState = useViewStateStore()
 // The "Look at the second screen" caption visibility is owned by the store
 // (interfaceDimCaptionVisible) — it's offset to appear AFTER the darkening
 // starts (DIM_CAPTION_OFFSET_MS) and hides on brighten. See setInterfaceDim.
+
+// ── Persistent "About" control (the single "i" + day/night dots) ──
+// One control group lives here at the app root so it survives view transitions
+// and stays for the whole experience. It first appears in VIEW_2 (ENTRY) and
+// persists through VIEW_3 / VIEW_4 and the explore-others end phase. The "i"
+// opens the global About/credits overlay (blurred field above the screen); the
+// two dots toggle the project's day/night canvas background.
+//
+// It FADES OUT during the overview finale at the same beat as the corner labels
+// (overviewFinalePhase 'rest' / 'transition' — the same condition that drives
+// the views' `.finale-fadeout` corner-label fade), then fades back in once the
+// finale settles (phase → 'idle', explore-others).
+const aboutControlVisible = computed(() => {
+  const inExperience =
+    viewState.is('ENTRY') || viewState.is('TRANSITION') || viewState.is('RELATIONAL')
+  const fadingForFinale =
+    store.overviewFinalePhase === 'rest' || store.overviewFinalePhase === 'transition'
+  return inExperience && !fadingForFinale
+})
+
+// About / credits overlay copy. IMAGE_CREDIT_LINES (view3Interpretations.ts)
+// supplies the "Source of images" block so it stays the single source of truth.
+const CREDITS_TITLE = 'Proxima'
+const CREDITS_AUTHOR = 'by Antonin Ricou'
+const CREDITS_CORPUS = 'This corpus gathers images from scientific and encyclopedic books published between the 18th and 20th centuries. Originally framed by a dominant Western system of knowledge, they were later digitized, reorganized into a dataset, and published online through Flickr.'
+const CREDITS_ABOUT: readonly string[] = [
+  'Proxima is a dual-view experience designed to explore large image corpus. It allows participants to navigate images through multiple forms of relation shaped by spatial proximity. Each journey produces a visual trajectory where meaning emerges through relations rather than through a single fixed structure.',
+  'By questioning how large corpus are apprehended, this interface proposes a new way of looking at images. It allows them to exist simultaneously across multiple areas of meaning. Usually confined to a linear and origin-based structure, images can here resonate, shift in meaning, and form new connections.',
+  
+]
+const CREDITS_TYPOGRAPHY: readonly string[] = [
+  'ABC Otto by ABC Dinamo',
+  'Neue Kabel by Marc Schütz',
+]
+const CREDITS_ACKNOWLEDGMENT: readonly string[] = [
+  '–HEAD Geneva', 'MA Media Design 2026',
+  'Tutor : Nicolas Baldran',
+]
+const CREDITS_COPYRIGHT = '© 2026 Proxima. All rights reserved.'
+
+// Names italicised wherever they appear in the credits body text. Ordered
+// longest-first so the regex matches the full phrase before its prefix (e.g.
+// "Internet Archive Book Images" before "Internet Archive"). Rendered via
+// v-html — all inputs are static trusted constants.
+const ITALIC_TERMS = ['Internet Archive Book Images', 'Internet Archives', 'Internet Archive', 'Flickr', 'Proxima']
+const ITALIC_RE = new RegExp(
+  `(${ITALIC_TERMS.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+  'g',
+)
+function italicize(text: string): string {
+  return text.replace(ITALIC_RE, '<i>$1</i>')
+}
 </script>
 
 <template>
   <div>
     <NuxtRouteAnnouncer />
     <NuxtPage />
+
+    <!-- Persistent "About" control — one group (day/night dot · "i" · day/night
+         dot) that survives view transitions. Appears in VIEW_2 and stays the
+         whole experience; fades out with the corner labels during the overview
+         finale (aboutControlVisible). The "i" opens the blurred About overlay;
+         the dots toggle the project's day/night canvas background. -->
+    <div
+      class="about-controls"
+      :class="{ hidden: !aboutControlVisible }"
+      :aria-hidden="!aboutControlVisible"
+    >
+      <button
+        class="bg-toggle"
+        :class="{ active: store.canvasBackground === 'gradient', revealed: store.creditsOpen }"
+        :aria-pressed="store.canvasBackground === 'gradient'"
+        aria-label="day background"
+        @click="store.setCanvasBackground('gradient')"
+      >
+        <span class="dot dot-white" aria-hidden="true" />
+      </button>
+      <button
+        class="interpret-control"
+        :class="{ active: store.creditsOpen }"
+        :aria-pressed="store.creditsOpen"
+        aria-label="about this project"
+        @click="store.toggleCredits()"
+      >
+        i
+      </button>
+      <button
+        class="bg-toggle"
+        :class="{ active: store.canvasBackground === 'black', revealed: store.creditsOpen }"
+        :aria-pressed="store.canvasBackground === 'black'"
+        aria-label="night background"
+        @click="store.setCanvasBackground('black')"
+      >
+        <span class="dot dot-black" aria-hidden="true" />
+      </button>
+    </div>
+
+    <!-- About / credits overlay — a blurred field above the whole screen. Click
+         anywhere closes it. Opened by the "i" above. -->
+    <Transition name="credits-fade">
+      <div v-if="store.creditsOpen" class="credits-panel" @click="store.toggleCredits()">
+        <div class="credits-content">
+          <header class="credits-head">
+            <h1 class="credits-title">{{ CREDITS_TITLE }}</h1>
+            <p class="credits-author">{{ CREDITS_AUTHOR }}</p>
+          </header>
+
+          <section class="credits-section">
+            <p class="credits-label">About</p>
+            <p v-for="(para, i) in CREDITS_ABOUT" :key="i" class="credits-para" v-html="italicize(para)" />
+          </section>
+
+          <section class="credits-section">
+            <p class="credits-label">Corpus in use</p>
+            <p class="credits-para credits-source" v-html="italicize(CREDITS_CORPUS)" />
+          </section>
+
+          <section class="credits-section">
+            <p class="credits-label">Images source</p>
+            <p
+              v-for="(line, i) in IMAGE_CREDIT_LINES"
+              :key="i"
+              class="credits-para credits-source"
+              :class="{ 'credits-url': i === IMAGE_CREDIT_LINES.length - 1 }"
+              v-html="italicize(line)"
+            />
+          </section>
+
+          <section class="credits-section">
+            <p class="credits-label">Typography in use</p>
+            <p v-for="(line, i) in CREDITS_TYPOGRAPHY" :key="i" class="credits-para credits-source">{{ line }}</p>
+          </section>
+
+          <section class="credits-section">
+            <p class="credits-label">Acknowledgment</p>
+            <p v-for="(line, i) in CREDITS_ACKNOWLEDGMENT" :key="i" class="credits-para credits-source">{{ line }}</p>
+          </section>
+
+          <p class="credits-copyright" v-html="italicize(CREDITS_COPYRIGHT)" />
+        </div>
+      </div>
+    </Transition>
+
     <!-- Interface luminosity dimmer — a full-screen black overlay above the
          whole UI. opacity = store.interfaceDimLevel (0 = full brightness, 1 =
          fully dark); fade time = store.interfaceDimDuration (the store derives
@@ -89,6 +231,230 @@ const store = useInteractionStore()
 .dim-caption.visible {
   opacity: 1;
 }
+
+/* ── Persistent "About" control (day/night dot · "i" · day/night dot) ──
+   3-column grid spanning the viewport: the dots hug the centre in the 1fr
+   columns, the "i" sits in the auto middle column (viewport centre). z below
+   the dim overlay (9999) so darkening covers it; above every view surface. */
+.about-controls {
+  position: fixed;
+  top: 0.22rem;
+  left: 0;
+  right: 0;
+  /* Above the credits overlay (z 130) so the day/night dots — revealed WITH the
+     overlay — sit on TOP of the blur and stay clickable, and the "i" can close. */
+  z-index: 140;
+  pointer-events: none;   /* container ignores clicks; buttons opt back in */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1rem;
+  opacity: 1;
+  /* Fades with the corner labels during the overview finale (700ms). */
+  transition: opacity 700ms var(--rotate-fade-easing, ease);
+}
+.about-controls.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.about-controls > .bg-toggle:first-of-type { justify-self: end; }
+.about-controls > .bg-toggle:last-of-type  { justify-self: start; }
+
+/* Day/night background toggles — oval-icon buttons (the coloured oval itself is
+   the affordance). HIDDEN by default; revealed only while the "i" is open (the
+   credits overlay), keeping their layout slot (opacity) so the "i" stays centred. */
+.about-controls .bg-toggle {
+  pointer-events: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  width: 1.8rem;
+  height: 1.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 240ms ease-out;
+}
+.about-controls .bg-toggle.revealed {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* Oval (ellipse), not a square. Each oval is a little swatch of its canvas
+   state's gradient (the base linear-gradient of .bg-gradient / .bg-black). The
+   non-active oval is clearly dimmed; the active one is full opacity — that's the
+   only selected-state change (no stroke, no fill recolour). */
+.about-controls .bg-toggle .dot {
+  width: 16px;
+  height: 11px;
+  border-radius: 50%;
+  display: block;
+  opacity: 0.4;
+  transition: transform 150ms ease-out, opacity 150ms ease-out, box-shadow 200ms ease-out;
+}
+/* Night oval = the .bg-black base gradient; day oval = the .bg-gradient base. */
+.about-controls .bg-toggle .dot-black {
+  background: linear-gradient(170deg, #1f2538 0%, #252a3a 35%, #363438 60%, #1c2030 85%, #14182a 100%);
+}
+.about-controls .bg-toggle .dot-white {
+  background: linear-gradient(170deg, #9aa6b0 0%, #a8a8a4 35%, #b0a896 60%, #8e96a0 85%, #6f7884 100%);
+}
+.about-controls .bg-toggle:hover .dot {
+  transform: scale(1.15);
+}
+/* Active oval carries a layered blue glow halo (like the rotate text, but an
+   explicit blue so it reads blueish rather than the greyish --rotate-stroke
+   which stacks to near-white), as a box-shadow scaled to the oval size. */
+.about-controls .bg-toggle.active .dot {
+  opacity: 1;
+  box-shadow:
+    0 0 4px rgba(160, 175, 195, 0.9),
+    0 0 6px rgba(160, 175, 195, 0.85),
+    0 0 9px rgba(156, 170, 190, 0.78),
+    0 0 12px rgba(156, 170, 190, 0.7),
+    0 0 16px rgba(152, 166, 186, 0.62),
+    0 0 20px rgba(152, 166, 186, 0.54),
+    0 0 26px rgba(150, 164, 184, 0.45),
+    0 0 34px rgba(150, 164, 184, 0.36);
+}
+
+/* "i" info control — an "i" enclosed in an oval ring (the ring lives on a
+   pseudo-element nudged up 1px so it sits centred on the glyph). Neue Kabel,
+   muted grey at 50% lifting to full on hover (matches the SkipButton look). */
+.about-controls .interpret-control {
+  pointer-events: auto;
+  position: relative;
+  top: 0;
+  width: 1.6rem;
+  height: 1.10rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  font-family: 'Neue Kabel', sans-serif;
+  font-weight: 500;
+  font-size: 1.05rem;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #595b54;
+  opacity: 0.65;
+  cursor: pointer;
+  transition: opacity 150ms ease;
+}
+.about-controls .interpret-control::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  top: -3px;
+  border: 2px solid #595b54;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.about-controls .interpret-control:hover { opacity: 1; }
+.about-controls .interpret-control.active { opacity: 1; }
+
+/* About / credits overlay — pure blurred field above the whole screen. Content
+   top-anchored, sized to fit the window (no scroll). Click anywhere closes. */
+.credits-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: transparent;
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+}
+.credits-content {
+  max-width: min(50em, 92vw);
+  max-height: 100vh;
+  /* Pushed down a bit (more top padding) so the block sits lower in the view. */
+  padding: 8vh 1rem 3vh;
+  text-align: center;
+  color: #595b54;
+  /* Same blue-grey glyph backing as the rotate captions (the layered
+     --rotate-stroke text-shadow). text-shadow is inherited, so declaring it on
+     the content wrapper gives every line — title, labels, paragraphs — the same
+     soft halo behind the text. */
+  text-shadow:
+    0 0 4px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 6px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 9px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 12px var(--rotate-stroke),
+    0 0 15px var(--rotate-stroke),
+    0 0 18px var(--rotate-stroke);
+}
+.credits-head { margin-bottom: 2vh; }
+.credits-title {
+  margin: 0;
+  font-family: 'ABC Otto', serif;
+  font-weight: 500;
+  font-style: italic;
+  font-size: 4.4rem;
+  letter-spacing: 0.005em;
+  line-height: 1.05;
+}
+.credits-author {
+  margin: 0.1rem 0 0;
+  font-family: 'Neue Kabel', sans-serif;
+  font-size: 0.95rem;
+  opacity: 0.85;
+}
+.credits-section { margin-bottom: 4vh; }
+.credits-section:last-child { margin-bottom: 0; }
+.credits-label {
+  margin: 0 0 0.02rem;
+  font-family: 'Neue Kabel', sans-serif;
+  font-weight: 500;
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+.credits-para {
+  margin: 0 auto 1.4rem;
+  max-width: 46em;
+  font-size: 1.3rem;
+  line-height: 1.05;
+  text-wrap: pretty;
+}
+.credits-para:last-child { margin-bottom: 0; }
+.credits-source {
+  margin-bottom: 0.15rem;
+  font-size: 1.3rem;
+  line-height: 1.05;
+  opacity: 0.9;
+}
+.credits-url { opacity: 0.7; word-break: break-all; }
+
+/* Copyright pinned to the very bottom of the viewport — same anchor as the
+   SkipButton (bottom: 0, centred, same vertical padding). */
+.credits-copyright {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.75rem 0.95rem;
+  font-family: 'Neue Kabel', sans-serif;
+  font-size: 1.05rem;
+  letter-spacing: 0.015em;
+  opacity: 0.55;
+}
+
+/* Fade the blurred About overlay in/out. */
+.credits-fade-enter-active,
+.credits-fade-leave-active { transition: opacity 240ms ease; }
+.credits-fade-enter-from,
+.credits-fade-leave-to { opacity: 0; }
 
 @font-face {
   font-family: 'ABC Otto';

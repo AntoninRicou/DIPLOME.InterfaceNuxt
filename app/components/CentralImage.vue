@@ -32,6 +32,11 @@ const props = withDefaults(defineProps<{
   // Extra multiplier on the RY (vertical) axis only, on top of radiusScale —
   // lets a circle be flattened (shorter than wide) without touching RX.
   radiusScaleY?: number
+  // Persistent per-image blue-grey glow on EVERY layer (the circle of 10 in the
+  // final phase), so each selected image glows and the glow shows between them.
+  // Independent of hover — the hovered image still gets the stronger
+  // `.is-highlighted` glow on top.
+  glowAll?: boolean
 }>(), {
   activeIndex: -1,
   expanded: false,
@@ -44,6 +49,7 @@ const props = withDefaults(defineProps<{
   revealDrift: false,
   radiusScale: 1,
   radiusScaleY: 1,
+  glowAll: false,
 })
 
 const emit = defineEmits<{
@@ -228,6 +234,7 @@ function layerStyle(i: number) {
     name="layer-fade"
     tag="div"
     class="central-image"
+    :class="{ 'glow-all': glowAll }"
     aria-hidden="true"
     @mouseenter="emit('update:hovered', true)"
     @mouseleave="emit('update:hovered', false)"
@@ -296,8 +303,8 @@ function layerStyle(i: number) {
   max-width: none;
   max-height: none;
 }
-/* Hovered image in the circle — warm beige glow matching the system
-   palette (history-strip .current, contribute bloom, center-anchor hover).
+/* Hovered image in the circle — blue-grey glow matching the rotate-text
+   stroke (--rotate-panel-bg), same as the center-anchor hover halo.
    The glow snaps in/out (filter isn't in .layer's transition list); the
    scale-up rides .layer's 700ms transform transition, but a shorter
    transform transition here makes the lift feel responsive on hover. */
@@ -306,10 +313,42 @@ function layerStyle(i: number) {
     transform 250ms cubic-bezier(0.22, 0.61, 0.36, 1),
     width 700ms cubic-bezier(0.22, 0.61, 0.36, 1),
     height 700ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* Blue-grey glow matching the rotate-text stroke (--rotate-panel-bg ≈
+     rgb(175,180,188)). Diffuse + strong — larger blur radii, higher alpha. */
   filter:
-    drop-shadow(0 0 8px rgba(249, 236, 208, 0.75))
-    drop-shadow(0 0 18px rgba(249, 236, 208, 0.45))
-    drop-shadow(0 0 32px rgba(249, 236, 208, 0.22));
+    drop-shadow(0 0 16px rgba(175, 180, 188, 0.95))
+    drop-shadow(0 0 34px rgba(175, 180, 188, 0.7))
+    drop-shadow(0 0 60px rgba(175, 180, 188, 0.42));
+}
+/* glowAll — every selected image in the final-phase circle carries its OWN
+   blue-grey glow behind it (per-image drop-shadow, not a whole-package halo).
+   The glow PULSES ONCE on reveal (no constant glow), then settles to a faint
+   resting halo. The ~0.4s delay roughly matches the circle's reveal-delay so
+   each image's pulse lands as it appears. */
+.central-image.glow-all .layer {
+  /* ONE slow pulse (rise → fall), runs once, settles to a faint resting halo. */
+  animation: layer-glow-pulse 2.8s ease-in-out 0.4s 1 both;
+}
+@keyframes layer-glow-pulse {
+  0% {
+    filter: drop-shadow(0 0 0 rgba(175, 180, 188, 0));
+  }
+  50% {
+    filter:
+      drop-shadow(0 0 14px rgba(175, 180, 188, 0.95))
+      drop-shadow(0 0 30px rgba(175, 180, 188, 0.6));
+  }
+  100% {
+    filter: drop-shadow(0 0 6px rgba(175, 180, 188, 0.3));
+  }
+}
+/* Hover still wins over the settled pulse value — `!important` beats the
+   animation's forwards fill so the hovered image glows stronger. */
+.central-image.glow-all .layer.is-highlighted {
+  filter:
+    drop-shadow(0 0 16px rgba(175, 180, 188, 0.95))
+    drop-shadow(0 0 34px rgba(175, 180, 188, 0.7))
+    drop-shadow(0 0 60px rgba(175, 180, 188, 0.42)) !important;
 }
 /* TransitionGroup hooks. New layers appear instantly (no fade-in — the
    caller may pin them, and a fade-in would feel laggy on hover). Layers

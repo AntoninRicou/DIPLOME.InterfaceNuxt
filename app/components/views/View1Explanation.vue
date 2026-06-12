@@ -82,7 +82,8 @@ onBeforeUnmount(() => {
 
 <template>
   <section
-    class="view-1 bg-gradient"
+    class="view-1"
+    :class="`bg-${store.canvasBackground}`"
     :style="{ '--cross-draw-duration': `${crossDurationMs}ms` }"
   >
     <SkipButton @click="skip" />
@@ -176,16 +177,16 @@ onBeforeUnmount(() => {
   left: 5%;
   right: 5%;
   top: 50%;
-  height: 1px;
-  margin-top: -0.5px;
+  height: 1.6px;
+  margin-top: -0.8px;
   animation: cross-draw-h var(--cross-draw-duration, 10000ms) linear forwards;
 }
 .view-1::after {
   top: 5%;
   bottom: 5%;
   left: 50%;
-  width: 1px;
-  margin-left: -0.5px;
+  width: 1.6px;
+  margin-left: -0.8px;
   animation: cross-draw-v var(--cross-draw-duration, 10000ms) linear forwards;
 }
 @keyframes cross-draw-h {

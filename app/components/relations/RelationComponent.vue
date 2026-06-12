@@ -291,6 +291,13 @@ function enterDelay(slotIdx: number): string {
 
 function onRelatedClick(id: string) {
   if (props.preview) return
+  // Clear THIS cell's hover overlay immediately on click — the radial words
+  // (keywords / bridge / year / subject), the connector line, the ghost path
+  // and the project highlight. On the 10th pick the finale freezes the cells
+  // (pointer-events: none) before `mouseleave` can fire, so without this the
+  // overlay lingers over the last image. Clearing on click makes it disappear
+  // the instant the image is selected.
+  onCellLeave()
   // Pass this quadrant so project can colour the new path segment by quadrant.
   store.activateCentral(id, QUADRANT_INDEX[props.position ?? 'tl'])
 }
@@ -318,8 +325,9 @@ function onCellHover(id: string, slotIdx: number) {
   store.setHighlight(id)
   // Ghost path — dashed translucent line from active central image to
   // this cell's id, drawn on every project canvas. Previews the proximity
-  // link before commit. Cleared on cell-leave (fades out ~150ms).
-  store.setGhostPath(id)
+  // link before commit. Tinted by THIS quadrant's relation colour (Source /
+  // Form / Semantic / Time). Cleared on cell-leave (fades out ~150ms).
+  store.setGhostPath(id, QUADRANT_INDEX[props.position ?? 'tl'])
   // Track the hovered cell so the radial words can render along the line
   // between this cell and the centred image (see `radialWords`).
   hoveredCell.value = { id, slotIdx }
@@ -338,7 +346,7 @@ function onCellLeave() {
 // (when the cells fade out) so it fades at the SAME moment. (Idempotent if the
 // mouseleave already fired and `hoveredCell` is null.)
 watch(() => store.overviewFinalePhase, (phase) => {
-  if (phase === 'clockwise' && hoveredCell.value) onCellLeave()
+  if (phase === 'rest' && hoveredCell.value) onCellLeave()
 })
 
 // ── Hover state ──
@@ -588,19 +596,6 @@ const QUADRANT_INDEX: Record<'tl' | 'tr' | 'bl' | 'br', number> = {
   tl: 0, tr: 1, bl: 2, br: 3,
 }
 
-// Overview-finale clockwise fade order: tl → tr → br → bl (distinct from
-// QUADRANT_INDEX, which is the component-id order with bl=2 / br=3). Each
-// quadrant's cells fade with a `transition-delay` of index × step, so the four
-// quadrants disappear one after another. FINALE_CLOCKWISE_STEP_MS mirrors
-// CLOCKWISE_STEP_MS in interaction.ts — KEEP IN SYNC (the CSS fade duration on
-// `.finale-clockwise .cell` mirrors CELL_FADE_MS there).
-const FINALE_CLOCKWISE_INDEX: Record<'tl' | 'tr' | 'bl' | 'br', number> = {
-  tl: 0, tr: 1, br: 2, bl: 3,
-}
-const FINALE_CLOCKWISE_STEP_MS = 450
-const finaleClockwiseDelay = computed(
-  () => `${FINALE_CLOCKWISE_INDEX[props.position ?? 'tl'] * FINALE_CLOCKWISE_STEP_MS}ms`,
-)
 
 // Per-quadrant palette. MIRRORS the project path palette QUADRANT_COLORS in
 // DIPLOME.Feedback/src/pathColors.js — KEEP IN LOCKSTEP. Indexed [tl, tr, bl, br]
@@ -742,18 +737,14 @@ onUnmounted(() => {
       name="cell-fade"
       tag="div"
       class="constellation"
-      :style="{ '--finale-clockwise-delay': finaleClockwiseDelay }"
       :class="{
         suppressed: interpretationActive,
         hidden: store.overviewConfirmed,
         'central-revealed': store.centralHovered,
-        // Cells revealed (full opacity) during `bright`, then fade out clockwise
-        // during `clockwise`; they stay gone through `rest` / `transition`.
-        'finale-bright': store.overviewFinalePhase === 'bright',
-        'finale-clockwise':
-          store.overviewFinalePhase === 'clockwise'
-          || store.overviewFinalePhase === 'rest'
-          || store.overviewFinalePhase === 'transition',
+        // Finale: the suggestion cells fade out together with the cross + labels
+        // on the `rest` phase (and stay gone through `transition`).
+        'finale-out':
+          store.overviewFinalePhase === 'rest' || store.overviewFinalePhase === 'transition',
         'is-preview': preview,
         'preview-revealed': preview && revealed,
         'no-entrance': suppressMountReveal,
@@ -939,7 +930,7 @@ onUnmounted(() => {
    the three leave in lockstep, before the grid is unmounted at confirm. */
 .rel.finale-fadeout .corner-label {
   opacity: 0;
-  transition: opacity 200ms ease-out;
+  transition: opacity 700ms ease-out;
 }
 
 .status {
@@ -1001,19 +992,12 @@ onUnmounted(() => {
    reveals. Overrides the latent/hover opacity; interaction is frozen via
    `.rel.is-frozen`. Pure appearance — these only touch opacity, the cells'
    geometry/transform is untouched. */
-/* Overview finale, beat 1 — the suggestion cells become fully visible (a brief
-   reveal) so the clockwise fade that follows is legible. */
-.constellation.finale-bright .cell {
-  opacity: 1;
-  transition: opacity 300ms ease-out;
-}
-/* Beat 2 — the cells fade out ONE QUADRANT AT A TIME, clockwise tl → tr → br →
-   bl. The per-quadrant stagger is `--finale-clockwise-delay` (bound inline from
-   FINALE_CLOCKWISE_INDEX × step); the duration mirrors CELL_FADE_MS in
-   interaction.ts. They stay at 0 through `rest` / `transition`. */
-.constellation.finale-clockwise .cell {
+/* Overview finale — the suggestion cells fade out together with the cross +
+   corner labels (the `rest` phase), leaving just the selected image centred.
+   Smooth, uniform fade; duration mirrors REST_FADE_MS in interaction.ts. */
+.constellation.finale-out .cell {
   opacity: 0;
-  transition: opacity 550ms ease-out var(--finale-clockwise-delay, 0ms);
+  transition: opacity 700ms ease-out;
 }
 
 .cell {
@@ -1087,7 +1071,10 @@ onUnmounted(() => {
 .cell-reveal {
   display: block;
   transform-origin: center center;
-  animation: cell-reveal-in 280ms ease-out var(--enter-delay, 0ms) backwards;
+  /* Softened: a longer window + gentle decelerating curve so the surrounding
+     suggestion images fade up smoothly on a central-image click instead of
+     snapping in. (Was 280ms ease-out.) */
+  animation: cell-reveal-in 460ms cubic-bezier(0.22, 0.61, 0.36, 1) var(--enter-delay, 0ms) backwards;
 }
 
 /* TransitionGroup leave — all leaving cells fade out simultaneously over
@@ -1101,7 +1088,9 @@ onUnmounted(() => {
   opacity: 0;
 }
 @keyframes cell-reveal-in {
-  from { opacity: 0; transform: scale(0.6); }
+  /* Start nearer to full scale (0.78, was 0.6) so the entrance reads as a soft
+     fade rather than a pop — gentler alongside the longer fade window above. */
+  from { opacity: 0; transform: scale(0.78); }
   to   { opacity: 1; transform: scale(1); }
 }
 
@@ -1177,7 +1166,8 @@ onUnmounted(() => {
     border-color 200ms ease-out;
   border-color: #7a7a85;
   color: #f0f0f4;
-  box-shadow: 0 0 22px 2px rgba(200, 200, 220, 0.18);
+  /* Blue-grey hover glow matching the rotate-text stroke (--rotate-panel-bg). */
+  box-shadow: 0 0 22px 2px rgba(175, 180, 188, 0.28);
   outline: none;
   z-index: 5;
 }

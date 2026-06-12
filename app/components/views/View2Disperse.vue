@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import AtlasThumb from '~/components/AtlasThumb.vue'
 import SkipButton from '~/components/SkipButton.vue'
@@ -32,16 +32,16 @@ import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 const ENTRY_PANELS = [
   'Proxima brings together thousands of images',
 
-  'Those images once belonged to the past, bounded by books.',
+  'Those images once belonged to the past, bounded by old books.',
  
-   'Today you can simultaneously explore them,\nthrough multiple angles.',
+   'Today you can simultaneously explore them,\nthrough multiple ways of seeing.',
 ]
 // Project-ONLY centred narration, played (2s after the user's first hover) via
 // set-center-caption with the same rotate params. Each sentence fades in,
 // holds PROJECT_HOLDS[i], fades out — sequenced by playProjectNarration().
 const PROJECT_PANELS = [
-  'You can see here the same images,\norganized into four distinct maps.',
-  'Each map organizes them according to different angles.',
+  'You can see here these same images,\norganized into four distinct maps.',
+  'Each map organizes them according to different criterias.',
 ]
 // CLICK_ACTION is a centred ROTATE caption (same `.entry-caption` style/timing
 // as the intro narration), drifting in after the project narration once the
@@ -158,6 +158,19 @@ function armHover() {
   )
 }
 
+// Forward the interface day/night toggle to the disperse embed so its backdrop
+// matches. The embed is off the socket relay (it can't get `set-canvas-bg`), so
+// this postMessage is the channel. Posted on iframe load and on every toggle.
+// NOTE: the `watch` that calls this lives below, AFTER `store` is defined — a
+// watch getter runs immediately, so registering it up here (before `const
+// store`) would hit `store` in its temporal dead zone and crash setup.
+function postCanvasBg() {
+  frameEl.value?.contentWindow?.postMessage(
+    { type: 'view0:set-bg', mode: store.canvasBackground },
+    expectedOrigin.value || '*',
+  )
+}
+
 // Dismiss the "Move your mouse…" caption the MOMENT the user hovers an image —
 // no minimum hold. Fades it out, then swaps to the "Select an image…" caption +
 // unlocks selection. Idempotent (no-op if already dismissed).
@@ -214,6 +227,10 @@ function playProjectNarration() {
         projectNarrationTimers.push(setTimeout(() => {
           hoverCaptionVisible.value = true
           armHover()
+          // Selection works the MOMENT the "Find an image…" caption appears — no
+          // hover-then-wait gate. (The caption still swaps to CLICK_ACTION on
+          // hover, but clicking a sprite is already live here.)
+          clickEnabled.value = true
           // If the cursor is already on a sprite the moment it appears, swap
           // right away (no hover event would fire while stationary).
           if (lastHoverId != null) dismissHoverCaption()
@@ -234,6 +251,10 @@ function readMsVar(name: string): number {
 }
 
 const store = useInteractionStore()
+// Mirror the interface day/night toggle into the disperse embed (see
+// postCanvasBg above). Registered here — after `store` exists — because a watch
+// getter runs immediately.
+watch(() => store.canvasBackground, postCanvasBg)
 const config = useRuntimeConfig()
 // Per-image natural dimensions in vmin — shared with CentralImage so
 // VIEW_2 previews land at the same footprint as the VIEW_3 / VIEW_4
@@ -390,8 +411,15 @@ function onMessage(event: MessageEvent) {
 // hover preview works, and the "Select an image…" prompt is shown; the user
 // then picks an image to advance to VIEW_3 as normal (the button does NOT
 // auto-advance — it just unlocks selection early).
+// Keeps the Skip button mounted through its 500ms exit fade — otherwise the
+// `clickEnabled` flip below removes it via v-if on the same tick and the fade
+// is cut. Cleared after the fade so the button then unmounts.
+const skipFading = ref(false)
+
 function skipToPick() {
   if (clickEnabled.value || entryExiting.value) return
+  skipFading.value = true
+  setTimeout(() => { skipFading.value = false }, 500)
   clearEntryTimer()
   entryCaptionVisible.value = false     // drop the intro caption if still up
   hoverCaptionVisible.value = false     // drop the "Move your mouse…" caption if up
@@ -460,12 +488,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="view view-0 bg-gradient" :class="{ 'is-exiting': entryExiting }">
+  <section class="view view-0" :class="[`bg-${store.canvasBackground}`, { 'is-exiting': entryExiting }]">
     <iframe
       ref="frameEl"
       class="project-frame"
       :src="projectUrl"
       title="project disperse canvas"
+      @load="postCanvasBg"
     />
     <!-- Rotating intro caption — same shared `--rotate-*` vars and same
          Vue <Transition> shape as View1Explanation / View3Transition,
@@ -514,7 +543,7 @@ onBeforeUnmount(() => {
          pickable state (clickEnabled), leaving the "Select an image…" prompt
          showing. Hidden once selection is unlocked (whether via this button or
          the natural phase progression) and during the exit. -->
-    <SkipButton v-if="!clickEnabled && !entryExiting" @click="skipToPick" />
+    <SkipButton v-if="(!clickEnabled || skipFading) && !entryExiting" @click="skipToPick" />
     <!-- Spawn-and-fade hover previews. Each preview is anchored to the
          viewport position where the cursor first entered its sprite and
          runs its own fade-in → hold → fade-out lifecycle. Multiple can

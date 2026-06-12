@@ -50,7 +50,7 @@ const MODES_CAPTION = '	This action-view display images on where you can explore
 // THEN does ZOOM_ACTION appear + the crosses arm (activation possible).
 const PICKED_TEXT = 'You picked this image.'
 const showPickedCaption = ref(false)
-const PICKED_HOLD_MS = 4000
+const PICKED_HOLD_MS = 3000
 let pickedHoldTimer: ReturnType<typeof setTimeout> | null = null
 let pickedAfterTimer: ReturnType<typeof setTimeout> | null = null
 // CONNECT — a short sentence shown AFTER the action-view (MODES) caption and
@@ -65,7 +65,7 @@ const ZOOM_ACTION = 'Activate the four quadrants across both screens.'
 // and BEFORE the start prompt. FEEDBACK (project) centre ONLY (mirrored via
 // set-center-caption), with the INTERFACE darkened while it plays — no
 // interface text for this one.
-const MIRROR_CAPTION = 'This map-view provides a trace of images you encounter.'
+const MIRROR_CAPTION = 'This maps-view provides a trace of images you will encounter.'
 const MIRROR_DIM_LEVEL = 0.7 // interface darkening while the MIRROR caption plays on the feedback
 const START_ACTION = 'Click on your image to start.'
 const showZoomAction = ref(false)
@@ -113,14 +113,34 @@ function onCenterClick() {
   }, ROTATE_FADE_OUT_MS)
 }
 
-// "Next" skip button — jumps straight to the relational view (VIEW_4),
-// bypassing the four quadrant-cross zooms + the modes-caption. No
-// flash/dissolve animation: it advances immediately via enterRelationalView,
-// which flips project to `split` and reveals the corner labels (see the
-// all-on re-assert inside enterRelationalView). It ALSO bypasses VIEW_4's
-// two-sentence entry narration (bypassRelationalIntro) so the user lands
-// directly in the interactive relational view with selection unlocked.
+// TWO-STAGE skip button. The same `<SkipButton>` does different things
+// depending on where VIEW_3's narration currently is (keyed off `crossesReady`):
+//
+//  Stage 1 — narration still playing (crossesReady === false): FAST-FORWARD to
+//  the "Activate the four quadrants…" beat WITHOUT leaving VIEW_3. Cancel all
+//  pending narration timers, clear the feedback caption + un-dim the interface
+//  (in case skip lands mid-MIRROR), drop the three narration captions, then
+//  reveal ZOOM_ACTION + arm the quadrants — exactly the state onMounted reaches
+//  at step 4. The user then activates the quadrants by hover as normal.
+//
+//  Stage 2 — quadrants armed (crossesReady === true): advance to VIEW_4. Lands
+//  on "You can now explore…" (bypassRelationalIntro skips VIEW_4's mode-words
+//  caption only — see View4Relational onMounted) with selection unlocked.
+//  enterRelationalView flips project to `split` + reveals the corner labels.
 function skipToRelational() {
+  if (!crossesReady.value) {
+    // Stage 1: jump to the quadrant-arming beat, stay in VIEW_3.
+    clearTimers()
+    store.setCenterCaption('')
+    store.setInterfaceDim(0, { instant: true })
+    showPickedCaption.value = false
+    showModesCaption.value = false
+    showConnectCaption.value = false
+    showZoomAction.value = true
+    crossesReady.value = true
+    return
+  }
+  // Stage 2: advance to VIEW_4, landing on "You can now explore…".
   store.bypassRelationalIntro = true
   store.enterRelationalView('skip')
 }
@@ -158,6 +178,11 @@ const CORNERS = [
   { position: 'bl', name: 'Semantic', index: 2 },
   { position: 'br', name: 'Time', index: 3 },
 ] as const
+
+// Each quadrant marker shows its corner-label NAME (Source / Form / Semantic /
+// Time) in place of the old `+`, styled like the corner label (minus the glow).
+const labelForQuadrant = (index: number) =>
+  CORNERS.find((c) => c.index === index)?.name ?? ''
 
 // The VIEW_3 entry intro caption ("This image has been selected.") was REMOVED
 // — VIEW_3 no longer shows a rotating intro sentence after the VIEW_2
@@ -278,7 +303,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="view-2 bg-gradient">
+  <section class="view-2" :class="`bg-${store.canvasBackground}`">
     <!-- Per-quadrant suggestion-image preview. Same four RelationComponents
          VIEW_4 renders, in `preview` mode: non-interactive, each quadrant's
          cells revealed (clockwise) only once its cross is clicked
@@ -310,15 +335,16 @@ onBeforeUnmount(() => {
         :style="zoneStyle(q)"
         @mouseenter="onQuadrantReach(q.index)"
       />
-      <!-- Cross is now a non-interactive marker (pointer-events: none) at the
-           quadrant centre — it shows/glows where to reach and fades when zoomed. -->
+      <!-- Non-interactive marker (pointer-events: none) at the quadrant centre.
+           Shows the corner-label NAME (Source / Form / Semantic / Time) where to
+           reach, in the corner-label style (no glow), and fades when zoomed. -->
       <div
         class="cross-button cross-quadrant"
         :class="{ faded: store.canvasZoomed[q.index], pending: !crossesReady }"
         :style="{ left: q.x, top: q.y }"
         aria-hidden="true"
       >
-        +
+        {{ labelForQuadrant(q.index) }}
       </div>
       <ProximityPanel
         class="quadrant-text"
@@ -366,9 +392,11 @@ onBeforeUnmount(() => {
       <span class="caption-text">{{ START_ACTION }}</span>
     </p>
 
-    <!-- Skip-to-relational button: jumps straight to VIEW_4, bypassing the
-         four quadrant-cross zooms + the modes-caption. -->
-    <SkipButton @click="skipToRelational" />
+    <!-- Two-stage skip. Stage 1 (narration still playing, !crossesReady) FAST-
+         FORWARDS within VIEW_3 — the button stays, so it fades out then back in
+         (staysAfterClick). Stage 2 (crossesReady) advances to VIEW_4 — it just
+         fades out. -->
+    <SkipButton :stays-after-click="!crossesReady" @click="skipToRelational" />
   </section>
 </template>
 
@@ -400,15 +428,15 @@ onBeforeUnmount(() => {
   left: 5%;
   right: 5%;
   top: 50%;
-  height: 1px;
-  margin-top: -0.5px;
+  height: 1.2px;
+  margin-top: -0.6px;
 }
 .view-2::after {
   top: 5%;
   bottom: 5%;
   left: 50%;
-  width: 1px;
-  margin-left: -0.5px;
+  width: 1.2px;
+  margin-left: -0.6px;
 }
 
 /* Corner labels — appearance + position come from the global
@@ -497,6 +525,19 @@ onBeforeUnmount(() => {
 .cross-quadrant {
   transform: translate(-50%, -50%);
   opacity: 1;
+  /* Show the corner-label NAME in the exact corner-label typography (app.vue
+     `.corner-label`: weight 500, italic, --label-size, 0.015em), but WITHOUT
+     the glow — no text-shadow stroke and no attention pulse. Overrides the base
+     `.cross-button` `+` glyph (1.4rem + cross-glow animation). */
+  width: auto;
+  height: auto;
+  white-space: nowrap;
+  font-size: var(--label-size);
+  font-weight: 500;
+  font-style: italic;
+  letter-spacing: 0.015em;
+  text-shadow: none;
+  animation: none;
 }
 .cross-quadrant.faded {
   opacity: 0;

@@ -85,6 +85,12 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   const view3InterpretationMode = ref(false)
 
+  // Global "About / credits" overlay flag. Owned here (not in a view component)
+  // because the single persistent "i" control lives in app.vue and must survive
+  // view transitions (VIEW_2 → VIEW_4 → explore-others). Opening it also clears
+  // any quadrant interpretation text on the projection so the About reads clean.
+  const creditsOpen = ref(false)
+
   const canvasBackground = ref<'black' | 'gradient'>('gradient')
 
   // ── Luminosity dimmers ──
@@ -483,35 +489,21 @@ export const useInteractionStore = defineStore('interaction', () => {
   }
 
   // ── Overview finale sequence (replaces the old tick-ring loader) ──
-  // When the 10th image is reached, the finale runs in four beats:
-  //   1. `bright`     — the suggestion cells become fully visible (a brief
-  //                     reveal so the clockwise fade is legible).
-  //   2. `clockwise`  — the cells fade out ONE QUADRANT AT A TIME, clockwise:
-  //                     tl → tr → br → bl. The per-quadrant stagger lives in
-  //                     CSS (`.finale-clockwise .cell` in RelationComponent),
-  //                     keyed by CLOCKWISE_STEP_MS / CELL_FADE_MS — KEEP IN
-  //                     SYNC with the mirror constants there.
-  //   3. `rest`       — the moment the LAST quadrant (bl) is gone, EVERYTHING
-  //                     ELSE (grid cross + corner labels) fades together. The
-  //                     central image stays. Held CENTER_HOLD_MS so the
-  //                     selected image sits alone for ~1s.
-  //   4. `transition` — the central deck fades + the project mask fades to
-  //                     gradient, then confirmOverview fires (→ circle of 10).
+  // When the 10th image is reached, the finale runs in two smooth beats:
+  //   1. `rest`       — EVERYTHING fades out together (the quadrant suggestion
+  //                     cells, the grid cross and the corner labels), leaving
+  //                     just the selected image centred. Held CENTER_HOLD_MS so
+  //                     the selected image sits alone for ~1s.
+  //   2. `transition` — the selected image (central deck) then fades out
+  //                     smoothly, the project mask fades to gradient with it,
+  //                     and confirmOverview fires (→ the circle of 10 reveals).
   // All interaction is frozen for the whole sequence (overviewFinaleActive).
-  const BRIGHT_MS = 800            // cells visible before the clockwise fade
-  const CLOCKWISE_STEP_MS = 450    // gap between each quadrant starting to fade (mirror in RelationComponent)
-  const CELL_FADE_MS = 550         // each quadrant's fade duration            (mirror in RelationComponent)
-  // Total time for the clockwise sweep: last quadrant (index 3) starts at
-  // 3·STEP and finishes CELL_FADE_MS later.
-  const CLOCKWISE_TOTAL_MS = 3 * CLOCKWISE_STEP_MS + CELL_FADE_MS
-  const CENTER_HOLD_MS = 1000      // selected image stays alone this long after "the rest" leaves
-  // Gradient hand-off — short so the move to the gradient + circle reveal is
-  // snappy. Matches the 200ms CSS fades on `.center-anchor.deck-fadeout`,
-  // `.view-3.finale-fadeout::before`, and `.rel.finale-fadeout .corner-label`.
-  const GRADIENT_MS = 200
+  const REST_FADE_MS = 700         // everything-fades-together duration (mirror CSS fades)
+  const CENTER_HOLD_MS = 1000      // selected image stays alone, centred, this long
+  const CENTER_FADE_MS = 700       // selected image fade + project gradient hand-off
   // "See your path" appears this long after the circle has revealed.
   const SEE_YOUR_PATH_DELAY_MS = 6000
-  const overviewFinalePhase = ref<'idle' | 'bright' | 'clockwise' | 'rest' | 'transition'>('idle')
+  const overviewFinalePhase = ref<'idle' | 'rest' | 'transition'>('idle')
   const overviewFinaleActive = computed(() => overviewFinalePhase.value !== 'idle')
   // Gates the post-confirm "See your path" control behind a delay.
   const overviewControlsReady = ref(false)
@@ -520,26 +512,19 @@ export const useInteractionStore = defineStore('interaction', () => {
   function startOverviewFinale() {
     if (!overviewEligible.value) return
     if (overviewFinalePhase.value !== 'idle') return
-    const clockwiseStart = BRIGHT_MS
-    const restStart = clockwiseStart + CLOCKWISE_TOTAL_MS   // last quadrant gone
-    const transitionStart = restStart + CENTER_HOLD_MS      // selected image held ~1s alone
-    overviewFinalePhase.value = 'bright'
-    finaleTimers.push(setTimeout(() => {
-      overviewFinalePhase.value = 'clockwise'  // cells fade tl → tr → br → bl
-    }, clockwiseStart))
-    finaleTimers.push(setTimeout(() => {
-      overviewFinalePhase.value = 'rest'       // grid cross + corner labels fade; central image stays
-    }, restStart))
+    // The selected image is held alone until its fade begins.
+    const transitionStart = REST_FADE_MS + CENTER_HOLD_MS
+    overviewFinalePhase.value = 'rest'           // cells + cross + labels fade together; central stays
     finaleTimers.push(setTimeout(() => {
       overviewFinalePhase.value = 'transition'
-      // Central deck fades (View4 deckHidden) + project mask fades to gradient,
-      // both over GRADIENT_MS, so both screens reach the gradient together.
-      projectSocket.setMask(1, GRADIENT_MS)
+      // Selected image (deck) fades (View4 deckHidden) + project mask fades to
+      // gradient, both over CENTER_FADE_MS, so both screens reach gradient together.
+      projectSocket.setMask(1, CENTER_FADE_MS)
     }, transitionStart))
     finaleTimers.push(setTimeout(() => {
       confirmOverview()
       overviewFinalePhase.value = 'idle'
-    }, transitionStart + GRADIENT_MS))
+    }, transitionStart + CENTER_FADE_MS))
   }
 
   function confirmOverview() {
@@ -787,6 +772,15 @@ export const useInteractionStore = defineStore('interaction', () => {
     projectSocket.setCanvasBg(mode)
   }
 
+  // Toggle the global About / credits overlay (the single "i" control in
+  // app.vue). On open, clear any per-quadrant interpretation text on the
+  // projection — the About replaces the quadrant text rather than layering
+  // over it (see the "i" merge: one control, blurred About above the screen).
+  function toggleCredits() {
+    creditsOpen.value = !creditsOpen.value
+    if (creditsOpen.value) clearCanvasTexts()
+  }
+
   // Dim the INTERFACE (Nuxt UI layer): drives the full-screen black overlay in
   // app.vue. level 0 = full brightness, 1 = fully dark. The fade DURATION is
   // derived from the opacity delta so the SPEED is constant (see
@@ -852,14 +846,16 @@ export const useInteractionStore = defineStore('interaction', () => {
   // showing the proximity link being previewed. Pass null to clear (fade
   // out). Same ephemerality rules as setHighlight — no persisted state
   // touched. Skipped if there's no active central image to anchor from.
-  function setGhostPath(toId: ImageId | null) {
+  function setGhostPath(toId: ImageId | null, quadrant?: number) {
     if (!toId) {
       projectSocket.setGhostPath(null, null)
       return
     }
     const fromId = activeCentralImageId.value
     if (!fromId) return
-    projectSocket.setGhostPath(fromId, toId)
+    // `quadrant` colours the hover line by the hovered cell's relation (Source /
+    // Form / Semantic / Time) — resolved to a colour project-side.
+    projectSocket.setGhostPath(fromId, toId, quadrant)
   }
 
   return {
@@ -909,6 +905,8 @@ export const useInteractionStore = defineStore('interaction', () => {
     jumpToHistory,
     view3InterpretationMode,
     toggleView3Interpretation,
+    creditsOpen,
+    toggleCredits,
     canvasBackground,
     setCanvasBackground,
     interfaceDimLevel,

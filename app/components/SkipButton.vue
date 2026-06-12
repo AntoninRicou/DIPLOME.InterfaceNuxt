@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 // Shared "Skip"/advance affordance — one consistent control used by VIEW_1
 // (explanation), VIEW_2 (disperse) and VIEW_3 (quadrant) to skip forward, and
 // by VIEW_4's "Start over" (top-placed). The label in Neue Kabel, the muted
@@ -8,26 +9,51 @@
 // ActionPrompt (1.05rem). The PARENT owns the click action (and whether the
 // button is shown, via v-if); this component owns only the look, so every
 // consumer stays consistent.
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   // Button text. Defaults to "Skip" so the three skip consumers need no prop.
   label?: string
   // Which corner-label line to align to. 'bottom' (default) = bl/br line;
   // 'top' = tl/tr line (VIEW_4 "Start over").
   placement?: 'top' | 'bottom'
+  // True when this click does NOT remove the button — it STAYS in the same view
+  // (e.g. VIEW_3's two-stage skip, stage 1). Then the exit fade plays and the
+  // button fades back IN afterwards instead of staying gone. Default false: the
+  // click advances/removes the button, so it just fades out and stays gone.
+  staysAfterClick?: boolean
 }>(), {
   label: 'Skip',
   placement: 'bottom',
+  staysAfterClick: false,
 })
-defineEmits<{ click: [] }>()
+const emit = defineEmits<{ click: [] }>()
+
+// On click the button fades itself OUT (the `.is-leaving` animation) so it
+// visibly disappears, then forwards the click to the parent. If the button is
+// expected to STAY (staysAfterClick), it resets after the fade so it re-appears
+// (the entrance animation replays) — otherwise it stays gone until it unmounts.
+const LEAVE_MS = 500
+const clicked = ref(false)
+let resetTimer: ReturnType<typeof setTimeout> | null = null
+function onClick() {
+  if (resetTimer) { clearTimeout(resetTimer); resetTimer = null }
+  // Capture BEFORE emit — the parent's handler may flip staysAfterClick during
+  // this click (VIEW_3 stage 1 sets crossesReady, so it goes true → false).
+  const stays = props.staysAfterClick
+  clicked.value = true
+  emit('click')
+  if (stays) {
+    resetTimer = setTimeout(() => { clicked.value = false }, LEAVE_MS)
+  }
+}
 </script>
 
 <template>
   <button
     class="skip-button"
-    :class="placement"
+    :class="[placement, { 'is-leaving': clicked }]"
     type="button"
     :aria-label="label"
-    @click="$emit('click')"
+    @click="onClick"
   >
     {{ label }}
   </button>
@@ -45,15 +71,39 @@ defineEmits<{ click: [] }>()
   padding: 0.75rem 0.95rem;
   font-family: 'Neue Kabel', sans-serif;
   font-weight: 500;
+  font-style: italic;
   font-size: 1.05rem;
   letter-spacing: 0.015em;
   line-height: 1;
   color: #595b54;
-  opacity: 0.5;
+  opacity: 0.65;
   cursor: pointer;
   transition: opacity 150ms ease;
   z-index: 20;
   pointer-events: auto;
+  /* Entrance every time a view mounts its Skip button. Without it, skipping
+     into the next view (which has its own button at the same fixed spot) makes
+     the new button appear instantly under the cursor — at hover opacity — so it
+     looks like the same button "stayed behind the mouse". The button is held
+     HIDDEN for `delay` (so it clearly goes away during the view swap), then
+     fades in over `duration` — a distinct disappear → reappear. `backwards`
+     fill keeps it at opacity 0 through the delay; after the animation the
+     normal base/:hover opacity resumes. The animation also overrides :hover
+     for its run, so the cursor sitting on the spot can't reveal it early. */
+  animation: skip-appear 800ms ease 350ms backwards;
+}
+@keyframes skip-appear {
+  from { opacity: 0; }
+  to { opacity: 0.65; }
+}
+/* Exit on click — fade out over 500ms (overrides the entrance + :hover for its
+   run, and forwards-holds at 0 so it stays gone until the button unmounts). */
+.skip-button.is-leaving {
+  animation: skip-leave 500ms ease forwards;
+  pointer-events: none;
+}
+@keyframes skip-leave {
+  to { opacity: 0; }
 }
 .skip-button.bottom { bottom: 0; }
 .skip-button.top { top: 0; }

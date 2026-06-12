@@ -4,7 +4,6 @@ import { useInteractionStore } from '~/stores/interaction'
 import RelationComponent from '~/components/relations/RelationComponent.vue'
 import CentralImage from '~/components/CentralImage.vue'
 import SkipButton from '~/components/SkipButton.vue'
-import { IMAGE_CREDIT_LINES } from '~/view3/view3Interpretations'
 import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 
 const store = useInteractionStore()
@@ -56,7 +55,7 @@ const EXPLORE_TEXT = 'See how you traveled.'
 // A second sentence shown right after the first, same hold duration. Everything
 // downstream (map keywords, ribbons) is pushed back by one sentence cycle so it
 // still lands after BOTH sentences have played (see advanceToExplore).
-const EXPLORE_TEXT_2 = 'Your journey cross different areas of the maps.'
+const EXPLORE_TEXT_2 = 'Your journey crosses different areas of the maps.'
 // "See how…" appears after the journey sentence leaves / single map reveals
 // (SINGLE_REVEAL_MS 8250). Hand-tuned to 10750ms (+500 over the prior 10250).
 const EXPLORE_DELAY_MS = 11750 // wait before the "See how…" project caption appears
@@ -77,7 +76,7 @@ const ribbonsReady = ref(false)
 const circleHoverReady = ref(false)
 // Interface-only rotate caption shown the moment the dim deactivates (hover
 // unlocks) — invites the user to hover the circle.
-const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to see where they live.'
+const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to see where they live from a map to another.'
 const EXPLORE_HOVER_HINT_DELAY_MS = 4000 // beat after the dim lifts before the hint appears
 const exploreHoverHintVisible = ref(false)
 // True once the user has hovered a circle image. If they hover BEFORE the hint's
@@ -94,12 +93,13 @@ const exploreRibbonsIntroVisible = ref(false)
 const RIBBONS_AFTER_INTRO_MS = 1500
 // Interface-only rotate caption shown WHEN the user clicks a side circle —
 // invites them to keep exploring. Holds CLICK_AROUND_HOLD_MS, then fades.
-const EXPLORE_RIBBONS_TEXT = 'Click around to discover their explorations.'
+const EXPLORE_RIBBONS_TEXT = 'Look around to discover their explorations.'
 const exploreRibbonsCaptionVisible = ref(false)
 const CLICK_AROUND_HOLD_MS = 5000
 // The end controls (Start over + About) appear END_CONTROLS_AFTER_CLICK_MS after
-// the FIRST side-circle click.
-const END_CONTROLS_AFTER_CLICK_MS = 14000
+// the FIRST side-circle (ribbon) click — i.e. 4s after the user first clicks a
+// "Previous participants…" ribbon.
+const END_CONTROLS_AFTER_CLICK_MS = 4000
 // True once the end controls (Start over + credits) should appear. Gates BOTH
 // the controls and the end caption (replaces the old replay-pick-count gate).
 const endControlsReady = ref(false)
@@ -280,6 +280,13 @@ function ribbonThumbStyle(corner: string, t: RibbonThumb, axis: 'h' | 'v'): Reco
 
 watch(() => store.overviewConfirmed, (v) => { if (v) { centerKey.value++; startFinaleNarration() } })
 
+// "You can now explore…" dismisses the instant the user actually picks an image
+// in a quadrant — the central image changes, so the prompt has served its
+// purpose and shouldn't linger over the new selection. Hiding it here also
+// short-circuits its pending auto-fade (the finaleTimers entry is harmless: it
+// only re-sets the already-false ref).
+watch(() => store.activeCentralImageId, () => { relationalIntroVisible.value = false })
+
 // ── Deck → circle hand-off (flash fix) ──
 // The central deck fades out during the `fadeout` phase. We must NOT un-hide it
 // the instant the phase clears at confirm: that reset (opacity → 1) made the
@@ -320,7 +327,8 @@ let finaleTimers: ReturnType<typeof setTimeout>[] = []
 // holds, fades out.
 const RELATIONAL_INTRO_TEXT = '	You can now explore the corpus through the centered image.'
 const RELATIONAL_INTRO_DELAY_MS = 1400 // settle beat before it drifts in
-const RELATIONAL_INTRO_HOLD_MS = 6000  // hold at full opacity before fading out
+const RELATIONAL_INTRO_HOLD_MS = 5500  // "You can now explore…" full-opacity hold before fading out
+const RELATIONAL_INTRO2_HOLD_MS = 6000 // mode-words caption full-opacity hold before fading out
 const relationalIntroVisible = ref(false)
 
 // Second entry caption — names the four proximity modes, each mode word glowing
@@ -353,14 +361,22 @@ const oneImageLeftReached = computed(
     store.overviewFinalePhase === 'idle',
 )
 // Play the beat when depth 9 is reached; hide immediately if the user leaves
-// depth 9 (picks the 10th, steps back) before the hold elapses.
+// depth 9 (picks the 10th, steps back) before the hold elapses. Selection is
+// LOCKED for the whole hold (reusing relationalSelectionLocked, which gates
+// activateCentral) so the user can't blow past the "last pick" message — they
+// can only pick the 10th once it has been read and faded.
 watch(oneImageLeftReached, (reached) => {
   if (oneLeftTimer) { clearTimeout(oneLeftTimer); oneLeftTimer = null }
   if (reached) {
     oneLeftVisible.value = true
-    oneLeftTimer = setTimeout(() => { oneLeftVisible.value = false }, ONE_LEFT_HOLD_MS)
+    store.relationalSelectionLocked = true
+    oneLeftTimer = setTimeout(() => {
+      oneLeftVisible.value = false
+      store.relationalSelectionLocked = false
+    }, ONE_LEFT_HOLD_MS)
   } else {
     oneLeftVisible.value = false
+    store.relationalSelectionLocked = false
   }
 })
 
@@ -385,12 +401,18 @@ function startFinaleNarration() {
 onMounted(() => {
   updateRibbonViewport()
   window.addEventListener('resize', updateRibbonViewport)
-  // VIEW_3's bottom Skip button bypasses the quadrant zooms AND this VIEW_4
-  // entry narration: when its flag is set, skip both intro sentences and leave
-  // selection unlocked immediately. (Consume the flag so it's one-shot.)
+  // VIEW_3's Skip (stage 2) lands here: skip ONLY the mode-words caption and
+  // open directly on "You can now explore…", with hover + selection live
+  // immediately. The "You can now explore…" sentence still drifts in (and fades
+  // after its hold) so the landing reads the same as the organic path — just
+  // without the leading mode-words sentence. (Consume the flag so it's one-shot.)
   if (store.bypassRelationalIntro) {
     store.bypassRelationalIntro = false
     store.relationalSelectionLocked = false
+    relationalIntroVisible.value = true
+    finaleTimers.push(setTimeout(() => {
+      relationalIntroVisible.value = false
+    }, RELATIONAL_INTRO_HOLD_MS))
     return
   }
   // Lock image selection until the entry narration finishes (released when the
@@ -405,13 +427,15 @@ onMounted(() => {
       // After the mode-words caption fades, drift "You can now explore…" in.
       finaleTimers.push(setTimeout(() => {
         relationalIntroVisible.value = true
+        // Unlock hover + selection the MOMENT "You can now explore…" APPEARS
+        // (not when it fades out) — relationalSelectionLocked gates both
+        // setQuadrantHover and activateCentral.
+        store.relationalSelectionLocked = false
         finaleTimers.push(setTimeout(() => {
           relationalIntroVisible.value = false
-          // 2nd caption fades out → selection unlocks.
-          store.relationalSelectionLocked = false
         }, RELATIONAL_INTRO_HOLD_MS))
       }, ROTATE_FADE_OUT_MS + RELATIONAL_INTRO2_GAP_MS))
-    }, RELATIONAL_INTRO_HOLD_MS))
+    }, RELATIONAL_INTRO2_HOLD_MS))
   }, RELATIONAL_INTRO_DELAY_MS))
 })
 
@@ -419,6 +443,7 @@ onBeforeUnmount(() => {
   for (const t of finaleTimers) clearTimeout(t)
   finaleTimers = []
   if (oneLeftTimer) { clearTimeout(oneLeftTimer); oneLeftTimer = null }
+  store.relationalSelectionLocked = false // never leave selection stuck locked
   window.removeEventListener('resize', updateRibbonViewport)
   store.setCenterCaption('') // don't leave the project sentence lingering
   store.setInterfaceDim(0, { instant: true }) // never leave the interface stuck dim
@@ -524,33 +549,9 @@ function onStartOver() {
   finaleTimers.push(setTimeout(() => { window.location.reload() }, RESTART_FADE_MS))
 }
 
-// ── Credits / about-the-project panel ──
-// A second end-of-experience control that appears alongside "Start over" in
-// the explore-others (single-path) view. Reproduces the VIEW_4 interpret-
-// control `+`, but opens its OWN centred overlay — the project credits + more
-// information. For now it just duplicates the interpretation-mode credit text
-// (IMAGE_CREDIT_LINES); the overlay is meant to grow into a scrollable grid of
-// all the images. Interface-only — nothing on the wire.
-const creditsOpen = ref(false)
-function toggleCredits() {
-  creditsOpen.value = !creditsOpen.value
-}
-
-// Credits panel copy. IMAGE_CREDIT_LINES (view3Interpretations.ts) supplies the
-// "Source of images" block so it stays the single source of truth shared with
-// interpretation mode; everything else lives here.
-const CREDITS_TITLE = 'Proxima'
-const CREDITS_SUBTITLE = 'No image belongs to one place'
-const CREDITS_AUTHOR = 'by Antonin Ricou'
-const CREDITS_ABOUT: readonly string[] = [
-  'Proxima is a tool for exploring visual corpus through different spaces of reading. It allows users to navigate images through multiple forms of relation shaped by spatial proximity. Each path produces a visual trajectory where meaning emerges through experience rather than a single fixed structure.',
-  'It questions contemporary archives by showing how images can exist in multiple relational positions at once. Once fixed within scientific and encyclopedic publications, these images now circulate, shift in meaning, and reconfigure through new connections.',
-  'Proxima opens a space where users explore a large corpus of images, originally fixed within a single archival context, through alternative perspectives and leave traces of their journey.',
-]
-const CREDITS_TYPOGRAPHY: readonly string[] = [
-  'ABC Otto by DINAMO',
-  'Neue Kabel by Marc Schütz',
-]
+// The credits / about-the-project overlay (and the "i" + day/night control that
+// opens it) now live globally in app.vue so they persist across the whole
+// experience. They were removed from VIEW_4.
 </script>
 
 <template>
@@ -596,35 +597,12 @@ const CREDITS_TYPOGRAPHY: readonly string[] = [
       <RelationComponent component-id="component_4" label="Time" position="br" />
     </div>
 
-    <div v-if="!store.overviewConfirmed" class="top-controls">
-      <button
-        class="bg-toggle"
-        :class="{ active: store.canvasBackground === 'black', revealed: store.view3InterpretationMode }"
-        :aria-pressed="store.canvasBackground === 'black'"
-        aria-label="night background"
-        @click="store.setCanvasBackground('black')"
-      >
-        <span class="dot dot-black" aria-hidden="true" />
-      </button>
-      <button
-        class="interpret-control"
-        :class="{ active: store.view3InterpretationMode }"
-        :aria-pressed="store.view3InterpretationMode"
-        aria-label="toggle interpretation mode"
-        @click="store.toggleView3Interpretation()"
-      >
-        +
-      </button>
-      <button
-        class="bg-toggle"
-        :class="{ active: store.canvasBackground === 'gradient', revealed: store.view3InterpretationMode }"
-        :aria-pressed="store.canvasBackground === 'gradient'"
-        aria-label="day background"
-        @click="store.setCanvasBackground('gradient')"
-      >
-        <span class="dot dot-white" aria-hidden="true" />
-      </button>
-    </div>
+    <!-- The top "About" control (day/night dots + "i") + the credits overlay
+         now live globally in app.vue so they persist across the whole
+         experience — see *Persistent "About" control*. -->
+
+    <!-- The big circle-wide glow was removed — each selected image keeps its own
+         per-image glow via CentralImage's `glow-all`. -->
 
     <div
       class="center-anchor"
@@ -632,6 +610,10 @@ const CREDITS_TYPOGRAPHY: readonly string[] = [
         suppressed: store.view3InterpretationMode,
         expanded: store.overviewConfirmed,
         'deck-fadeout': deckHidden,
+        // During the overview finale the central image is fading out — no hover
+        // halo on it (it isn't `expanded` yet, so the hover rule below would
+        // otherwise still fire).
+        finale: store.overviewFinaleActive,
       }"
       :style="centerAnchorStyle"
       aria-hidden="true"
@@ -650,6 +632,7 @@ const CREDITS_TYPOGRAPHY: readonly string[] = [
             :radius-scale="1.05"
             :radius-scale-y="0.85"
             :interactive="circleHoverReady"
+            :glow-all="store.overviewConfirmed"
             source="original"
             @update:hovered="store.setCentralHovered"
             @hover="onCircleHover"
@@ -800,48 +783,8 @@ const CREDITS_TYPOGRAPHY: readonly string[] = [
       @click="onStartOver"
     />
 
-    <!-- Credits / "about the project" control — appears WITH "Start over"
-         (same gate: endControlsReady). Same shared SkipButton look as "Start
-         over", top-placed (aligns with the top corner labels). Toggles a centred
-         overlay; for now it duplicates the interpretation-mode credit text. -->
-    <SkipButton
-      v-if="store.singlePathViewActive && endControlsReady"
-      label="About"
-      placement="top"
-      @click="toggleCredits"
-    />
-
-    <div v-if="creditsOpen" class="credits-panel" @click="toggleCredits">
-      <!-- Click anywhere (backdrop or content) closes — clicks bubble up to
-           the panel's @click. -->
-      <div class="credits-content">
-        <header class="credits-head">
-          <h1 class="credits-title">{{ CREDITS_TITLE }}</h1>
-          <p class="credits-subtitle">{{ CREDITS_SUBTITLE }}</p>
-          <p class="credits-author">{{ CREDITS_AUTHOR }}</p>
-        </header>
-
-        <section class="credits-section">
-          <p class="credits-label">About</p>
-          <p v-for="(para, i) in CREDITS_ABOUT" :key="i" class="credits-para">{{ para }}</p>
-        </section>
-
-        <section class="credits-section">
-          <p class="credits-label">Source of images</p>
-          <p
-            v-for="(line, i) in IMAGE_CREDIT_LINES"
-            :key="i"
-            class="credits-para credits-source"
-            :class="{ 'credits-url': i === IMAGE_CREDIT_LINES.length - 1 }"
-          >{{ line }}</p>
-        </section>
-
-        <section class="credits-section">
-          <p class="credits-label">Typography in use</p>
-          <p v-for="(line, i) in CREDITS_TYPOGRAPHY" :key="i" class="credits-para credits-source">{{ line }}</p>
-        </section>
-      </div>
-    </div>
+    <!-- The "About" control + credits overlay are now global (app.vue), shared
+         across the whole experience — removed from VIEW_4. -->
 
     <nav
       v-if="!store.overviewConfirmed"
@@ -893,18 +836,18 @@ const CREDITS_TYPOGRAPHY: readonly string[] = [
      interpretation mode the cross gets its OWN blur (see `.interpreting`
      below) so it stays a soft, discreet cross instead of vanishing. */
   z-index: 6;
-  transition: filter 240ms ease-out, opacity 200ms ease-out;
+  transition: filter 240ms ease-out, opacity 700ms ease-out;
   background:
     linear-gradient(to bottom,
-      transparent calc(50% - 0.5px),
-      rgba(166, 154, 128, 0.85) calc(50% - 0.5px),
-      rgba(166, 154, 128, 0.85) calc(50% + 0.5px),
-      transparent calc(50% + 0.5px)),
+      transparent calc(50% - 0.6px),
+      rgba(166, 154, 128, 0.85) calc(50% - 0.6px),
+      rgba(166, 154, 128, 0.85) calc(50% + 0.6px),
+      transparent calc(50% + 0.6px)),
     linear-gradient(to right,
-      transparent calc(50% - 0.5px),
-      rgba(166, 154, 128, 0.85) calc(50% - 0.5px),
-      rgba(166, 154, 128, 0.85) calc(50% + 0.5px),
-      transparent calc(50% + 0.5px));
+      transparent calc(50% - 0.6px),
+      rgba(166, 154, 128, 0.85) calc(50% - 0.6px),
+      rgba(166, 154, 128, 0.85) calc(50% + 0.6px),
+      transparent calc(50% + 0.6px));
 }
 /* Overview finale `fadeout` phase — the grid cross fades out TOGETHER with
    the central deck (`.center-anchor.deck-fadeout`) and the corner labels
@@ -1042,27 +985,60 @@ const CREDITS_TYPOGRAPHY: readonly string[] = [
    opacity transition. */
 .center-anchor.deck-fadeout {
   opacity: 0;
-  transition: opacity 200ms ease-out;
+  transition: opacity 700ms ease-out;
+}
+/* Re-specify the active layer's transition in single-image mode so the hover
+   halo's drop-shadow EASES in/out instead of snapping. The base `.layer` rule
+   (in CentralImage) transitions only transform/width/height; we keep those and
+   add `filter` so the glow fades up and away smoothly. Scoped to the
+   non-expanded / non-finale centre (in expanded/circle mode the glow is owned by
+   CentralImage's own `.is-highlighted` rule, and the finale runs its own pulse). */
+.center-anchor:not(.expanded):not(.finale) :deep(.layer.is-active) {
+  transition:
+    transform 900ms cubic-bezier(0.45, 0, 0.55, 1),
+    width 900ms cubic-bezier(0.45, 0, 0.55, 1),
+    height 900ms cubic-bezier(0.45, 0, 0.55, 1),
+    filter 320ms ease-out;
 }
 /* Hover halo — warm beige glow matching the system palette
    (history-strip `.current` step, contribute button bloom). Targets
    ONLY the topmost layer (`.layer.is-active`) so the drop-shadow
    wraps just the active image's alpha contour, not the union of every
-   stacked silhouette in the deck. No filter transition on the layer
-   (its `transition` rule covers only transform/width/height), so the
-   glow snaps in and out instantly — same feel as the quadrant cell
-   hover. Suppressed in interpretation mode (`.center-anchor.suppressed`
+   stacked silhouette in the deck. The `filter` now eases via the
+   transition rule above, so the glow blooms in and away smoothly rather
+   than snapping. Suppressed in interpretation mode (`.center-anchor.suppressed`
    sits behind the `:not(.suppressed)` guard) — the central reference
    is intentionally receding then. Also disabled in `.expanded` (circle /
    overview) mode: there the cursor is over the whole deck while hovering
    any circle image, so this rule would force-glow the last selected image
    on every hover. Per-image hover emphasis in circle mode is owned by
    CentralImage's own `.is-highlighted` rule instead. */
-.center-anchor:not(.suppressed):not(.expanded):hover :deep(.layer.is-active) {
+.center-anchor:not(.suppressed):not(.expanded):not(.finale):hover :deep(.layer.is-active) {
+  /* Blue-grey glow matching the rotate-text stroke (--rotate-panel-bg ≈
+     rgb(175,180,188)). Diffuse + strong — larger blur radii, higher alpha. */
   filter:
-    drop-shadow(0 0 8px rgba(249, 236, 208, 0.75))
-    drop-shadow(0 0 18px rgba(249, 236, 208, 0.45))
-    drop-shadow(0 0 32px rgba(249, 236, 208, 0.22));
+    drop-shadow(0 0 16px rgba(175, 180, 188, 0.95))
+    drop-shadow(0 0 34px rgba(175, 180, 188, 0.7))
+    drop-shadow(0 0 60px rgba(175, 180, 188, 0.42));
+}
+/* After the 10th pick, the finale fades everything else out and leaves the
+   SELECTED image alone in the centre — pulse a blue-grey glow on it so the eye
+   lands on the contributed centre. Runs only while the finale is active. */
+.center-anchor.finale :deep(.layer.is-active) {
+  animation: center-select-pulse 1.4s ease-in-out infinite;
+}
+@keyframes center-select-pulse {
+  0%, 100% {
+    filter:
+      drop-shadow(0 0 8px rgba(175, 180, 188, 0.45))
+      drop-shadow(0 0 18px rgba(175, 180, 188, 0.22));
+  }
+  50% {
+    filter:
+      drop-shadow(0 0 22px rgba(175, 180, 188, 0.95))
+      drop-shadow(0 0 46px rgba(175, 180, 188, 0.6))
+      drop-shadow(0 0 76px rgba(175, 180, 188, 0.35));
+  }
 }
 
 /* Centred circle wrapper — fills the center-anchor box. The `:key` bump
@@ -1171,109 +1147,8 @@ const CREDITS_TYPOGRAPHY: readonly string[] = [
   opacity: 0.8;
 }
 
-/* Credits / "about the project" control — reuses the interpret-control `+`
-   glyph styling (transparent, single glyph), pinned top-centre and shown
-   alongside "Start over" in the explore-others view. */
-.credits-control {
-  position: fixed;
-  top: 0.22rem;
-  left: 50%;
-  transform: translateX(-50%);
-  /* Above the centred circle / ribbons in the explore view so it stays
-     clickable (matches the top-controls `+` bump to 120). */
-  z-index: 120;
-}
-
-/* Credits overlay — pure blurred field (same system as the interpretation-mode
-   `.interpret-veil`: transparent + blur, no beige tint). Sits ABOVE the explore
-   circle / ribbons (z bumped past them) so the text reads on top, not under the
-   images. Content is anchored to the TOP and sized to fit the window — no
-   scroll. Click anywhere closes it. */
-.credits-panel {
-  position: fixed;
-  inset: 0;
-  z-index: 130;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  background: transparent;
-  backdrop-filter: blur(7px);
-  -webkit-backdrop-filter: blur(7px);
-}
-
-/* Structured credits content — top-anchored column, no scroll, fits the
-   window. Body text (ABC Otto) uses the interface quadrant-text size (1.3rem);
-   the title uses the Neue Kabel skip-button size (1.05rem). Vertical spacing is
-   tight so the whole block clears the window height without scrolling. */
-.credits-content {
-  max-width: min(46em, 88vw);
-  max-height: 100vh;
-  padding: 2.4vh 1rem;
-  text-align: center;
-  color: #595b54;
-}
-
-.credits-head {
-  margin-bottom: 2vh;
-}
-/* Title — Neue Kabel at the skip-button size (1.05rem). */
-.credits-title {
-  margin: 0;
-  font-family: 'Neue Kabel', sans-serif;
-  font-weight: 500;
-  font-size: 1.05rem;
-  letter-spacing: 0.015em;
-  line-height: 1.15;
-}
-.credits-subtitle {
-  margin: 0.35rem 0 0;
-  font-style: italic;
-  font-size: 1.05rem;
-}
-.credits-author {
-  margin: 0.5rem 0 0;
-  font-family: 'Neue Kabel', sans-serif;
-  font-size: 0.95rem;
-  opacity: 0.85;
-}
-
-.credits-section {
-  margin-bottom: 2vh;
-}
-.credits-section:last-child {
-  margin-bottom: 0;
-}
-/* Section heading (About / Source of images / Typography) — Neue Kabel. */
-.credits-label {
-  margin: 0 0 0.5rem;
-  font-family: 'Neue Kabel', sans-serif;
-  font-weight: 500;
-  font-size: 0.95rem;
-  letter-spacing: 0.04em;
-  opacity: 0.7;
-}
-/* Body paragraphs (ABC Otto) at the interface quadrant-text size. */
-.credits-para {
-  margin: 0 auto 0.5rem;
-  max-width: 42em;
-  font-size: 1.3rem;
-  line-height: 1.28;
-  text-wrap: pretty;
-}
-.credits-para:last-child {
-  margin-bottom: 0;
-}
-/* Source-of-images + typography lines — same Otto quadrant size, quieter. */
-.credits-source {
-  margin-bottom: 0.15rem;
-  font-size: 1.3rem;
-  line-height: 1.25;
-  opacity: 0.9;
-}
-.credits-url {
-  opacity: 0.7;
-  word-break: break-all;
-}
+/* The credits / about overlay styles now live globally in app.vue (the
+   persistent "About" control). */
 
 .overview-control {
   position: absolute;
@@ -1364,128 +1239,9 @@ const CREDITS_TYPOGRAPHY: readonly string[] = [
   gap: 0.75rem;
 }
 
-/* 3-column grid spanning the full viewport width: side buttons live in
-   1fr columns and hug the centre; the interpret-control sits in the
-   auto-sized middle column, which is the viewport's geometric centre
-   regardless of how wide `night` / `gradient` text are. */
-.top-controls {
-  position: absolute;
-  /* Aligned to the top corner labels (Mirror / Trace): those sit at
-     top:0 + 0.75rem padding, so their text centre is ~1.12rem down.
-     The buttons are 1.8rem tall, so top = 1.12 - 0.9 ≈ 0.22rem puts
-     the button centres on the same line as the component titles. */
-  top: 0.22rem;
-  left: 0;
-  right: 0;
-  /* Above the hover-lifted quadrants (.rel:hover z 50), the central deck
-     (z 60) and the radial words (z 90) so the top-centre `+` is always
-     clickable. The container itself ignores pointer events (its empty 1fr
-     columns would otherwise block the top strip of the quadrants) — only the
-     buttons catch clicks (pointer-events: auto below). */
-  z-index: 120;
-  pointer-events: none;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0 1rem;
-}
-.top-controls > .bg-toggle:first-of-type { justify-self: end; }
-.top-controls > .bg-toggle:last-of-type  { justify-self: start; }
-.interpret-control,
-.bg-toggle {
-  pointer-events: auto;   /* container is pointer-events:none — buttons opt back in */
-  padding: 0.45rem 0.95rem;
-  background: rgba(13, 13, 16, 0.7);
-  color: #595b54;
-  border: 1px solid #2a2a2e;
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-  cursor: pointer;
-  transition: background 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out;
-}
+/* The top "About" control (day/night dots + "i") now lives globally in
+   app.vue — its styles moved there with it. */
 
-/* Background toggles are now circle-icon buttons. The colored dot itself
-   represents the mode (black = night, white = day); the button frame is
-   stripped so only the dot is visible. */
-.bg-toggle {
-  background: transparent;
-  border-color: transparent;
-  padding: 0;
-  width: 1.8rem;
-  height: 1.8rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  /* Hidden by default — the background toggles are only revealed once the
-     user clicks the `+` (interpretation mode). They keep their layout slot
-     (opacity, not display) so the `+` stays centred between them. Clicking
-     `+` again hides them. */
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 240ms ease-out;
-}
-.bg-toggle.revealed {
-  opacity: 1;
-  pointer-events: auto;
-}
-.bg-toggle .dot {
-  /* Square (not circle), sized to match the timeline history squares.
-     Only the aspect changes — the toggle behaviour, click target
-     (1.8rem button), fills, active ring and hover are unchanged. */
-  width: 5px;
-  height: 5px;
-  border-radius: 0;
-  display: block;
-  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
-}
-.bg-toggle .dot-black {
-  background: #0d0d10;
-  /* Faint outline so the black dot stays visible against the black
-     background mode without merging into it. */
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
-}
-.bg-toggle .dot-white {
-  background: #ffffff;
-  /* Same idea inverted — keeps the white dot legible on the bright day
-     gradient. */
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
-}
-.bg-toggle:hover .dot {
-  transform: scale(1.15);
-}
-.bg-toggle.active .dot {
-  /* Active mode: outline ring around the dot to mark current selection. */
-  box-shadow: 0 0 0 1px currentColor, 0 0 0 3px rgba(255, 255, 255, 0.55);
-}
-.bg-toggle.active .dot-black { color: #0d0d10; }
-.bg-toggle.active .dot-white { color: #ffffff; }
-/* Interpret control is a single-glyph icon — no background, no border.
-   The glyph is centered in a square box via flex so its visual centre
-   sits on the button's geometric centre (typography baseline alone
-   would leave it slightly low). Color is deliberately dark enough to
-   read against the bright day gradient. */
-.interpret-control {
-  background: transparent;
-  border-color: transparent;
-  width: 1.8rem;
-  height: 1.8rem;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.4rem;
-  line-height: 1;
-  letter-spacing: 0;
-  color: #595b54;
-}
-.interpret-control:hover {
-  color: #2a2e36;
-}
-.interpret-control.active {
-  color: #2a2e36;
-}
 /* "Contribute to proxima" — surfaces once the active branch reaches the
    overview cap. Uses the title typography (`.proximity-panel-title` in
    app.vue: serif / 0.95rem / 600 / 0.02em) and the same warm pulsing

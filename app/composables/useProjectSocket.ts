@@ -186,13 +186,13 @@ export function useProjectSocket() {
     return true
   }
 
-  function setGhostPath(fromId: string | null, toId: string | null): boolean {
+  function setGhostPath(fromId: string | null, toId: string | null, quadrant?: number): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) {
       console.warn('[socket] not connected; dropping set-ghost-path', fromId, toId)
       return false
     }
-    socket.emit('message', { type: 'set-ghost-path', payload: { fromId, toId } })
+    socket.emit('message', { type: 'set-ghost-path', payload: { fromId, toId, quadrant } })
     return true
   }
 
