@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useInteractionStore } from '~/stores/interaction'
 import SkipButton from '~/components/SkipButton.vue'
 import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
@@ -61,6 +61,11 @@ function skip() {
   advance()
 }
 
+// Reveal the persistent About "i" control at the SAME beat the Skip button
+// appears — the second sentence (index 1). Latched in the store so it stays
+// visible through the rest of the experience (app.vue `aboutControlVisible`).
+watch(index, (v) => { if (v >= 1) store.aboutArmed = true })
+
 onMounted(() => {
   // Per-sentence schedule (relative to mount). Sentence 1 is fully visible at
   // FIRST_APPEAR_MS; we flip to the next index after its HOLD, and each later
@@ -86,7 +91,9 @@ onBeforeUnmount(() => {
     :class="`bg-${store.canvasBackground}`"
     :style="{ '--cross-draw-duration': `${crossDurationMs}ms` }"
   >
-    <SkipButton @click="skip" />
+    <!-- Skip appears only with the SECOND sentence ("A dual-view…"), not the
+         first ("Welcome to Proxima."). -->
+    <SkipButton v-if="index === 1 && captionVisible" @click="skip" />
     <!-- Vue <Transition> with `appear` + `mode="out-in"`. The
          out-in mode makes sentence-to-sentence transitions sequential:
          the old sentence fully fades out before the new sentence

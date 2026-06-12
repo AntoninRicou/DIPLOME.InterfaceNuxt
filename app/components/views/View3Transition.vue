@@ -457,6 +457,14 @@ onBeforeUnmount(() => {
      global `.corner-label`) stays for legibility; the label just fades in. */
   opacity: 1;
 }
+/* VIEW_3 corner labels glow their quadrant colour (matching the quadrant text +
+   the feedback corner labels). They're only visible once their quadrant has
+   been reached, so they colour as they reveal. Same palette as the corner
+   labels in VIEW_4 / the feedback. */
+.corner-label[data-position="tl"] { --corner-glow: #f0a05c; } /* Source — orange */
+.corner-label[data-position="tr"] { --corner-glow: #6cb4e6; } /* Form — sky blue */
+.corner-label[data-position="bl"] { --corner-glow: #74cf92; } /* Semantic — green */
+.corner-label[data-position="br"] { --corner-glow: #ef82ac; } /* Time — pink */
 
 /* Preview suggestion-image grid — mirrors VIEW_4's `.grid` so the four
    RelationComponents occupy the same 2×2 quadrants and the shared oval is

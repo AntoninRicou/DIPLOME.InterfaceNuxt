@@ -246,7 +246,7 @@ export function useProjectSocket() {
 
   // Colour the hovered quadrant's corner label on the canvas (or clear all with
   // null) — project maps the index to its quadrant colour. VIEW_4 hover only.
-  function setCornerLabelHover(index: number | null): boolean {
+  function setCornerLabelHover(index: number | 'all' | null): boolean {
     if (import.meta.server) return false
     if (!socket || !socket.connected) return false
     socket.emit('message', { type: 'set-corner-label-hover', payload: { index } })

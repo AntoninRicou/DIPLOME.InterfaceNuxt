@@ -171,16 +171,21 @@ function postCanvasBg() {
   )
 }
 
-// Dismiss the "Move your mouse…" caption the MOMENT the user hovers an image —
-// no minimum hold. Fades it out, then swaps to the "Select an image…" caption +
-// unlocks selection. Idempotent (no-op if already dismissed).
+// First hover: KEEP the "Find an image…" (HOVER_ACTION) prompt visible —
+// clicking is already live (clickEnabled was set when the prompt appeared), so
+// the user can select straight from here. Just schedule the "Select it…"
+// (CLICK_ACTION) nudge to swap in after a beat. Armed once. If the user clicks
+// BEFORE this fires, it's cancelled in the image-click handler, so "Select it…"
+// never appears.
+let clickActionTimer: ReturnType<typeof setTimeout> | null = null
 function dismissHoverCaption() {
-  if (!hoverCaptionVisible.value) return
-  hoverCaptionVisible.value = false
-  projectNarrationTimers.push(setTimeout(() => {
+  if (!hoverCaptionVisible.value || clickActionTimer != null) return
+  clickActionTimer = setTimeout(() => {
+    hoverCaptionVisible.value = false   // swap: "Find an image…" → "Select it…"
     clickCaptionVisible.value = true
-    clickEnabled.value = true
-  }, ROTATE_FADE_OUT_MS + 2500))
+    clickActionTimer = null
+  }, ROTATE_FADE_OUT_MS + 2500)
+  projectNarrationTimers.push(clickActionTimer)
 }
 
 // Coordinated beat AFTER the 2nd intro sentence ("It was structured…"):
@@ -393,6 +398,9 @@ function onMessage(event: MessageEvent) {
     const id = data.imageId
     // Stop any running rotation timer regardless of caption state.
     clearEntryTimer()
+    // Cancel the pending "Select it…" swap — clicked before it appeared, so it
+    // must never show.
+    if (clickActionTimer) { clearTimeout(clickActionTimer); clickActionTimer = null }
     // Fade the caption (if still up), the bottom prompts, and the disperse
     // field out together, then advance once the field has calmed. The clicked
     // image's pinned preview stays visible as an anchor through the swap.

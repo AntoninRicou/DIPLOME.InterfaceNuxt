@@ -75,11 +75,20 @@ function onClick() {
   font-size: 1.05rem;
   letter-spacing: 0.015em;
   line-height: 1;
-  color: #595b54;
+  /* REVERSED from the rotate text: blueish FILL with a dark-grey GLOW (rotate
+     text is the opposite — dark fill, blueish glow). Same two colours, swapped. */
+  color: rgb(175, 180, 188);
+  text-shadow:
+    0 0 4px rgba(89, 91, 85, 0.95),
+    0 0 6px rgba(89, 91, 85, 0.9),
+    0 0 9px rgba(89, 91, 85, 0.75),
+    0 0 13px rgba(89, 91, 85, 0.55);
   opacity: 0.65;
   cursor: pointer;
   transition: opacity 150ms ease;
-  z-index: 20;
+  /* Above the interface dim overlay (app.vue .dim-overlay z 9999) so Skip stays
+     lit + clickable while the screen darkens for narration. */
+  z-index: 10001;
   pointer-events: auto;
   /* Entrance every time a view mounts its Skip button. Without it, skipping
      into the next view (which has its own button at the same fixed spot) makes

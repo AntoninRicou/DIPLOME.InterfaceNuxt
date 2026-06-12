@@ -21,7 +21,11 @@ const viewState = useViewStateStore()
 // the views' `.finale-fadeout` corner-label fade), then fades back in once the
 // finale settles (phase → 'idle', explore-others).
 const aboutControlVisible = computed(() => {
+  // Armed by VIEW_1's second sentence (store.aboutArmed) and latched on through
+  // the rest of the experience — so the "i" appears at the same beat as VIEW_1's
+  // first Skip button, not only from VIEW_2 onward.
   const inExperience =
+    store.aboutArmed ||
     viewState.is('ENTRY') || viewState.is('TRANSITION') || viewState.is('RELATIONAL')
   const fadingForFinale =
     store.overviewFinalePhase === 'rest' || store.overviewFinalePhase === 'transition'
@@ -234,16 +238,17 @@ function italicize(text: string): string {
 
 /* ── Persistent "About" control (day/night dot · "i" · day/night dot) ──
    3-column grid spanning the viewport: the dots hug the centre in the 1fr
-   columns, the "i" sits in the auto middle column (viewport centre). z below
-   the dim overlay (9999) so darkening covers it; above every view surface. */
+   columns, the "i" sits in the auto middle column (viewport centre). z ABOVE
+   the dim overlay (9999) so the "i" stays lit + clickable while the interface
+   darkens for narration; above every view surface and the credits overlay. */
 .about-controls {
   position: fixed;
   top: 0.22rem;
   left: 0;
   right: 0;
-  /* Above the credits overlay (z 130) so the day/night dots — revealed WITH the
-     overlay — sit on TOP of the blur and stay clickable, and the "i" can close. */
-  z-index: 140;
+  /* Above the dim overlay (9999) and the credits overlay (z 130) so the "i" and
+     the day/night dots stay on top and clickable through the darkening. */
+  z-index: 10001;
   pointer-events: none;   /* container ignores clicks; buttons opt back in */
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -341,7 +346,14 @@ function italicize(text: string): string {
   line-height: 1;
   letter-spacing: 0;
   text-transform: none;
-  color: #595b54;
+  /* REVERSED from the rotate text: blueish FILL + dark-grey GLOW (same two
+     colours as the rotate stroke/fill, swapped). */
+  color: rgb(175, 180, 188);
+  text-shadow:
+    0 0 4px rgba(89, 91, 85, 0.95),
+    0 0 6px rgba(89, 91, 85, 0.9),
+    0 0 9px rgba(89, 91, 85, 0.75),
+    0 0 13px rgba(89, 91, 85, 0.55);
   opacity: 0.65;
   cursor: pointer;
   transition: opacity 150ms ease;
@@ -351,8 +363,12 @@ function italicize(text: string): string {
   position: absolute;
   inset: 0;
   top: -3px;
-  border: 2px solid #595b54;
+  /* Blueish ring with a dark-grey glow to match the reversed glyph. */
+  border: 2px solid rgb(175, 180, 188);
   border-radius: 50%;
+  box-shadow:
+    0 0 5px rgba(89, 91, 85, 0.85),
+    0 0 9px rgba(89, 91, 85, 0.6);
   pointer-events: none;
 }
 .about-controls .interpret-control:hover { opacity: 1; }
@@ -623,6 +639,10 @@ body {
 
 html {
   font-family: 'ABC Otto', serif;
+  /* Never show the text (I-beam) cursor over text. `cursor` is inherited, so
+     this gives every element the arrow by default; buttons/links that set their
+     own `pointer` still override it. */
+  cursor: default;
 }
 
 /* ── Atmospheric backdrop classes ──
@@ -670,23 +690,27 @@ html {
      takes the component colour while the word fill stays #595b55. See
      RelationComponent .rel:hover. */
   transition: text-shadow 220ms ease-out;
-  /* Same organic beige glyph stroke the rotating captions wear (the
-     --rotate-panel-bg layered text-shadow), replacing the old cream halo. */
+  /* Layered glyph glow — coloured per quadrant via `--corner-glow` (set on the
+     `[data-position]` rules below: Source orange / Form blue / Semantic green /
+     Time pink), falling back to the neutral blue-grey stroke. */
   text-shadow:
-    0 0 4px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 15px var(--rotate-panel-bg),
-    0 0 18px var(--rotate-panel-bg);
+    0 0 4px var(--corner-glow, var(--rotate-panel-bg)),
+    0 0 6px var(--corner-glow, var(--rotate-panel-bg)),
+    0 0 6px var(--corner-glow, var(--rotate-panel-bg)),
+    0 0 9px var(--corner-glow, var(--rotate-panel-bg)),
+    0 0 9px var(--corner-glow, var(--rotate-panel-bg)),
+    0 0 12px var(--corner-glow, var(--rotate-panel-bg)),
+    0 0 12px var(--corner-glow, var(--rotate-panel-bg)),
+    0 0 15px var(--corner-glow, var(--rotate-panel-bg)),
+    0 0 18px var(--corner-glow, var(--rotate-panel-bg));
 }
 .corner-label[data-position="tl"] { top: 0; left: 0; }
 .corner-label[data-position="tr"] { top: 0; right: 0; }
 .corner-label[data-position="bl"] { bottom: 0; left: 0; }
 .corner-label[data-position="br"] { bottom: 0; right: 0; }
+/* Corner labels glow blue-grey by default (the --corner-glow fallback) and turn
+   their quadrant colour only WHILE that quadrant is hovered — driven per
+   RelationComponent by `.rel:hover .corner-label` (see RelationComponent.vue). */
 
 /* ── Proximity panel ──
    Shared typography for the per-quadrant text block (VIEW_3's
@@ -717,22 +741,26 @@ html {
   color: #595b54;
   pointer-events: none;
   box-sizing: border-box;
-  /* Organic blue-grey glyph stroke — same layered text-shadow the rotating
-     captions (.caption-text) use, in --rotate-panel-bg. text-shadow is
-     inherited, so declaring it here covers BOTH the title (subtitle) and the
-     body. Traces the letterforms (not a box). Mirrored on project's
-     `.canvas-text`. */
+  /* Layered glyph stroke — coloured per quadrant via `--panel-glow` (set on the
+     `[data-component]` rules below), else the neutral blue-grey. Inherited, so
+     it covers BOTH the title and the body. Mirrored on project's `.canvas-text`. */
   text-shadow:
-    0 0 4px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 6px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 9px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 12px var(--rotate-panel-bg),
-    0 0 15px var(--rotate-panel-bg),
-    0 0 18px var(--rotate-panel-bg);
+    0 0 4px var(--panel-glow, var(--rotate-panel-bg)),
+    0 0 6px var(--panel-glow, var(--rotate-panel-bg)),
+    0 0 6px var(--panel-glow, var(--rotate-panel-bg)),
+    0 0 9px var(--panel-glow, var(--rotate-panel-bg)),
+    0 0 9px var(--panel-glow, var(--rotate-panel-bg)),
+    0 0 12px var(--panel-glow, var(--rotate-panel-bg)),
+    0 0 12px var(--panel-glow, var(--rotate-panel-bg)),
+    0 0 15px var(--panel-glow, var(--rotate-panel-bg)),
+    0 0 18px var(--panel-glow, var(--rotate-panel-bg));
 }
+/* Per-quadrant glyph glow for the interpretation text — same palette as the
+   corner labels (Source orange / Form blue / Semantic green / Time pink). */
+.proximity-panel[data-component="component_1"] { --panel-glow: #f0a05c; }
+.proximity-panel[data-component="component_2"] { --panel-glow: #6cb4e6; }
+.proximity-panel[data-component="component_3"] { --panel-glow: #74cf92; }
+.proximity-panel[data-component="component_4"] { --panel-glow: #ef82ac; }
 /* Semantic (component_3) body is the longest — give it a slightly wider box
    so it still balances onto two lines. Interface-only (project canvas-text
    unaffected); attribute selector outranks the base `.proximity-panel` width. */

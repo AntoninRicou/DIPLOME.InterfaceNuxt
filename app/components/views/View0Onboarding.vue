@@ -248,8 +248,8 @@ function handleClick() {
   font-weight: 500;
   font-style: italic;
   letter-spacing: 0.015em;
-  /* Nudge the subtitle up a bit (closer to the title). */
-  margin: -1rem 0 0;
+  /* Sit the subtitle a touch lower, away from the title. */
+  margin: -0.35rem 0 0;
   color: var(--rotate-fill);
   text-shadow:
     0 0 4px var(--rotate-stroke),

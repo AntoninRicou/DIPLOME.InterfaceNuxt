@@ -47,7 +47,19 @@ export const useInteractionStore = defineStore('interaction', () => {
   // image. Read by RelationComponent to fade all quadrant cells to full
   // opacity. Never on the wire.
   const centralHovered = ref(false)
-  function setCentralHovered(v: boolean) { centralHovered.value = v }
+  // Corner labels enter VIEW_4 ALL coloured (carried over from the VIEW_3
+  // quadrant reaches) and stay so until the user first hovers a quadrant, which
+  // ends this phase and switches to the per-quadrant hover behaviour. Drives the
+  // interface labels (`.rel.all-colored`) and gates the wire emissions below.
+  const cornerLabelsAllColored = ref(false)
+  function setCentralHovered(v: boolean) {
+    centralHovered.value = v
+    if (!viewState.is('RELATIONAL') || overviewConfirmed.value) return
+    // During the initial all-coloured phase the labels stay all-coloured
+    // regardless of central hover; afterwards, central hover colours all four.
+    if (cornerLabelsAllColored.value) return
+    projectSocket.setCornerLabelHover(v ? 'all' : null)
+  }
 
   // After `confirmOverview`, the user can request a second hidden-morph
   // that drops the standalone project from `overview` back to `single`
@@ -134,6 +146,12 @@ export const useInteractionStore = defineStore('interaction', () => {
   // the quadrant zooms; this also bypasses the VIEW_4 intro.
   const bypassRelationalIntro = ref(false)
 
+  // Armed by VIEW_1 the moment its SECOND sentence appears (the same beat its
+  // Skip button shows). Latches the persistent About "i" control visible from
+  // then on — see app.vue `aboutControlVisible`. Resets naturally on the full
+  // page reload that "Start over" performs.
+  const aboutArmed = ref(false)
+
   // Per-canvas zoom-in tracking for VIEW_3. Each entry flips to `true` once
   // the user clicks the corresponding quadrant cross — that emits
   // `set-canvas-zoom` so the standalone project zooms canvas[i] from the
@@ -187,9 +205,19 @@ export const useInteractionStore = defineStore('interaction', () => {
     if (prev === next) return
     view4HoveredQuadrant.value = next
 
-    // (Corner-label hover colouring removed — labels no longer recolour on
-    // quadrant hover, on either screen. The per-quadrant glow now lives on the
-    // interface hover radial words instead.)
+    // Corner-label colour. In the initial all-coloured phase the labels stay
+    // all-coloured; the FIRST real quadrant hover ends that phase and narrows to
+    // the hovered one. After that it's per-hover (quadrant → one, null → none;
+    // central hover → all, handled in setCentralHovered). The interface label is
+    // coloured in CSS via `.rel.all-colored` / `.rel:hover` / `.rel.central-hovered`.
+    if (cornerLabelsAllColored.value) {
+      if (next !== null) {
+        cornerLabelsAllColored.value = false
+        projectSocket.setCornerLabelHover(next)
+      }
+    } else {
+      projectSocket.setCornerLabelHover(next)
+    }
 
     // Cancel any pending delayed zoom-in. The canvases it targeted are
     // still in overview project-side (the timer never fired), and
@@ -425,6 +453,11 @@ export const useInteractionStore = defineStore('interaction', () => {
     // this is what reveals them. Safe to re-assert now that the one-shot
     // announce-glow was removed (the reveal is opacity-only).
     projectSocket.setCornerLabels(true)
+    // The labels enter VIEW_4 ALL coloured (carried over from VIEW_3) and stay
+    // so until the user first hovers a quadrant. Re-assert 'all' here so the
+    // SKIP path (quadrants never reached) also starts all-coloured.
+    cornerLabelsAllColored.value = true
+    projectSocket.setCornerLabelHover('all')
   }
 
   // `quadrant` (0=tl,1=tr,2=bl,3=br) identifies which relation component the
@@ -866,11 +899,13 @@ export const useInteractionStore = defineStore('interaction', () => {
     centralStackActiveIndex,
     centralHovered,
     setCentralHovered,
+    cornerLabelsAllColored,
     imageClick,
     overviewConfirmed,
     overviewEligible,
     view2ExitReason,
     bypassRelationalIntro,
+    aboutArmed,
     canvasZoomed,
     allCanvasesZoomed,
     relationsPreRevealed,

@@ -265,6 +265,8 @@ const isFirstReveal = ref(true)
 // later activations reveal normally. Never set in preview mode itself.
 const suppressMountReveal = ref(!props.preview && store.relationsPreRevealed)
 watch(centralImageId, () => { isFirstReveal.value = false; suppressMountReveal.value = false })
+// New central image → reset all keyword rotations so each starts at its base set.
+watch(centralImageId, () => { hoverNonce.value = {} })
 
 function enterDelay(slotIdx: number): string {
   const pos = props.position ?? 'tl'
@@ -319,9 +321,25 @@ const HOVER_SOUND = '/sounds/hover.wav'
 const { load: loadSound, play: playSound } = useSound()
 onMounted(() => { if (!props.preview) loadSound(HOVER_SOUND) })
 
+// Per-image hover counter — bumped each time a cell is (re-)hovered, so the
+// Form / Semantic keyword selection can ROTATE on re-hover (surfacing the
+// image's OTHER links rather than always the same words). First hover of an id
+// = 0 (the curated base set); each subsequent re-hover increments. Reset when
+// the central image changes (see watch below) so every new central starts fresh.
+const hoverNonce = ref<Record<string, number>>({})
+// Rotate an array left by k (wraps); k=0 leaves it unchanged.
+function rotateArr<T>(arr: T[], k: number): T[] {
+  if (arr.length < 2) return arr
+  const n = ((k % arr.length) + arr.length) % arr.length
+  return n === 0 ? arr : arr.slice(n).concat(arr.slice(0, n))
+}
+
 function onCellHover(id: string, slotIdx: number) {
   if (props.preview) return
   playSound(HOVER_SOUND)
+  // Bump this image's rotation offset (first hover stays at the base set).
+  const prev = hoverNonce.value[id]
+  hoverNonce.value = { ...hoverNonce.value, [id]: prev === undefined ? 0 : prev + 1 }
   store.setHighlight(id)
   // Ghost path — dashed translucent line from active central image to
   // this cell's id, drawn on every project canvas. Previews the proximity
@@ -410,7 +428,9 @@ const tagSelection = computed<Record<string, string[]>>(() => {
   const out: Record<string, string[]> = {}
   for (const id of batchIds) {
     const tagged: Tagged[] = tagsMap[id]!.map((t, idx) => ({ t, idx }))
-    const own = tagged.filter((x) => !centralSet.has(x.t)).sort(score)
+    // OWN tags rotate by this image's hover counter (re-hover → next own tags);
+    // SHARED stays unrotated so the middle "bridge" tag is stable on re-hover.
+    const own = rotateArr(tagged.filter((x) => !centralSet.has(x.t)).sort(score), hoverNonce.value[id] ?? 0)
     const shared = tagged.filter((x) => centralSet.has(x.t)).sort(score)
 
     const chosen: string[] = []
@@ -494,8 +514,12 @@ const bridgePairs = computed<Record<string, { a: string; b: string }>>(() => {
   for (const cell of ordered) {
     const neighbour = tagsMap[cell.id] ?? []
     const neighbourSet = new Set(neighbour)
-    const a = pick(central, neighbourSet) //   A = a central tag (its own, unique)
-    const b = pick(neighbour, centralSet, a) // B = a neighbour tag (its own, unique, ≠a)
+    // BOTH sides rotate by this cell's hover counter — no fixed "bridge" word
+    // (the connector line is the only constant), so a re-hover shows a different
+    // central-tag ↔ neighbour-tag pairing between the same two images.
+    const offset = hoverNonce.value[cell.id] ?? 0
+    const a = pick(rotateArr(central, offset), neighbourSet) //   A = a central tag (its own, unique)
+    const b = pick(rotateArr(neighbour, offset), centralSet, a) // B = a neighbour tag (its own, unique, ≠a)
     if (a) used.add(a)
     if (b) used.add(b)
     out[cell.id] = { a, b }
@@ -703,9 +727,16 @@ onUnmounted(() => {
       'finale-fadeout': store.overviewFinalePhase === 'rest' || store.overviewFinalePhase === 'transition',
       'is-preview': preview,
       'no-entrance': suppressMountReveal,
+      // Hovering the central image colours every corner label (see the
+      // `.rel.central-hovered .corner-label` rule).
+      'central-hovered': store.centralHovered,
+      // Initial VIEW_4 phase: all labels stay coloured (carried over from VIEW_3)
+      // until the user first hovers a quadrant.
+      'all-colored': store.cornerLabelsAllColored,
     }"
     :data-position="position ?? 'tl'"
     :data-reveal="revealDirection"
+    :style="{ '--quadrant-color': quadrantColor }"
     @mouseenter="onMouseEnter"
   >
     <!-- VIEW_3 (preview) owns its own corner labels in View3Transition; this
@@ -919,9 +950,16 @@ onUnmounted(() => {
      hovering it reveals this quadrant's interpretation text on both screens. */
   pointer-events: auto;
 }
-/* (Corner labels no longer recolour on quadrant hover — the per-quadrant glow
-   now lives on the hover radial words instead; see .radial-word-inner /
-   .radial-bridge-line.) */
+/* The corner label glows blue-grey by default and turns THIS quadrant's
+   relation colour while the quadrant is hovered OR the central image is hovered
+   (which colours all four). `--quadrant-color` is bound on `.rel`
+   (QUADRANT_SOLID_COLORS), feeding the global `.corner-label` text-shadow via
+   `--corner-glow`. */
+.rel:hover .corner-label,
+.rel.central-hovered .corner-label,
+.rel.all-colored .corner-label {
+  --corner-glow: var(--quadrant-color);
+}
 
 /* Overview finale `fadeout` phase — the corner labels fade out TOGETHER with
    the central deck (`.center-anchor.deck-fadeout`) and the grid cross
