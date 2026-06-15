@@ -368,7 +368,7 @@ let finaleTimers: ReturnType<typeof setTimeout>[] = []
 // shown once when the relational view is entered (i.e. right after the user
 // clicks the central image in VIEW_3). Fades in after a short settle beat,
 // holds, fades out.
-const RELATIONAL_INTRO_TEXT = '	You can now explore the corpus around the centered image.'
+const RELATIONAL_INTRO_TEXT = '	You can now explore the corpus\naround the centered image.'
 const RELATIONAL_INTRO_DELAY_MS = 400 // settle beat before the rotate keywords drift in (−1s)
 const RELATIONAL_INTRO_HOLD_MS = 5500  // "You can now explore…" full-opacity hold before fading out
 const RELATIONAL_INTRO2_HOLD_MS = 6000 // mode-words caption full-opacity hold before fading out

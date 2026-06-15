@@ -1367,7 +1367,8 @@ onUnmounted(() => {
 .radial-word-inner {
   display: inline-block;
   white-space: nowrap;
-  font-size: 0.92rem;
+  /* Match the quadrant text size (.proximity-panel 1.3rem). */
+  font-size: 1.3rem;
   font-style: italic;
   letter-spacing: 0.015em;
   line-height: 1.1;
@@ -1430,7 +1431,8 @@ onUnmounted(() => {
 }
 .radial-bridge-line {
   white-space: nowrap;
-  font-size: 0.92rem;
+  /* Match the quadrant text size (.proximity-panel 1.3rem). */
+  font-size: 1.3rem;
   font-style: italic;
   letter-spacing: 0.015em;
   line-height: 1.1;
