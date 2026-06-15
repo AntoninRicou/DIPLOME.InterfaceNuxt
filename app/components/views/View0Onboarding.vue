@@ -32,7 +32,7 @@ function handleClick() {
          target) is the thing clicked — otherwise it would hang at full opacity
          and vanish on unmount. The view advances at FADE_OUT_MS (500) =
          SkipButton's LEAVE_MS, so the fade completes exactly as the view swaps. -->
-    <SkipButton label="Start the experience" :leaving="fadingOut" @click="handleClick" />
+    <SkipButton label="Start" :leaving="fadingOut" @click="handleClick" />
     <!-- The centred title is the ONLY click target now (the full-window click +
          "Click to launch" prompt were removed). Clicking anywhere on this group
          advances to VIEW_1. -->

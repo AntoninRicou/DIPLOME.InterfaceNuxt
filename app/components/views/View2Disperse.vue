@@ -34,14 +34,14 @@ const ENTRY_PANELS = [
 
   'These images once belonged to the past, bounded by old books.',
  
-   'Today you can explore them,\nthrough multiple ways of seeing at once',
+   'Today, you can explore them from multiple perspectives at once.',
 ]
 // Project-ONLY centred narration, played (2s after the user's first hover) via
 // set-center-caption with the same rotate params. Each sentence fades in,
 // holds PROJECT_HOLDS[i], fades out — sequenced by playProjectNarration().
 const PROJECT_PANELS = [
   'The same images are organized here\ninto four distinct maps.',
-  'Each map structures them according to a different criterion.',
+  'Each map structures them according to a different rule.',
 ]
 // CLICK_ACTION is a centred ROTATE caption (same `.entry-caption` style/timing
 // as the intro narration), drifting in after the project narration once the

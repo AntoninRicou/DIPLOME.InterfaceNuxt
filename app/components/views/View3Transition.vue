@@ -37,7 +37,7 @@ const CAPTION_DELAY_MS = 2000
 // Middle NARRATION shown after zooming (mirrored to project). Uses the shared
 // rotate-text params (--rotate-size + fade timing + blue-grey stroke), same as
 // the rotating intro narration — see `.modes-caption` styles.
-const MODES_CAPTION = 'This action-view suggests where to explore next based on your previous selection.'
+const MODES_CAPTION = 'This action-view suggests where to explore next\nthrough the selected image.'
 // CALL-TO-ACTION sentences (interface-only) — now rendered as CENTRED rotate
 // text (the .modes-caption style), the 1st and 3rd of a 3-sentence sequence
 // with MODES_CAPTION in between. ZOOM_ACTION appears after the initial settle
@@ -65,7 +65,7 @@ const ZOOM_ACTION = 'Activate the four quadrants across both screens.'
 // and BEFORE the start prompt. FEEDBACK (project) centre ONLY (mirrored via
 // set-center-caption), with the INTERFACE darkened while it plays — no
 // interface text for this one.
-const MIRROR_CAPTION = 'This map-view retraces your journey through image proximities.'
+const MIRROR_CAPTION = 'This map-view retraces your journey\nthrough your images selection.'
 const MIRROR_DIM_LEVEL = 0.7 // interface darkening while the MIRROR caption plays on the feedback
 const START_ACTION = 'Click on your image to start.'
 const showZoomAction = ref(false)
