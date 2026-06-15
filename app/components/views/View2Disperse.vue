@@ -41,7 +41,7 @@ const ENTRY_PANELS = [
 // holds PROJECT_HOLDS[i], fades out — sequenced by playProjectNarration().
 const PROJECT_PANELS = [
   'The same images are organized here\ninto four distinct maps.',
-  'Each map structures them according to a different rule.',
+  'Each map structures\nthem according to a different rule.',
 ]
 // CLICK_ACTION is a centred ROTATE caption (same `.entry-caption` style/timing
 // as the intro narration), drifting in after the project narration once the

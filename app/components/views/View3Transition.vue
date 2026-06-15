@@ -37,7 +37,7 @@ const CAPTION_DELAY_MS = 2000
 // Middle NARRATION shown after zooming (mirrored to project). Uses the shared
 // rotate-text params (--rotate-size + fade timing + blue-grey stroke), same as
 // the rotating intro narration — see `.modes-caption` styles.
-const MODES_CAPTION = 'This action-view will suggest where to explore next\nthrough the selected image.'
+const MODES_CAPTION = 'This action-view will suggest where to explore next\nthrough the centered image.'
 // CALL-TO-ACTION sentences (interface-only) — now rendered as CENTRED rotate
 // text (the .modes-caption style), the 1st and 3rd of a 3-sentence sequence
 // with MODES_CAPTION in between. ZOOM_ACTION appears after the initial settle
@@ -56,7 +56,7 @@ let pickedAfterTimer: ReturnType<typeof setTimeout> | null = null
 // LOOK — a second rotate sentence shown right AFTER "You picked this image."
 // fades out (its own fade-in / hold / fade-out), before the map/action-view
 // narration begins. Interface-only, same `.modes-caption` rotate style.
-const LOOK_TEXT = 'Look where she lives in the maps.'
+const LOOK_TEXT = 'Look where she lives in the maps above.'
 const showLookCaption = ref(false)
 const LOOK_HOLD_MS = 5000
 let lookShowTimer: ReturnType<typeof setTimeout> | null = null
@@ -65,7 +65,7 @@ let lookHoldTimer: ReturnType<typeof setTimeout> | null = null
 // BEFORE ZOOM_ACTION, linking the two screens.
 const CONNECT_TEXT = 'Both views are directly connected.'
 const showConnectCaption = ref(false)
-const CONNECT_HOLD_MS = 4000
+const CONNECT_HOLD_MS = 5000
 let connectShowTimer: ReturnType<typeof setTimeout> | null = null
 let connectHoldTimer: ReturnType<typeof setTimeout> | null = null
 const ZOOM_ACTION = 'Activate the four quadrants across both screens.'
@@ -209,9 +209,8 @@ let crossesReadyTimer: ReturnType<typeof setTimeout> | null = null
 // HOLDS (one rotate panel), then fades OUT over --rotate-fade-ms — after which
 // the advance `+` (top cross) + the bottom start prompt appear.
 const showModesCaption = ref(false)
-// How long the "This action-view…" caption holds at full opacity — a full
-// standard rotate panel (was VIEW3_PANEL_MS − 1s; +1s now).
-const MODES_HOLD_MS = VIEW3_PANEL_MS
+// How long the "This action-view…" caption holds at full opacity (+1s).
+const MODES_HOLD_MS = VIEW3_PANEL_MS + 1000
 let captionTimer: ReturnType<typeof setTimeout> | null = null
 let modesHoldTimer: ReturnType<typeof setTimeout> | null = null
 let modesAfterTimer: ReturnType<typeof setTimeout> | null = null
