@@ -76,7 +76,7 @@ const ribbonsReady = ref(false)
 const circleHoverReady = ref(false)
 // Interface-only rotate caption shown the moment the dim deactivates (hover
 // unlocks) — invites the user to hover the circle.
-const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to discover how they live\nacross the different maps.'
+const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to discover how they live<br>across the different maps.'
 const EXPLORE_HOVER_HINT_DELAY_MS = 4000 // beat after the dim lifts before the hint appears
 const exploreHoverHintVisible = ref(false)
 // True once the user has hovered a circle image. If they hover BEFORE the hint's
