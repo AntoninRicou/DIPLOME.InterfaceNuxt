@@ -574,7 +574,7 @@ function italicize(text: string): string {
      glyphs themselves — a soft organic "stroke" hugging the letterforms via a
      layered `text-shadow` on the inner `.caption-text` span (NOT a rectangle
      behind the line). */
-  --rotate-size: 1.98rem;
+  --rotate-size: 1.82rem;
   /* Shared line-height for all rotating intro/finale captions (VIEW_1/2/3/4).
      Tightened from the old per-view 1.4–1.5 (then 1.2) so multi-line captions
      sit closer. */
