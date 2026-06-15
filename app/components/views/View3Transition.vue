@@ -37,7 +37,7 @@ const CAPTION_DELAY_MS = 2000
 // Middle NARRATION shown after zooming (mirrored to project). Uses the shared
 // rotate-text params (--rotate-size + fade timing + blue-grey stroke), same as
 // the rotating intro narration — see `.modes-caption` styles.
-const MODES_CAPTION = 'This action-view suggests where to explore next\nthrough the selected image.'
+const MODES_CAPTION = 'This action-view will suggest where to explore next\nthrough the selected image.'
 // CALL-TO-ACTION sentences (interface-only) — now rendered as CENTRED rotate
 // text (the .modes-caption style), the 1st and 3rd of a 3-sentence sequence
 // with MODES_CAPTION in between. ZOOM_ACTION appears after the initial settle
@@ -50,9 +50,17 @@ const MODES_CAPTION = 'This action-view suggests where to explore next\nthrough 
 // THEN does ZOOM_ACTION appear + the crosses arm (activation possible).
 const PICKED_TEXT = 'You picked this image.'
 const showPickedCaption = ref(false)
-const PICKED_HOLD_MS = 3000
+const PICKED_HOLD_MS = 4500
 let pickedHoldTimer: ReturnType<typeof setTimeout> | null = null
 let pickedAfterTimer: ReturnType<typeof setTimeout> | null = null
+// LOOK — a second rotate sentence shown right AFTER "You picked this image."
+// fades out (its own fade-in / hold / fade-out), before the map/action-view
+// narration begins. Interface-only, same `.modes-caption` rotate style.
+const LOOK_TEXT = 'Look where she lives in the maps.'
+const showLookCaption = ref(false)
+const LOOK_HOLD_MS = 5000
+let lookShowTimer: ReturnType<typeof setTimeout> | null = null
+let lookHoldTimer: ReturnType<typeof setTimeout> | null = null
 // CONNECT — a short sentence shown AFTER the action-view (MODES) caption and
 // BEFORE ZOOM_ACTION, linking the two screens.
 const CONNECT_TEXT = 'Both views are directly connected.'
@@ -65,7 +73,7 @@ const ZOOM_ACTION = 'Activate the four quadrants across both screens.'
 // and BEFORE the start prompt. FEEDBACK (project) centre ONLY (mirrored via
 // set-center-caption), with the INTERFACE darkened while it plays — no
 // interface text for this one.
-const MIRROR_CAPTION = 'This map-view retraces your journey\nthrough your images selection.'
+const MIRROR_CAPTION = 'This map-view will retrace your journey\nthrough your image selections.'
 const MIRROR_DIM_LEVEL = 0.7 // interface darkening while the MIRROR caption plays on the feedback
 const START_ACTION = 'Click on your image to start.'
 const showZoomAction = ref(false)
@@ -94,7 +102,7 @@ let dissolveTimer: ReturnType<typeof setTimeout> | null = null
 //    (both at once), wait this long before the MIRROR caption shows on feedback.
 //  - START_LEAD_MS: after the interface brightens back up, wait this long before
 //    the START_ACTION prompt shows on the interface.
-const MIRROR_LEAD_MS = 3000
+const MIRROR_LEAD_MS = 5000
 // Gap after the interface brightens (post map-view) before the "This action-view…"
 // MODES caption appears on the interface. (+1s → 3000.)
 const START_LEAD_MS = 3000
@@ -134,6 +142,7 @@ function skipToRelational() {
     store.setCenterCaption('')
     store.setInterfaceDim(0, { instant: true })
     showPickedCaption.value = false
+    showLookCaption.value = false
     showModesCaption.value = false
     showConnectCaption.value = false
     showZoomAction.value = true
@@ -218,6 +227,8 @@ function clearTimers() {
   if (crossesReadyTimer) { clearTimeout(crossesReadyTimer); crossesReadyTimer = null }
   if (pickedHoldTimer) { clearTimeout(pickedHoldTimer); pickedHoldTimer = null }
   if (pickedAfterTimer) { clearTimeout(pickedAfterTimer); pickedAfterTimer = null }
+  if (lookShowTimer) { clearTimeout(lookShowTimer); lookShowTimer = null }
+  if (lookHoldTimer) { clearTimeout(lookHoldTimer); lookHoldTimer = null }
   if (connectShowTimer) { clearTimeout(connectShowTimer); connectShowTimer = null }
   if (connectHoldTimer) { clearTimeout(connectHoldTimer); connectHoldTimer = null }
 }
@@ -244,12 +255,19 @@ onMounted(() => {
     crossesReadyTimer = null
     pickedHoldTimer = setTimeout(() => {
       showPickedCaption.value = false   // PICKED fades out
-      // 2) After PICKED fades: darken the interface + "This map-view…" on the
-      // FEEDBACK centre, then brighten + "This action view…" (MODES) on the
-      // INTERFACE — the whole narration plays BEFORE the quadrants can be
-      // activated.
+      // 1b) After PICKED fades: "Look where she lives in the maps below." drifts
+      // in, holds, fades — its own beat before the map/action-view narration.
+      lookShowTimer = setTimeout(() => {
+        showLookCaption.value = true
+        lookHoldTimer = setTimeout(() => {
+          showLookCaption.value = false   // LOOK fades out
+      // 2) Darken the interface AT THE MOMENT LOOK fades out (the automatic
+      // "Look at the projection above" dim caption rides the darkening), then
+      // "This map-view…" on the FEEDBACK centre, then brighten + "This action
+      // view…" (MODES) on the INTERFACE — the whole narration plays BEFORE the
+      // quadrants can be activated.
+      store.setInterfaceDim(MIRROR_DIM_LEVEL)
       pickedAfterTimer = setTimeout(() => {
-        store.setInterfaceDim(MIRROR_DIM_LEVEL)
         mirrorShowTimer = setTimeout(() => {
           store.setCenterCaption(MIRROR_CAPTION, 'rotate')   // feedback "map view"
           mirrorHoldTimer = setTimeout(() => {
@@ -281,6 +299,8 @@ onMounted(() => {
           }, MIRROR_HOLD_MS)
         }, MIRROR_LEAD_MS)
       }, ROTATE_FADE_OUT_MS)
+        }, LOOK_HOLD_MS)         // LOOK holds, then fades
+      }, ROTATE_FADE_OUT_MS)     // gap after PICKED fades before LOOK drifts in
     }, PICKED_HOLD_MS)
   }, appearDelayMs)
 })
@@ -380,6 +400,9 @@ onBeforeUnmount(() => {
          showStartAction flags in the allCanvasesZoomed watch. -->
     <p class="modes-caption" :class="{ visible: showPickedCaption }">
       <span class="caption-text">{{ PICKED_TEXT }}</span>
+    </p>
+    <p class="modes-caption" :class="{ visible: showLookCaption }">
+      <span class="caption-text">{{ LOOK_TEXT }}</span>
     </p>
     <p class="modes-caption" :class="{ visible: showZoomAction }">
       <span class="caption-text">{{ ZOOM_ACTION }}</span>
