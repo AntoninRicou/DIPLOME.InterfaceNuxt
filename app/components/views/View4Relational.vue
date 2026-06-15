@@ -76,7 +76,7 @@ const ribbonsReady = ref(false)
 const circleHoverReady = ref(false)
 // Interface-only rotate caption shown the moment the dim deactivates (hover
 // unlocks) — invites the user to hover the circle.
-const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to discover how they live across the different maps.'
+const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to discover how they live\nacross the different maps.'
 const EXPLORE_HOVER_HINT_DELAY_MS = 4000 // beat after the dim lifts before the hint appears
 const exploreHoverHintVisible = ref(false)
 // True once the user has hovered a circle image. If they hover BEFORE the hint's
@@ -808,7 +808,7 @@ function onStartOver() {
       aria-live="polite"
     >
       <span class="caption-text"
-        >Your selected image shares proximity with surrounding images through:<br /><!--
+        >The centered image is connected to surrounding images through:<br /><!--
         --><template v-for="(m, i) in RELATIONAL_MODES" :key="m.word">{{ i === 0 ? '' : i === RELATIONAL_MODES.length - 1 ? ' & ' : ', ' }}<span
           class="mode-word"
           :style="{ '--mode-glow': m.color }"

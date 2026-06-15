@@ -30,11 +30,11 @@ import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 // Explicit line breaks (\n, honoured via `white-space: pre-line` on
 // .entry-caption): sentence 1 breaks after "books", sentence 2 after "vision".
 const ENTRY_PANELS = [
-  'Proxima brings together thousands of images',
+  'Proxima brings together thousands of images.',
 
-  'These one once belonged to the past, bounded by old books.',
+  'These one once belonged to the past,\nbounded by old books.',
  
-   'Today, you can explore them from multiple perspectives at once.',
+   'Today, you can explore\nthem from multiple perspectives at once.',
 ]
 // Project-ONLY centred narration, played (2s after the user's first hover) via
 // set-center-caption with the same rotate params. Each sentence fades in,
