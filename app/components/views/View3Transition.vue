@@ -37,7 +37,7 @@ const CAPTION_DELAY_MS = 2000
 // Middle NARRATION shown after zooming (mirrored to project). Uses the shared
 // rotate-text params (--rotate-size + fade timing + blue-grey stroke), same as
 // the rotating intro narration — see `.modes-caption` styles.
-const MODES_CAPTION = '	This action-view display images on where you can explore next.'
+const MODES_CAPTION = 'This action-view suggests where to explore next based on your previous selection.'
 // CALL-TO-ACTION sentences (interface-only) — now rendered as CENTRED rotate
 // text (the .modes-caption style), the 1st and 3rd of a 3-sentence sequence
 // with MODES_CAPTION in between. ZOOM_ACTION appears after the initial settle
@@ -65,7 +65,7 @@ const ZOOM_ACTION = 'Activate the four quadrants across both screens.'
 // and BEFORE the start prompt. FEEDBACK (project) centre ONLY (mirrored via
 // set-center-caption), with the INTERFACE darkened while it plays — no
 // interface text for this one.
-const MIRROR_CAPTION = 'This maps-view provides a trace of images you will encounter.'
+const MIRROR_CAPTION = 'This map-view retraces your journey through image proximities.'
 const MIRROR_DIM_LEVEL = 0.7 // interface darkening while the MIRROR caption plays on the feedback
 const START_ACTION = 'Click on your image to start.'
 const showZoomAction = ref(false)
@@ -262,8 +262,12 @@ onMounted(() => {
                 // 3) "Both maps are directly connected." after the action-view fades.
                 connectShowTimer = setTimeout(() => {
                   showConnectCaption.value = true
+                  // Mirror "Both views are directly connected." onto the FEEDBACK
+                  // centre too, so it plays on both screens at once.
+                  store.setCenterCaption(CONNECT_TEXT, 'rotate')
                   connectHoldTimer = setTimeout(() => {
                     showConnectCaption.value = false
+                    store.setCenterCaption('')   // clear the feedback caption
                     // 4) THEN: "Activate the four quadrants…" appears + the crosses
                     // arm, so the user can now reach into the quadrants.
                     modesAfterTimer = setTimeout(() => {
@@ -600,7 +604,7 @@ onBeforeUnmount(() => {
    in/out. Cleared the instant it's clicked (showStartAction → false). */
 .central-slot.clickable {
   pointer-events: auto;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   animation: center-glow-beige 1.8s ease-in-out infinite;
 }
 @keyframes center-glow-beige {
@@ -648,7 +652,9 @@ onBeforeUnmount(() => {
   transform: translate(-50%, -50%);
   margin: 0;
   padding: 0 1rem;
-  white-space: nowrap;
+  /* `pre-line` so the explicit `\n` in MODES_CAPTION renders as a line break
+     (the other captions have no `\n`, so they stay on one line). */
+  white-space: pre-line;
   text-align: center;
   /* Same rotate-caption style: --rotate-size + the organic stroke on the
      inner .caption-text span, and the shared rotate fade timing so it reveals

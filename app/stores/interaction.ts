@@ -97,6 +97,11 @@ export const useInteractionStore = defineStore('interaction', () => {
 
   const view3InterpretationMode = ref(false)
 
+  // True while the cursor is over a VIEW_4 suggestion image (a quadrant cell).
+  // Drives the custom "pull to centre" arrow cursor in View4Relational. Set by
+  // RelationComponent's cell hover/leave; interface-only, never on the wire.
+  const suggestionHovered = ref(false)
+
   // Global "About / credits" overlay flag. Owned here (not in a view component)
   // because the single persistent "i" control lives in app.vue and must survive
   // view transitions (VIEW_2 → VIEW_4 → explore-others). Opening it also clears
@@ -718,11 +723,33 @@ export const useInteractionStore = defineStore('interaction', () => {
     centeredCircleIds.value = circle.ids
     replayPickCount.value += 1
     redrawCircleOnSingle(circle.ids)
-    // Refresh the four corners so a fresh set of existing circles appears
-    // after each pick (the chosen one is now centred). `centeredCircleIds`
-    // holds its own copy of the ids, so replacing `replayCircles` doesn't
-    // disturb the centred circle.
-    loadReplayCircles(true)
+    // Replace ONLY the clicked ribbon with a fresh circle — the OTHER ribbon(s)
+    // keep their images. `centeredCircleIds` holds its own copy of the ids, so
+    // swapping this slot doesn't disturb the centred circle.
+    refreshOneReplayCircle(index)
+  }
+
+  // Swap a single ribbon (index) for a fresh circle, leaving the rest untouched.
+  // Picks one that differs from every circle currently on screen (incl. the
+  // just-centred one) so the ribbon visibly changes to something new.
+  async function refreshOneReplayCircle(index: number) {
+    try {
+      const res = await $fetch<{ circles: { anchorId: ImageId; ids: ImageId[] }[] }>(
+        '/api/replay-circles',
+        { query: { count: 4, size: 10 } },
+      )
+      const candidates = res?.circles ?? []
+      if (candidates.length === 0) return
+      const inUse = new Set(
+        replayCircles.value.map((c) => c?.anchorId).filter(Boolean) as ImageId[],
+      )
+      const pick = candidates.find((c) => !inUse.has(c.anchorId)) ?? candidates[0]!
+      const next = replayCircles.value.slice()
+      next[index] = pick
+      replayCircles.value = next
+    } catch (err) {
+      console.warn('[interaction] refreshOneReplayCircle failed', err)
+    }
   }
 
   function stepBackInHistory() {
@@ -939,6 +966,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     stepForwardInHistory,
     jumpToHistory,
     view3InterpretationMode,
+    suggestionHovered,
     toggleView3Interpretation,
     creditsOpen,
     toggleCredits,

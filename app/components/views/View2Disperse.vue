@@ -32,22 +32,22 @@ import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 const ENTRY_PANELS = [
   'Proxima brings together thousands of images',
 
-  'Those images once belonged to the past, bounded by old books.',
+  'These images once belonged to the past, bounded by old books.',
  
-   'Today you can simultaneously explore them,\nthrough multiple ways of seeing.',
+   'Today you can explore them,\nthrough multiple ways of seeing at once',
 ]
 // Project-ONLY centred narration, played (2s after the user's first hover) via
 // set-center-caption with the same rotate params. Each sentence fades in,
 // holds PROJECT_HOLDS[i], fades out — sequenced by playProjectNarration().
 const PROJECT_PANELS = [
-  'You can see here these same images,\norganized into four distinct maps.',
-  'Each map organizes them according to different criterias.',
+  'The same images are organized here\ninto four distinct maps.',
+  'Each map structures them according to a different criterion.',
 ]
 // CLICK_ACTION is a centred ROTATE caption (same `.entry-caption` style/timing
 // as the intro narration), drifting in after the project narration once the
 // interface has brightened back up (see playProjectNarration). (The earlier
 // "Explore the images…" HOVER_ACTION bottom prompt was removed.)
-const CLICK_ACTION = 'Select it to start Proxima.'
+const CLICK_ACTION = 'Select it to begin.'
 // HOVER_ACTION is a centred ROTATE caption shown BEFORE the click action — it
 // invites the user to move the mouse / explore once hover unlocks; it then
 // fades and swaps to CLICK_ACTION (which is what also unlocks selection).

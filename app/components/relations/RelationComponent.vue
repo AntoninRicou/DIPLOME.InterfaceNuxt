@@ -334,6 +334,58 @@ function rotateArr<T>(arr: T[], k: number): T[] {
   return n === 0 ? arr : arr.slice(n).concat(arr.slice(0, n))
 }
 
+// ── Cycle the keyword combinations DURING a held hover ──
+// Form (own·shared·own) and Semantic (image-to-image bridge) each have several
+// valid keyword combinations between the same two images — the combination is
+// selected by `hoverNonce[id]` (rotates the tag pools). Re-hovering used to be
+// the only way to advance it; instead, while a cell stays hovered we tick the
+// nonce on a timer so the user reads multiple combinations without re-hovering.
+// Each swap cross-fades (the radial-words <Transition mode="out-in">, keyed on
+// `comboKey`). Source/Time show a single subject/year — nothing to cycle — so
+// the timer only arms for component_2 / component_3.
+//   HOVER_CYCLE_MS = full hold per combination before it swaps. Paired with the
+//   slow ~500ms `combo-fade` (matched to the SkipButton), so a full combination
+//   reads at a calm pace before the next fades in.
+const HOVER_CYCLE_MS = 2600
+const CYCLES = new Set(['component_2', 'component_3'])
+let comboTimer: ReturnType<typeof setInterval> | null = null
+function stopComboCycle() {
+  if (comboTimer) { clearInterval(comboTimer); comboTimer = null }
+}
+// Signature of the keyword block currently rendered for the hovered cell — the
+// joined stack lines. Used to guarantee each tick lands on a DIFFERENT
+// combination than the one on screen (never repeats back-to-back).
+function comboSignature(): string {
+  return (radialWords.value[0]?.stack ?? []).join('|')
+}
+function startComboCycle(id: string) {
+  stopComboCycle()
+  if (!CYCLES.has(props.componentId)) return
+  comboTimer = setInterval(() => {
+    // Only advance the currently-hovered cell, and stop if the hover ended.
+    if (hoveredCell.value?.id !== id) { stopComboCycle(); return }
+    // Bump the nonce, re-reading the rendered combination each step, until it
+    // differs from what's on screen — so every fade shows a new combination.
+    // `radialWords` recomputes synchronously on each `hoverNonce` mutation.
+    // Capped (8) so a cell with only one possible combination still advances
+    // once instead of looping forever.
+    const before = comboSignature()
+    for (let i = 0; i < 8; i++) {
+      const prev = hoverNonce.value[id]
+      hoverNonce.value = { ...hoverNonce.value, [id]: prev === undefined ? 1 : prev + 1 }
+      if (comboSignature() !== before) break
+    }
+  }, HOVER_CYCLE_MS)
+}
+onUnmounted(stopComboCycle)
+
+// Identity of the combination currently shown for the hovered cell: hovered id
+// + its nonce. Drives the radial-words `:key` so each cycle tick (and each cell
+// switch) plays the out-in fade between the old and new keyword block.
+const comboKey = computed(() =>
+  hoveredCell.value ? `${hoveredCell.value.id}:${hoverNonce.value[hoveredCell.value.id] ?? 0}` : '',
+)
+
 function onCellHover(id: string, slotIdx: number) {
   if (props.preview) return
   playSound(HOVER_SOUND)
@@ -349,11 +401,17 @@ function onCellHover(id: string, slotIdx: number) {
   // Track the hovered cell so the radial words can render along the line
   // between this cell and the centred image (see `radialWords`).
   hoveredCell.value = { id, slotIdx }
+  // Cycle through the keyword combinations while this cell stays hovered.
+  startComboCycle(id)
+  // Drive the "pull to centre" arrow cursor (View4Relational).
+  store.suggestionHovered = true
 }
 function onCellLeave() {
+  stopComboCycle()
   store.setHighlight(null)
   store.setGhostPath(null)
   hoveredCell.value = null
+  store.suggestionHovered = false
 }
 
 // When the last image is selected, the overview finale freezes the cells
@@ -639,6 +697,10 @@ const connectorColor = computed(
 const quadrantColor = computed(
   () => QUADRANT_SOLID_COLORS[QUADRANT_INDEX[props.position ?? 'tl']],
 )
+// Time quadrant — its radial tags are YEARS. Flagged so the overlay can force
+// plain lining figures on them (the tag font's default oldstyle/proportional
+// numerals render years unevenly).
+const isTimeComponent = computed(() => props.componentId === 'component_4')
 
 // In preview mode (VIEW_3) the cells stay hidden until this quadrant's cross
 // is clicked (its canvasZoomed flag flips). Outside preview the cells are
@@ -809,10 +871,17 @@ onUnmounted(() => {
          placed at its `--frac` along the centre→cell vector (`--cell-x/y`) and
          the inner span rotates by the line's `--angle`. -->
     <Teleport to="body">
-      <Transition name="subject-fade">
+      <!-- `mode="out-in"` + `:key="comboKey"` so each cycle tick (and cell
+           switch) fades the old keyword block fully out, then the new one in —
+           the smooth fade-out → fade-in the brief is asked for. `combo-fade` is
+           a longer, eased fade than the bridge lines' `subject-fade`. The bridge
+           connector lines below keep `subject-fade` (they don't change between
+           combinations, so they must NOT re-fade on every tick). -->
+      <Transition name="combo-fade" mode="out-in">
         <div
           v-if="!preview && radialWords.length"
-          class="radial-words"
+          :key="comboKey"
+          :class="['radial-words', { 'is-time': isTimeComponent }]"
           :style="{
             '--cell-x': hoveredOffset?.x,
             '--cell-y': hoveredOffset?.y,
@@ -1050,7 +1119,10 @@ onUnmounted(() => {
   padding: 0;
   border: 0px solid transparent;
   background: transparent;
-  cursor: pointer;
+  /* Custom cross (not the native pointer) so the cursor matches every other
+     clickable across the experience. Overridden to `none` while the VIEW_4
+     arrow cursor is up (`.view-3.arrow-cursor :deep(.cell)`). */
+  cursor: var(--cursor-pointer);
   opacity: 0.05;
   pointer-events: none;
   /* Opacity transition takes a per-cell delay (--reveal-delay) only on
@@ -1284,10 +1356,18 @@ onUnmounted(() => {
     )
     translate(-50%, -50%);
 }
+/* Time quadrant: render YEARS as plain lining + tabular figures so digits sit
+   on one baseline at a uniform width, instead of the tag font's default
+   oldstyle/proportional numerals (which make years like 1830 look uneven). */
+.radial-words.is-time .radial-word-inner,
+.radial-words.is-time .radial-bridge-line {
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: 'lnum' 1, 'tnum' 1;
+}
 .radial-word-inner {
   display: inline-block;
   white-space: nowrap;
-  font-size: 0.8rem;
+  font-size: 0.92rem;
   font-style: italic;
   letter-spacing: 0.015em;
   line-height: 1.1;
@@ -1350,7 +1430,7 @@ onUnmounted(() => {
 }
 .radial-bridge-line {
   white-space: nowrap;
-  font-size: 0.8rem;
+  font-size: 0.92rem;
   font-style: italic;
   letter-spacing: 0.015em;
   line-height: 1.1;
@@ -1372,6 +1452,18 @@ onUnmounted(() => {
 }
 .subject-fade-enter-from,
 .subject-fade-leave-to {
+  opacity: 0;
+}
+
+/* Keyword-block fade (radial words). Paced to match the SkipButton's fade
+   (~500ms `ease`) so the cycling reads as a slow, soft fade-out → fade-in.
+   Used under `mode="out-in"`, so a swap = leave (this) + enter (this) ≈ 1s. */
+.combo-fade-enter-active,
+.combo-fade-leave-active {
+  transition: opacity 500ms ease;
+}
+.combo-fade-enter-from,
+.combo-fade-leave-to {
   opacity: 0;
 }
 

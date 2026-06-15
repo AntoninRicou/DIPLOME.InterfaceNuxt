@@ -8,7 +8,7 @@ const store = useInteractionStore()
 
 const PANELS = [
   'Welcome to Proxima.',
-  'A dual-view experience for exploring large corpus of images.',
+  'A dual-view experience designed to explore large corpus of images.',
 ]
 const FADE_OUT_MS = ROTATE_FADE_OUT_MS
 
@@ -30,6 +30,13 @@ const GAP_MS = FADE_OUT_MS + EMPTY_BEAT_MS + FADE_OUT_MS
 
 const index = ref(0)
 const captionVisible = ref(true)
+// Drives the shared SkipButton's `is-leaving` fade and keeps it mounted while it
+// plays. Without it, `advance()` flips `captionVisible` false and the button's
+// `v-if` would unmount it INSTANTLY at full opacity (the teleported button
+// doesn't ride the view cross-fade) — a hard cut. Set true on advance so the
+// button fades out exactly like VIEW_2's skip; it stays mounted through the
+// View1 leave transition, long enough for the 500ms fade to complete.
+const skipLeaving = ref(false)
 // Current sentence with "Proxima" italicised (rendered via v-html — the panels
 // are static trusted constants, so no XSS surface).
 const panelHtml = computed(() => (PANELS[index.value] ?? '').replace('Proxima', '<i>Proxima</i>'))
@@ -53,6 +60,10 @@ function clearTimer() {
 function advance() {
   if (!captionVisible.value) return
   clearTimer()
+  // If the Skip button is up (last panel), fade it out instead of letting the
+  // v-if cut it. It stays mounted via `skipLeaving` and fades over its own
+  // 500ms while View1 cross-fades away.
+  if (index.value === 1) skipLeaving.value = true
   captionVisible.value = false
   setTimeout(() => store.enterEntryView(), FADE_OUT_MS)
 }
@@ -93,7 +104,7 @@ onBeforeUnmount(() => {
   >
     <!-- Skip appears only with the SECOND sentence ("A dual-view…"), not the
          first ("Welcome to Proxima."). -->
-    <SkipButton v-if="index === 1 && captionVisible" @click="skip" />
+    <SkipButton v-if="(index === 1 && captionVisible) || skipLeaving" :leaving="skipLeaving" @click="skip" />
     <!-- Vue <Transition> with `appear` + `mode="out-in"`. The
          out-in mode makes sentence-to-sentence transitions sequential:
          the old sentence fully fades out before the new sentence

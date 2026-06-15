@@ -76,7 +76,7 @@ const ribbonsReady = ref(false)
 const circleHoverReady = ref(false)
 // Interface-only rotate caption shown the moment the dim deactivates (hover
 // unlocks) — invites the user to hover the circle.
-const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to see where they live from a map to another.'
+const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to discover how they live across the multiple maps.'
 const EXPLORE_HOVER_HINT_DELAY_MS = 4000 // beat after the dim lifts before the hint appears
 const exploreHoverHintVisible = ref(false)
 // True once the user has hovered a circle image. If they hover BEFORE the hint's
@@ -196,6 +196,49 @@ const ribbonViewport = ref<{ w: number; h: number }>({ w: 1920, h: 1080 })
 function updateRibbonViewport() {
   ribbonViewport.value = { w: window.innerWidth, h: window.innerHeight }
 }
+
+// ── "Pull to centre" arrow cursor ──
+// While the cursor is over a suggestion image (store.suggestionHovered), the
+// native cursor is hidden (RelationComponent `.cell { cursor: none }`) and we
+// render a custom arrow at the pointer that always points at the interface
+// centre — the cue that clicking the image pulls it to the centre. Position +
+// angle are plain refs updated in the move handler (no window access at render,
+// so SSR-safe). Active only when a pick is actually possible.
+const cursorX = ref(0)
+const cursorY = ref(0)
+const cursorAngleDeg = ref(0)
+// Custom quadrant cursor — the → arrow (rotated to point at the interface
+// centre) shows ANYWHERE inside a quadrant, INCLUDING over suggestion images.
+// Gated off while selection is locked or after overview is confirmed.
+const arrowActive = computed(() =>
+  store.view4HoveredQuadrant !== null &&
+  !store.relationalSelectionLocked &&
+  !store.overviewConfirmed,
+)
+// The glow stays the same dark-grey all along (in CSS). The cursor's FILL takes
+// the hovered quadrant's colour the MOMENT the cursor enters that quadrant — for
+// BOTH the arrow (in quadrant space) and the dot (over a suggestion image). Keep
+// QUADRANT_CURSOR_FILL in lockstep with QUADRANT_SOLID_COLORS in
+// RelationComponent.vue (Source / Form / Semantic / Time).
+const QUADRANT_CURSOR_FILL = ['#f0a05c', '#6cb4e6', '#74cf92', '#ef82ac']
+const cursorFill = computed(() => {
+  const i = store.view4HoveredQuadrant
+  if (i !== null && QUADRANT_CURSOR_FILL[i]) return QUADRANT_CURSOR_FILL[i]
+  return 'rgb(175, 180, 188)'
+})
+// Glyph swap: the → arrow (aimed at centre) while in quadrant SPACE; over a
+// suggestion image it becomes the project's classic click arrow ↖ (U+2196, the
+// same glyph as the global pointer cursor). Only the glyph changes — the quadrant
+// colour carries across as the glow on both.
+const cursorGlyph = computed(() => (store.suggestionHovered ? '↖' : '→'))
+function onCursorMove(e: MouseEvent) {
+  cursorX.value = e.clientX
+  cursorY.value = e.clientY
+  const cx = window.innerWidth / 2
+  const cy = window.innerHeight / 2
+  // Arrow art points to the RIGHT at 0°; rotate toward the centre vector.
+  cursorAngleDeg.value = Math.atan2(cy - e.clientY, cx - e.clientX) * 180 / Math.PI
+}
 // Max reach (vmin) of each arm from its corner: half the edge MINUS half the
 // mid-edge gap, so the two arms sharing an edge never meet — a RIBBON_EDGE_GAP_VMIN
 // gap is always left in the middle (the edge stays visible). Horizontal edge =
@@ -309,7 +352,7 @@ function onCenterAfterLeave() { deckHidden.value = false }
 // project (advanceToExplore drives both the morph and that caption). The old
 // second sentence on the project ("Your images found different neighbors…") was
 // removed.
-const FINAL_INTERFACE_TEXT = 'Your selection formed a unique path through your journey.'
+const FINAL_INTERFACE_TEXT = 'Your selection has formed a unique path.'
 // Journey sentence appears 1.8s AFTER the circle (the transition itself starts
 // with the circle, at t=0 — they're decoupled). Brought 1s earlier so it holds
 // 1s longer; its fade-out still lands at SINGLE_REVEAL_MS (project reveal).
@@ -325,7 +368,7 @@ let finaleTimers: ReturnType<typeof setTimeout>[] = []
 // shown once when the relational view is entered (i.e. right after the user
 // clicks the central image in VIEW_3). Fades in after a short settle beat,
 // holds, fades out.
-const RELATIONAL_INTRO_TEXT = '	You can now explore the corpus through the centered image.'
+const RELATIONAL_INTRO_TEXT = '	You can now explore the corpus around the centered image.'
 const RELATIONAL_INTRO_DELAY_MS = 1400 // settle beat before it drifts in
 const RELATIONAL_INTRO_HOLD_MS = 5500  // "You can now explore…" full-opacity hold before fading out
 const RELATIONAL_INTRO2_HOLD_MS = 6000 // mode-words caption full-opacity hold before fading out
@@ -369,13 +412,18 @@ watch(oneImageLeftReached, (reached) => {
   if (oneLeftTimer) { clearTimeout(oneLeftTimer); oneLeftTimer = null }
   if (reached) {
     oneLeftVisible.value = true
+    // Mirror the same beat onto the FEEDBACK centre (rotate caption), so the
+    // "last pick" prompt shows on both screens at once.
+    store.setCenterCaption(ONE_LEFT_TEXT, 'rotate')
     store.relationalSelectionLocked = true
     oneLeftTimer = setTimeout(() => {
       oneLeftVisible.value = false
+      store.setCenterCaption('')
       store.relationalSelectionLocked = false
     }, ONE_LEFT_HOLD_MS)
   } else {
     oneLeftVisible.value = false
+    store.setCenterCaption('')
     store.relationalSelectionLocked = false
   }
 })
@@ -401,6 +449,7 @@ function startFinaleNarration() {
 onMounted(() => {
   updateRibbonViewport()
   window.addEventListener('resize', updateRibbonViewport)
+  window.addEventListener('mousemove', onCursorMove)
   // VIEW_3's Skip (stage 2) lands here: skip ONLY the mode-words caption and
   // open directly on "You can now explore…", with hover + selection live
   // immediately. The "You can now explore…" sentence still drifts in (and fades
@@ -444,7 +493,9 @@ onBeforeUnmount(() => {
   finaleTimers = []
   if (oneLeftTimer) { clearTimeout(oneLeftTimer); oneLeftTimer = null }
   store.relationalSelectionLocked = false // never leave selection stuck locked
+  store.suggestionHovered = false // don't leave the arrow cursor armed
   window.removeEventListener('resize', updateRibbonViewport)
+  window.removeEventListener('mousemove', onCursorMove)
   store.setCenterCaption('') // don't leave the project sentence lingering
   store.setInterfaceDim(0, { instant: true }) // never leave the interface stuck dim
 })
@@ -564,6 +615,8 @@ function onStartOver() {
       // is gone (the rest phase), together with the corner labels.
       'finale-fadeout': store.overviewFinalePhase === 'rest' || store.overviewFinalePhase === 'transition',
       'is-restarting': restarting,
+      // Hide the native pointer over the quadrant region while the arrow shows.
+      'arrow-cursor': arrowActive,
     }]"
   >
     <!-- Teleport target for the Semantic quadrant's bridge connector lines.
@@ -789,6 +842,7 @@ function onStartOver() {
     <nav
       v-if="!store.overviewConfirmed"
       class="history-strip"
+      :class="{ 'center-hidden': store.centralHovered }"
       aria-label="navigation history"
     >
       <ol class="strip-steps">
@@ -806,10 +860,83 @@ function onStartOver() {
         </li>
       </ol>
     </nav>
+
+    <!-- Custom quadrant cursor — teleported to <body> so its fixed position + high
+         z aren't trapped in a parent stacking context (pointer-events:none so it
+         never intercepts the click). Shows anywhere in a quadrant; the FILL takes
+         that quadrant's colour the moment the cursor enters it (--cursor-fill).
+         The glyph swaps: the → arrow (rotated to aim at the centre) in quadrant
+         space; over a suggestion image it becomes the project's classic click
+         arrow ↖ — only the glyph changes, the quadrant colour carries across. The
+         glow stays a constant dark-grey for legibility on both canvases. -->
+    <Teleport to="body">
+      <div
+        class="center-cursor"
+        :class="{ visible: arrowActive, 'is-click': store.suggestionHovered }"
+        :style="{
+          left: `${cursorX}px`,
+          top: `${cursorY}px`,
+          '--cursor-angle': `${cursorAngleDeg}deg`,
+          '--cursor-fill': cursorFill,
+        }"
+        aria-hidden="true"
+      ><span class="center-cursor-glyph">{{ cursorGlyph }}</span></div>
+    </Teleport>
   </section>
 </template>
 
 <style scoped>
+/* ── "Pull to centre" arrow cursor ── */
+.center-cursor {
+  position: fixed;
+  /* left/top track the pointer (set inline); centre the art on the pointer. */
+  transform: translate(-50%, -50%) rotate(var(--cursor-angle, 0deg));
+  /* Above the dim overlay (9999) and everything else; never eats the click. */
+  z-index: 10002;
+  pointer-events: none;
+  /* The glyph FILL takes the hovered quadrant's colour (--cursor-fill, set inline;
+     blue-grey default), while the GLOW stays a constant dark-grey so it reads on
+     both the day and night canvases. */
+  color: var(--cursor-fill, rgb(175, 180, 188));
+  filter:
+    drop-shadow(0 0 3px rgba(89, 91, 85, 0.95))
+    drop-shadow(0 0 6px rgba(89, 91, 85, 0.7));
+  /* Smooth appear/disappear; the rotate var animates so the arrow eases as it
+     re-aims rather than snapping when crossing between quadrants. The color
+     transition eases the fill recolour when crossing between quadrants. */
+  opacity: 0;
+  transition: opacity 160ms ease, transform 90ms linear, color 160ms ease;
+  will-change: transform;
+}
+/* The arrow is the FONT's own glyph (→), in the experience's display serif —
+   so the cursor reads as part of the same typographic system as the labels and
+   captions, not a drawn icon. The wrapper's rotation aims it at the centre. */
+.center-cursor-glyph {
+  font-family: 'ABC Otto', serif;
+  font-style: italic;
+  font-size: 1.6rem;
+  line-height: 1;
+  display: block;
+}
+.center-cursor.visible {
+  opacity: 0.95;
+}
+/* Over a suggestion image the glyph is the ↖ click arrow — keep it upright at its
+   fixed click-cursor angle (don't apply the centre-aiming rotation the → uses). */
+.center-cursor.is-click {
+  transform: translate(-50%, -50%);
+}
+
+/* Hide the native pointer over the WHOLE quadrant region (empty space + cells)
+   while a custom cursor is up — the cells set their own `cursor: pointer`, so
+   they need the explicit override too. */
+.view-3.arrow-cursor {
+  cursor: none;
+}
+.view-3.arrow-cursor :deep(.cell) {
+  cursor: none;
+}
+
 .view-3 {
   position: relative;
   width: 100vw;
@@ -886,7 +1013,7 @@ function onStartOver() {
      ABOVE the veil — central deck (z:10), corner labels / text panels (z:6),
      the `+` and bg dots (top-controls) — keep their own clicks. */
   pointer-events: auto;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 /* Canvas-background modes live globally in app.vue (`.bg-black` /
    `.bg-gradient`) — shared across all views. .view-3 just applies the
@@ -1079,7 +1206,7 @@ function onStartOver() {
   top: 50%;
   width: 64vmin;
   height: 64vmin;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   pointer-events: auto;
   z-index: 40;
   opacity: 0.36; /* rest opacity, same as the old ribbons */
@@ -1094,6 +1221,14 @@ function onStartOver() {
 /* left:0 / right:0 + the half-shift puts each box's CENTRE on the edge. */
 .side-circle[data-side="left"]  { left: 0;  transform: translate(-50%, -50%) scale(var(--side-scale)); }
 .side-circle[data-side="right"] { right: 0; transform: translate(50%, -50%) scale(var(--side-scale)); }
+
+/* On a corner pick, only the clicked ribbon's images swap (its CentralImage
+   `ids` change → its layers fade out). Make that disappearance gentler than the
+   central deck's default 220ms leave — scoped to the ribbons via :deep, so the
+   deck's snappier swap is untouched. */
+.side-circle :deep(.layer-fade-leave-active) {
+  transition: opacity 600ms ease;
+}
 
 /* Fade in/out for the corner ribbons (appear on entering explore-others, and
    swap on each corner pick) and for the centred circle — so nothing pops.
@@ -1264,7 +1399,7 @@ function onStartOver() {
   letter-spacing: 0.01em;
   line-height: 1.2;
   color: #595b54;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: color 150ms ease-out;
 }
 .contribute:hover {
@@ -1323,6 +1458,13 @@ function onStartOver() {
 .view-3.finale-fadeout .history-strip {
   opacity: 0;
 }
+/* Hidden while the centred image is hovered (so it doesn't compete with the
+   central deck). Quicker fade than the finale's 700ms. */
+.history-strip.center-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease-out;
+}
 .strip-steps {
   list-style: none;
   margin: 0;
@@ -1339,20 +1481,17 @@ function onStartOver() {
      pointer-events:none also drops the pointer cursor + hover tooltip; the
      @click/@keydown handlers stay in the template, just never fire. */
   pointer-events: none;
-  cursor: default;
+  cursor: var(--cursor-default);
 }
-/* Square step. No border-radius — discrete squares. Every square glows
-   at all times.
-     past    (behind current)  → beige 100%
-     current (the actual image) → beige + pulsing glow
-     future  (ahead, already selected after stepping back) → beige 50%
-     empty   (not reached yet)  → component-name colour + warm title halo
-   Classes recompute from historyIndex, so stepping forward/back
-   reassigns past/future automatically. */
+/* Oval step (wider than tall, fully rounded). Dark fill; the glow carries the
+   source-quadrant colour. Classes recompute from historyIndex, so stepping
+   forward/back reassigns past/future automatically. */
 .strip-steps li .step {
   display: block;
-  width: 5px;
+  /* Small oval (almost the old square size, just wider-than-tall + rounded). */
+  width: 7px;
   height: 5px;
+  border-radius: 50%;
   background: #595b54;
   transition: background 150ms ease-out, box-shadow 150ms ease-out, opacity 150ms ease-out;
   box-sizing: border-box;

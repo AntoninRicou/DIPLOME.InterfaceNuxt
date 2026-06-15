@@ -36,10 +36,10 @@ const aboutControlVisible = computed(() => {
 // supplies the "Source of images" block so it stays the single source of truth.
 const CREDITS_TITLE = 'Proxima'
 const CREDITS_AUTHOR = 'by Antonin Ricou'
-const CREDITS_CORPUS = 'This corpus gathers images from scientific and encyclopedic books published between the 18th and 20th centuries. Originally framed by a dominant Western system of knowledge, they were later digitized, reorganized into a dataset, and published online through Flickr.'
+const CREDITS_CORPUS = 'This corpus gathers images from scientific and encyclopedic books published between the 18th and 20th centuries. Originally framed within a dominant Western system of knowledge, the images were later digitized, reorganized into a dataset, and published online via Flickr.'
 const CREDITS_ABOUT: readonly string[] = [
-  'Proxima is a dual-view experience designed to explore large image corpus. It allows participants to navigate images through multiple forms of relation shaped by spatial proximity. Each journey produces a visual trajectory where meaning emerges through relations rather than through a single fixed structure.',
-  'By questioning how large corpus are apprehended, this interface proposes a new way of looking at images. It allows them to exist simultaneously across multiple areas of meaning. Usually confined to a linear and origin-based structure, images can here resonate, shift in meaning, and form new connections.',
+  'Proxima is a dual-view experience designed to explore large image corpora through alternative modes of exploration. It lets participants engage with images through new suggestions based on criteria, all driven by spatial proximity at once. Each journey produces a unique selection where meaning emerges from new relations rather than a fixed structure.',
+  'By looking at how large visual databases are navigated, this interface suggests a different way of looking at images. Each image can have multiple neighbors at once and exist in different contexts simultaneously. Rather than being confined to a linear, origin-based structure, images can resonate, shift in meaning, and form new connections.',
   
 ]
 const CREDITS_TYPOGRAPHY: readonly string[] = [
@@ -279,7 +279,7 @@ function italicize(text: string): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   opacity: 0;
   transition: opacity 240ms ease-out;
 }
@@ -355,7 +355,7 @@ function italicize(text: string): string {
     0 0 9px rgba(89, 91, 85, 0.75),
     0 0 13px rgba(89, 91, 85, 0.55);
   opacity: 0.65;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: opacity 150ms ease;
 }
 .about-controls .interpret-control::before {
@@ -419,10 +419,24 @@ function italicize(text: string): string {
   letter-spacing: 0.005em;
   line-height: 1.05;
 }
+/* Reversed scheme for the Neue Kabel credit texts (author, section labels,
+   copyright): blueish FILL + dark-grey GLOW — the opposite of the ABC Otto
+   body, which keeps the dark fill + blueish glow inherited from .credits-content.
+   Same two colours as the rotate text, swapped (matches the Skip / "i" buttons). */
+.credits-author,
+.credits-label,
+.credits-copyright {
+  color: rgb(175, 180, 188);
+  text-shadow:
+    0 0 4px rgba(89, 91, 85, 0.95),
+    0 0 6px rgba(89, 91, 85, 0.9),
+    0 0 9px rgba(89, 91, 85, 0.75),
+    0 0 13px rgba(89, 91, 85, 0.55);
+}
 .credits-author {
   margin: 0.1rem 0 0;
   font-family: 'Neue Kabel', sans-serif;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   opacity: 0.85;
 }
 .credits-section { margin-bottom: 4vh; }
@@ -517,6 +531,24 @@ function italicize(text: string): string {
    in both axes. overflow: hidden on body prevents any inner element from
    reintroducing scroll at the document level. */
 :root {
+  /* ── Custom interface cursors ──
+     SAME glyph for both — the ↖ U+2196 arrow drawn as ABC Otto's ACTUAL glyph
+     outline (the font's vector path embedded directly; a web font can't render
+     inside a CSS data-URI cursor, so the outline is baked in). Dark blue-grey
+     glyph throughout; only the GLOW colour changes: passive (default) = bluish,
+     clickable (pointer) = warm beige (rgb(249,236,208), the system glow colour).
+     The glow hugs the arrow's silhouette — built from layered expanding strokes
+     of the same path (round joins, fading outward), NOT a radial circle and NOT
+     an SVG filter (filters don't render inside data-URI cursors). The hotspot
+     sits at the arrow TIP (top-left, 8 8). Used as `cursor: var(--cursor-default)` on the app root and
+     `cursor: var(--cursor-pointer)` on every clickable selector. The VIEW_4
+     quadrant keeps its own → arrow (it sets cursor:none over the quadrant, so
+     these never show there). If a data-URI ever fails to parse, the trailing
+     keyword (default / pointer) is the safe fallback.
+     KEEP IN LOCKSTEP with DIPLOME.Feedback/src/style.css (the VIEW_2 embed). */
+  --cursor-default: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='32'%20height='32'%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(160,180,214)'%20stroke-opacity='0.14'%20stroke-width='380'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(160,180,214)'%20stroke-opacity='0.2'%20stroke-width='300'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(160,180,214)'%20stroke-opacity='0.28'%20stroke-width='230'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(160,180,214)'%20stroke-opacity='0.4'%20stroke-width='165'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(160,180,214)'%20stroke-opacity='0.58'%20stroke-width='110'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(160,180,214)'%20stroke-opacity='0.8'%20stroke-width='60'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='rgb(89,91,85)'/%3E%3C/svg%3E") 8 8, default;
+  --cursor-pointer: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='32'%20height='32'%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(249,236,208)'%20stroke-opacity='0.14'%20stroke-width='380'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(249,236,208)'%20stroke-opacity='0.2'%20stroke-width='300'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(249,236,208)'%20stroke-opacity='0.28'%20stroke-width='230'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(249,236,208)'%20stroke-opacity='0.4'%20stroke-width='165'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(249,236,208)'%20stroke-opacity='0.58'%20stroke-width='110'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='none'%20stroke='rgb(249,236,208)'%20stroke-opacity='0.8'%20stroke-width='60'%20stroke-linejoin='round'%20stroke-linecap='round'/%3E%3Cpath%20transform='translate(8%208)%20scale(0.0128%20-0.0128)%20translate(-140%20-964)'%20d='M845%20911C833%20923%20816%20931%20796%20933L200%20982C175%20983%20156%20979%20140%20964C123%20947%20119%20927%20123%20905L181%20312C183%20293%20189%20278%20201%20266C219%20249%20246%20248%20261%20263C272%20274%20279%20292%20290%20316L422%20601L876%2068C953%20-31%201036%20-24%201083%2022C1137%2076%201132%20148%201038%20229L504%20684L794%20822C817%20833%20835%20840%20847%20852C862%20867%20863%20893%20845%20911Z'%20fill='rgb(89,91,85)'/%3E%3C/svg%3E") 8 8, pointer;
+
   /* Single source of truth for the "label tier" font-size — corner labels
      and the per-quadrant title texts (.proximity-panel-title here,
      .canvas-text-title in project) must all share this size. Style (weight,
@@ -640,9 +672,22 @@ body {
 html {
   font-family: 'ABC Otto', serif;
   /* Never show the text (I-beam) cursor over text. `cursor` is inherited, so
-     this gives every element the arrow by default; buttons/links that set their
-     own `pointer` still override it. */
-  cursor: default;
+     this gives every element the dot by default everywhere. */
+  cursor: var(--cursor-default);
+}
+
+/* Consistency net — EVERY interactive element shows the custom CROSS cursor, so
+   the dot (default, inherited above) / cross (interactive) pair reads identically
+   across all views. Without this, a clickable that forgot to opt in would fall
+   back to the inherited dot, and one using the native `pointer` would show the OS
+   cursor — the per-view shape differences. Unscoped so it reaches every view +
+   component. Higher-specificity rules can still override (e.g. the VIEW_4 arrow's
+   `cursor: none` over the suggestion cells). */
+a,
+button,
+[role='button'],
+[tabindex='0'] {
+  cursor: var(--cursor-pointer);
 }
 
 /* ── Atmospheric backdrop classes ──

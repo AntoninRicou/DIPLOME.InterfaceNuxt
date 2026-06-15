@@ -20,10 +20,19 @@ const props = withDefaults(defineProps<{
   // button fades back IN afterwards instead of staying gone. Default false: the
   // click advances/removes the button, so it just fades out and stays gone.
   staysAfterClick?: boolean
+  // Parent-driven fade-out. Set true to play the SAME `is-leaving` fade as a
+  // self-click, for removals NOT triggered by clicking the button itself —
+  // e.g. VIEW_0's title click (the main target) advancing, or VIEW_1's
+  // last-panel auto-advance. Without it those paths would `v-if`-unmount the
+  // teleported button at full opacity (it doesn't ride the view cross-fade),
+  // hard-cutting instead of fading. Parents must keep the button mounted for
+  // `LEAVE_MS` after flipping this so the fade can actually play.
+  leaving?: boolean
 }>(), {
   label: 'Skip',
   placement: 'bottom',
   staysAfterClick: false,
+  leaving: false,
 })
 const emit = defineEmits<{ click: [] }>()
 
@@ -48,15 +57,22 @@ function onClick() {
 </script>
 
 <template>
-  <button
-    class="skip-button"
-    :class="[placement, { 'is-leaving': clicked }]"
-    type="button"
-    :aria-label="label"
-    @click="onClick"
-  >
-    {{ label }}
-  </button>
+  <!-- Teleported to <body> so the fixed button isn't trapped in a parent
+       stacking context (e.g. VIEW_2's `.view-0` is `position: fixed`, which
+       creates one) — that would pin its z-index BELOW the app-root dim overlay
+       (z 9999) and darken it during narration. At body level its z-index is in
+       the root context, above the dim. -->
+  <Teleport to="body">
+    <button
+      class="skip-button"
+      :class="[placement, { 'is-leaving': clicked || leaving }]"
+      type="button"
+      :aria-label="label"
+      @click="onClick"
+    >
+      {{ label }}
+    </button>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -84,11 +100,12 @@ function onClick() {
     0 0 9px rgba(89, 91, 85, 0.75),
     0 0 13px rgba(89, 91, 85, 0.55);
   opacity: 0.65;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: opacity 150ms ease;
   /* Above the interface dim overlay (app.vue .dim-overlay z 9999) so Skip stays
-     lit + clickable while the screen darkens for narration. */
-  z-index: 10001;
+     lit + clickable while the screen darkens for narration — but BELOW the About
+     modal (.credits-panel z 10001) so that overlay still covers it when open. */
+  z-index: 10000;
   pointer-events: auto;
   /* Entrance every time a view mounts its Skip button. Without it, skipping
      into the next view (which has its own button at the same fixed spot) makes

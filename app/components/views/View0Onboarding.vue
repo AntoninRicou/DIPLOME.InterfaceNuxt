@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useViewStateStore } from '~/stores/viewState'
+import SkipButton from '~/components/SkipButton.vue'
 
 const viewState = useViewStateStore()
 
@@ -25,6 +26,13 @@ function handleClick() {
     class="view-0 bg-gradient"
     :class="{ 'fading-out': fadingOut }"
   >
+    <!-- Shared Skip control — same style/position as the other views; advances
+         to VIEW_1 exactly like clicking the title. `:leaving="fadingOut"` so the
+         button fades out together with the title even when the TITLE (the main
+         target) is the thing clicked — otherwise it would hang at full opacity
+         and vanish on unmount. The view advances at FADE_OUT_MS (500) =
+         SkipButton's LEAVE_MS, so the fade completes exactly as the view swaps. -->
+    <SkipButton label="Start the experience" :leaving="fadingOut" @click="handleClick" />
     <!-- The centred title is the ONLY click target now (the full-window click +
          "Click to launch" prompt were removed). Clicking anywhere on this group
          advances to VIEW_1. -->
@@ -101,7 +109,7 @@ function handleClick() {
   flex-direction: column;
   align-items: center;
   gap: 1.5rem;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   z-index: 1;
 }
 
