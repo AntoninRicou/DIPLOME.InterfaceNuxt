@@ -1483,15 +1483,14 @@ function onStartOver() {
   pointer-events: none;
   cursor: var(--cursor-default);
 }
-/* Oval step (wider than tall, fully rounded). Dark fill; the glow carries the
-   source-quadrant colour. Classes recompute from historyIndex, so stepping
-   forward/back reassigns past/future automatically. */
+/* Square step. Dark fill; the glow carries the source-quadrant colour. Classes
+   recompute from historyIndex, so stepping forward/back reassigns past/future
+   automatically. */
 .strip-steps li .step {
   display: block;
-  /* Small oval (almost the old square size, just wider-than-tall + rounded). */
-  width: 7px;
-  height: 5px;
-  border-radius: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 0;
   background: #595b54;
   transition: background 150ms ease-out, box-shadow 150ms ease-out, opacity 150ms ease-out;
   box-sizing: border-box;

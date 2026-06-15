@@ -56,7 +56,7 @@ let pickedAfterTimer: ReturnType<typeof setTimeout> | null = null
 // LOOK — a second rotate sentence shown right AFTER "You picked this image."
 // fades out (its own fade-in / hold / fade-out), before the map/action-view
 // narration begins. Interface-only, same `.modes-caption` rotate style.
-const LOOK_TEXT = 'Look where she lives in the maps above.'
+const LOOK_TEXT = 'Look where it lives in the maps above.'
 const showLookCaption = ref(false)
 const LOOK_HOLD_MS = 5000
 let lookShowTimer: ReturnType<typeof setTimeout> | null = null
@@ -73,7 +73,7 @@ const ZOOM_ACTION = 'Activate the four quadrants across both screens.'
 // and BEFORE the start prompt. FEEDBACK (project) centre ONLY (mirrored via
 // set-center-caption), with the INTERFACE darkened while it plays — no
 // interface text for this one.
-const MIRROR_CAPTION = 'This map-view will retrace your journey\nthrough your image selections.'
+const MIRROR_CAPTION = 'This map-view will retrace the journey\nthrough your image selections.'
 const MIRROR_DIM_LEVEL = 0.7 // interface darkening while the MIRROR caption plays on the feedback
 const START_ACTION = 'Click on your image to start.'
 const showZoomAction = ref(false)
