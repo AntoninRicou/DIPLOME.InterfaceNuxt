@@ -808,7 +808,7 @@ function onStartOver() {
       aria-live="polite"
     >
       <span class="caption-text"
-        >The centered image is connected to the surrounding ones by:<br /><!--
+        >The centered image is connected to the surrounding ones by<br /><!--
         --><template v-for="(m, i) in RELATIONAL_MODES" :key="m.word">{{ i === 0 ? '' : i === RELATIONAL_MODES.length - 1 ? ' & ' : ', ' }}<span
           class="mode-word"
           :style="{ '--mode-glow': m.color }"

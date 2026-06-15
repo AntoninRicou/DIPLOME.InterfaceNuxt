@@ -34,7 +34,7 @@ const ENTRY_PANELS = [
 
   'These one once belonged to the past,<br>bounded by old books.',
 
-  'Today, you can explore<br>them from multiple perspectives at once.',
+  'Today, you can explore them<br>from multiple perspectives at once.',
 ]
 // Project-ONLY centred narration, played (2s after the user's first hover) via
 // set-center-caption with the same rotate params. Each sentence fades in,
