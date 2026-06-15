@@ -32,9 +32,9 @@ import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 const ENTRY_PANELS = [
   'Proxima brings together thousands of images.',
 
-  'These one once belonged to the past,\nbounded by old books.',
- 
-   'Today, you can explore\nthem from multiple perspectives at once.',
+  'These one once belonged to the past,<br>bounded by old books.',
+
+  'Today, you can explore<br>them from multiple perspectives at once.',
 ]
 // Project-ONLY centred narration, played (2s after the user's first hover) via
 // set-center-caption with the same rotate params. Each sentence fades in,
