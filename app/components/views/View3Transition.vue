@@ -53,23 +53,14 @@ const showLookCaption = ref(false)
 const LOOK_HOLD_MS = 5000
 let pickedAfterTimer: ReturnType<typeof setTimeout> | null = null
 let lookHoldTimer: ReturnType<typeof setTimeout> | null = null
-// When LOOK shows, flash the SELECTED image on the feedback maps so the user
-// sees where it lives. Reuses the transient `set-highlight` channel — works in
-// overview (scales the sprite up on every map), toggled a couple of beats then
-// cleared. Only at this moment; the persistent focus glow is untouched
-// (set-highlight is a separate transient track from setFocus).
-const LOOK_FLASH_BEATS = 2
-const LOOK_FLASH_ON_MS = 600
-const LOOK_FLASH_GAP_MS = 350
-let lookFlashTimers: ReturnType<typeof setTimeout>[] = []
+// When LOOK shows, highlight the SELECTED image on the feedback maps so the user
+// sees where it lives. We HOLD a single set-highlight on it for the whole LOOK
+// moment — the feedback side pulses its focus glow as a slow, smooth breath
+// (pointsManager GLOW_PULSE_FREQ / GLOW_FLASH_SCALE) while it's held. Cleared
+// when LOOK fades (and on skip / unmount via clearTimers). Only at this moment.
 function flashSelectedOnFeedback() {
   const id = store.activeCentralImageId
-  if (!id) return
-  for (let n = 0; n < LOOK_FLASH_BEATS; n++) {
-    const t0 = n * (LOOK_FLASH_ON_MS + LOOK_FLASH_GAP_MS)
-    lookFlashTimers.push(setTimeout(() => store.setHighlight(id), t0))
-    lookFlashTimers.push(setTimeout(() => store.setHighlight(null), t0 + LOOK_FLASH_ON_MS))
-  }
+  if (id) store.setHighlight(id)
 }
 // CONNECT — a short sentence shown AFTER the action-view (MODES) caption and
 // BEFORE ZOOM_ACTION, linking the two screens.
@@ -112,7 +103,7 @@ let dissolveTimer: ReturnType<typeof setTimeout> | null = null
 //    (both at once), wait this long before the MIRROR caption shows on feedback.
 //  - START_LEAD_MS: after the interface brightens back up, wait this long before
 //    the START_ACTION prompt shows on the interface.
-const MIRROR_LEAD_MS = 5000
+const MIRROR_LEAD_MS = 3000
 // Gap after the interface brightens (post map-view) before the "This action-view…"
 // MODES caption appears on the interface. (+1s → 3000.)
 const START_LEAD_MS = 3000
@@ -237,9 +228,7 @@ function clearTimers() {
   if (lookHoldTimer) { clearTimeout(lookHoldTimer); lookHoldTimer = null }
   if (connectShowTimer) { clearTimeout(connectShowTimer); connectShowTimer = null }
   if (connectHoldTimer) { clearTimeout(connectHoldTimer); connectHoldTimer = null }
-  // Stop the LOOK flash and clear any in-flight highlight (skip / unmount).
-  for (const t of lookFlashTimers) clearTimeout(t)
-  lookFlashTimers = []
+  // Clear any held LOOK highlight / focus-glow pulse (skip / unmount).
   store.setHighlight(null)
 }
 
@@ -267,6 +256,7 @@ onMounted(() => {
     crossesReadyTimer = null
     lookHoldTimer = setTimeout(() => {
       showLookCaption.value = false   // LOOK fades out
+      store.setHighlight(null)        // stop the focus-glow pulse with the caption
       // 2) Darken the interface AT THE MOMENT LOOK fades out (the automatic
       // "Look at the projection above" dim caption rides the darkening), then
       // "This map-view…" on the FEEDBACK centre, then brighten + "This action
