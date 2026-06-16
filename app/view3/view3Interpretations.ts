@@ -43,28 +43,28 @@ export const IMAGE_CREDIT_LINES: readonly string[] = [
 ]
 
 export const view3Interpretations: Record<View3ComponentId, View3Interpretation> = {
-  // Bodies break the line before "through" (\n) — honoured on the project via
-  // `white-space: pre-line` on `.canvas-text-body`; the interface collapses the
-  // \n to a space (default white-space), so only the project breaks.
+  // Use `\n` in a body to force a line break — honoured on BOTH screens via
+  // `white-space: pre-line` (project `.canvas-text-body`, interface
+  // `.proximity-panel-body`), so the interface and feedback break at the same point.
   component_1: {
     title: 'Source tracing',
     body:
-      'Connected through book and subject context.',
+      'Connected through book\nand subject context.',
   },
   component_2: {
     title: 'Form mirroring',
     body:
-      'Connected through visual similarity and composition.',
+      'Connected through visual\nsimilarity and composition.',
   },
   component_3: {
     title: 'Semantic shifting',
     body:
-      'Connected through interpreted meanings and language.',
+      'Connected through interpreted\nmeanings and language.',
   },
   component_4: {
     title: 'Time drifting',
     body:
-      'Connected through time-based relationships.',
+      'Connected through\ntime-based relationships.',
 
   }
 }

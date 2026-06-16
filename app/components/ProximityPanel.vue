@@ -13,15 +13,10 @@ import { view3Interpretations } from '~/view3/view3Interpretations'
 const props = defineProps<{ componentId: string }>()
 const interpretation = computed(() => view3Interpretations[props.componentId])
 
-// Interface-only line break: collapse the project's own `\n` (it breaks at a
-// different per-quadrant point), then break before "related to the centered"
-// for all four. The project body (emitted via set-canvas-text from the store)
-// is untouched, so the feedback quadrant line keeps its own break.
-const displayBody = computed(() =>
-  (interpretation.value?.body ?? '')
-    .replace(/\s*\n\s*/g, ' ')
-    .replace(/\s+related to the centered/, '\nrelated to the centered'),
-)
+// Honour the `\n` line breaks authored in `view3Interpretations.ts` as-is
+// (rendered via `white-space: pre-line` below) — same breaks as the project
+// canvas-text, so both screens break at the same point.
+const displayBody = computed(() => interpretation.value?.body ?? '')
 </script>
 
 <template>
