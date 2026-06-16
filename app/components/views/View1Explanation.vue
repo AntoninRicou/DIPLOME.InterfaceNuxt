@@ -233,9 +233,9 @@ onBeforeUnmount(() => {
      transitions. */
   top: 50%;
   transform: translate(-50%, -50%);
-  /* Wrap each sentence onto ~two lines (centred) — wide enough that even the
-     long-word panel ("simultaneous perspectives") stays within two lines. */
-  max-width: min(52rem, 90vw);
+  /* Wide enough that "A dual-view experience…" stays on a single line; still
+     caps at 95vw so it never touches the edges on narrow screens. */
+  max-width: min(68rem, 95vw);
   /* pre-line honors the explicit `\n` in PANELS as a hard break while still
      wrapping long lines. (`normal` collapsed the newline into a space.) */
   white-space: pre-line;

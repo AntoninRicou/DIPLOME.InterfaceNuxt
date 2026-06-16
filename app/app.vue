@@ -64,6 +64,12 @@ const ITALIC_RE = new RegExp(
 function italicize(text: string): string {
   return text.replace(ITALIC_RE, '<i>$1</i>')
 }
+
+// Restart the whole experience — a clean reload re-boots at VIEW_0 (same effect
+// as VIEW_4's "Start over"). Shown under the "i" while the About overlay is open.
+function restartExperience() {
+  window.location.reload()
+}
 </script>
 
 <template>
@@ -109,6 +115,16 @@ function italicize(text: string): string {
         <span class="dot dot-black" aria-hidden="true" />
       </button>
     </div>
+
+    <!-- "Restart" — appears under the "i" while the About overlay is open;
+         reloads the experience from VIEW_0 (same effect as VIEW_4's Start over). -->
+    <button
+      v-if="store.creditsOpen"
+      class="restart-control"
+      type="button"
+      aria-label="restart the experience"
+      @click="restartExperience"
+    >Restart</button>
 
     <!-- About / credits overlay — a blurred field above the whole screen. Click
          anywhere closes it. Opened by the "i" above. -->
@@ -373,6 +389,35 @@ function italicize(text: string): string {
 }
 .about-controls .interpret-control:hover { opacity: 1; }
 .about-controls .interpret-control.active { opacity: 1; }
+
+/* "Restart" — centred just under the "i", above the About overlay (z 140 > the
+   credits panel's 130) so it stays clickable. Same blue-grey fill + dark glow as
+   the "i" / Skip controls. */
+.restart-control {
+  position: fixed;
+  top: 2.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 140;
+  background: transparent;
+  border: none;
+  padding: 0.3rem 0.6rem;
+  font-family: 'Neue Kabel', sans-serif;
+  font-weight: 500;
+  font-size: 1.05rem;
+  letter-spacing: 0.015em;
+  line-height: 1;
+  color: rgb(175, 180, 188);
+  text-shadow:
+    0 0 4px rgba(89, 91, 85, 0.95),
+    0 0 6px rgba(89, 91, 85, 0.9),
+    0 0 9px rgba(89, 91, 85, 0.75),
+    0 0 13px rgba(89, 91, 85, 0.55);
+  opacity: 0.65;
+  cursor: var(--cursor-pointer);
+  transition: opacity 150ms ease;
+}
+.restart-control:hover { opacity: 1; }
 
 /* About / credits overlay — pure blurred field above the whole screen. Content
    top-anchored, sized to fit the window (no scroll). Click anywhere closes. */

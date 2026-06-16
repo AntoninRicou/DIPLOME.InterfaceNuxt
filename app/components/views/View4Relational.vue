@@ -76,7 +76,7 @@ const ribbonsReady = ref(false)
 const circleHoverReady = ref(false)
 // Interface-only rotate caption shown the moment the dim deactivates (hover
 // unlocks) — invites the user to hover the circle.
-const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to discover how they live<br>across the different maps.'
+const EXPLORE_HOVER_HINT_TEXT = 'Hover over images to discover where they live<br>across the different maps.'
 const EXPLORE_HOVER_HINT_DELAY_MS = 4000 // beat after the dim lifts before the hint appears
 const exploreHoverHintVisible = ref(false)
 // True once the user has hovered a circle image. If they hover BEFORE the hint's
@@ -135,7 +135,10 @@ function advanceToExplore() {
           // telling them to do what they're doing). It STAYS until the first
           // real hover (dismissed in onCircleHover), and does NOT auto-fade.
           finaleTimers.push(setTimeout(() => {
-            if (!hasHoveredCircle.value) exploreHoverHintVisible.value = true
+            if (!hasHoveredCircle.value) {
+              exploreHoverHintVisible.value = true
+              pulseSelectedOnFeedback()   // invite the hover: pulse the selected image on the map
+            }
           }, EXPLORE_HOVER_HINT_DELAY_MS))
           // …then the map keywords/subjects/years appear 500ms after that fade-out.
           finaleTimers.push(setTimeout(() => { store.showMapWords() }, MAPWORDS_AFTER_SEE_HOW_MS))
@@ -145,6 +148,28 @@ function advanceToExplore() {
       }, EXPLORE_SENTENCE_GAP_MS))
     }, EXPLORE_HOLD_MS))
   }, EXPLORE_DELAY_MS))
+}
+
+// One-shot attention pulse on the user's SELECTED image, on the feedback map,
+// played the moment the "Hover over images…" hint appears — a gentle grow then
+// settle that invites the user to start hovering. Reuses the existing
+// set-highlight channel: project is in `single` here, where set-highlight only
+// emphasises the sprite (no camera move), and a marked sprite eases back to its
+// mark scale on clear, so each beat reads as a soft pulse. Every toggle is
+// guarded on `!hasHoveredCircle` so the instant the user actually hovers (which
+// sets that flag) the pulse stops touching the highlight and leaves their hover
+// intact.
+const PULSE_BEATS = 2
+const PULSE_ON_MS = 480
+const PULSE_GAP_MS = 320
+function pulseSelectedOnFeedback() {
+  const id = store.activeCentralImageId
+  if (!id) return
+  for (let n = 0; n < PULSE_BEATS; n++) {
+    const t0 = n * (PULSE_ON_MS + PULSE_GAP_MS)
+    finaleTimers.push(setTimeout(() => { if (!hasHoveredCircle.value) store.setHighlight(id) }, t0))
+    finaleTimers.push(setTimeout(() => { if (!hasHoveredCircle.value) store.setHighlight(null) }, t0 + PULSE_ON_MS))
+  }
 }
 
 // Split a circle's ids into the two arms of the corner L-ribbon. The ribbon is

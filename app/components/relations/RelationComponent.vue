@@ -346,7 +346,7 @@ function rotateArr<T>(arr: T[], k: number): T[] {
 //   HOVER_CYCLE_MS = full hold per combination before it swaps. Paired with the
 //   slow ~500ms `combo-fade` (matched to the SkipButton), so a full combination
 //   reads at a calm pace before the next fades in.
-const HOVER_CYCLE_MS = 2600
+const HOVER_CYCLE_MS = 3200
 const CYCLES = new Set(['component_2', 'component_3'])
 let comboTimer: ReturnType<typeof setInterval> | null = null
 function stopComboCycle() {
