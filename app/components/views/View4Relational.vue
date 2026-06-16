@@ -761,7 +761,7 @@ function onStartOver() {
       :class="{ visible: exploreHoverHintVisible }"
       aria-live="polite"
     >
-      <span class="caption-text">{{ EXPLORE_HOVER_HINT_TEXT }}</span>
+      <span class="caption-text" v-html="EXPLORE_HOVER_HINT_TEXT"></span>
     </p>
 
     <!-- Intro caption — interface centre only, plays BEFORE the ribbons. -->
