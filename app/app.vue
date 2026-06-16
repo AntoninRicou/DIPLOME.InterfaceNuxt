@@ -38,7 +38,7 @@ const CREDITS_TITLE = 'Proxima'
 const CREDITS_AUTHOR = 'by Antonin Ricou'
 const CREDITS_CORPUS = 'This corpus gathers images from scientific and encyclopedic books published between the 18th and 20th centuries. Originally framed within a dominant Western system of knowledge, the images were later digitized, reorganized into a dataset, and published online via Flickr.'
 const CREDITS_ABOUT: readonly string[] = [
-  'Proxima is a dual-view experience designed to explore large image corpus through alternative modes of exploration. It lets participants engage with images through new suggestions based on criteria, all driven by spatial proximity at once. Each journey produces a unique selection where meaning emerges from new relations rather than a fixed structure.',
+  'Proxima is a dual-view system designed to explore large image corpus through alternative modes of exploration. It lets participants engage with images through new suggestions based on criteria, all driven by spatial proximity at once. Each journey produces a unique selection where meaning emerges from new relations rather than a fixed structure.',
   'By looking at how large visual databases are navigated, this interface suggests a different way of looking at images. Each image can have multiple neighbors at once and exist in different contexts simultaneously. Rather than being confined to a linear, origin-based structure, images can resonate, shift in meaning, and form new connections.',
   
 ]

@@ -32,7 +32,7 @@ import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 const ENTRY_PANELS = [
   'Proxima brings together thousands of images.',
 
-  'These one once belonged to the past,<br>bounded by old books.',
+  'These images were published in a past<br>shaped by a Western vision of the world.',
 
   'Today, you can explore them<br>from multiple perspectives at once.',
 ]
@@ -40,7 +40,7 @@ const ENTRY_PANELS = [
 // set-center-caption with the same rotate params. Each sentence fades in,
 // holds PROJECT_HOLDS[i], fades out — sequenced by playProjectNarration().
 const PROJECT_PANELS = [
-  'The same images are organized here\ninto four distinct maps.',
+  'These images are organized here\ninto four distinct maps.',
   'Each map structures them\naccording to a different rule.',
 ]
 // CLICK_ACTION is a centred ROTATE caption (same `.entry-caption` style/timing

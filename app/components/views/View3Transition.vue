@@ -44,23 +44,33 @@ const MODES_CAPTION = 'This action-view will let you choose\nwhere to explore ne
 // beat (with the crosses) and HOLDS until all four quadrants are zoomed;
 // START_ACTION appears after the middle caption and HOLDS until the user clicks
 // the central image into the relational view.
-// PICKED — a short intro sentence shown FIRST (after the settle beat), before
-// ZOOM_ACTION. Same fade-in + settle delay as ZOOM_ACTION (the `.modes-caption`
-// style + `--rotate-appear-delay`). It holds PICKED_HOLD_MS, fades out, and only
-// THEN does ZOOM_ACTION appear + the crosses arm (activation possible).
-const PICKED_TEXT = 'You picked this image.'
-const showPickedCaption = ref(false)
-const PICKED_HOLD_MS = 4500
-let pickedHoldTimer: ReturnType<typeof setTimeout> | null = null
-let pickedAfterTimer: ReturnType<typeof setTimeout> | null = null
-// LOOK — a second rotate sentence shown right AFTER "You picked this image."
-// fades out (its own fade-in / hold / fade-out), before the map/action-view
-// narration begins. Interface-only, same `.modes-caption` rotate style.
-const LOOK_TEXT = 'Look where it lives in the maps above.'
+// LOOK — the FIRST rotate sentence shown (after the settle beat), before the
+// map/action-view narration begins. Its own fade-in / hold / fade-out, then the
+// rest of the sequence follows. Interface-only, `.modes-caption` rotate style.
+// (The earlier "You picked this image." intro caption was removed.)
+const LOOK_TEXT = 'Look where your image lives in the maps above.'
 const showLookCaption = ref(false)
 const LOOK_HOLD_MS = 5000
-let lookShowTimer: ReturnType<typeof setTimeout> | null = null
+let pickedAfterTimer: ReturnType<typeof setTimeout> | null = null
 let lookHoldTimer: ReturnType<typeof setTimeout> | null = null
+// When LOOK shows, flash the SELECTED image on the feedback maps so the user
+// sees where it lives. Reuses the transient `set-highlight` channel — works in
+// overview (scales the sprite up on every map), toggled a couple of beats then
+// cleared. Only at this moment; the persistent focus glow is untouched
+// (set-highlight is a separate transient track from setFocus).
+const LOOK_FLASH_BEATS = 2
+const LOOK_FLASH_ON_MS = 600
+const LOOK_FLASH_GAP_MS = 350
+let lookFlashTimers: ReturnType<typeof setTimeout>[] = []
+function flashSelectedOnFeedback() {
+  const id = store.activeCentralImageId
+  if (!id) return
+  for (let n = 0; n < LOOK_FLASH_BEATS; n++) {
+    const t0 = n * (LOOK_FLASH_ON_MS + LOOK_FLASH_GAP_MS)
+    lookFlashTimers.push(setTimeout(() => store.setHighlight(id), t0))
+    lookFlashTimers.push(setTimeout(() => store.setHighlight(null), t0 + LOOK_FLASH_ON_MS))
+  }
+}
 // CONNECT — a short sentence shown AFTER the action-view (MODES) caption and
 // BEFORE ZOOM_ACTION, linking the two screens.
 const CONNECT_TEXT = 'Both views are directly connected.'
@@ -141,7 +151,6 @@ function skipToRelational() {
     clearTimers()
     store.setCenterCaption('')
     store.setInterfaceDim(0, { instant: true })
-    showPickedCaption.value = false
     showLookCaption.value = false
     showModesCaption.value = false
     showConnectCaption.value = false
@@ -224,12 +233,14 @@ function clearTimers() {
   if (mirrorClearTimer) { clearTimeout(mirrorClearTimer); mirrorClearTimer = null }
   if (dissolveTimer) { clearTimeout(dissolveTimer); dissolveTimer = null }
   if (crossesReadyTimer) { clearTimeout(crossesReadyTimer); crossesReadyTimer = null }
-  if (pickedHoldTimer) { clearTimeout(pickedHoldTimer); pickedHoldTimer = null }
   if (pickedAfterTimer) { clearTimeout(pickedAfterTimer); pickedAfterTimer = null }
-  if (lookShowTimer) { clearTimeout(lookShowTimer); lookShowTimer = null }
   if (lookHoldTimer) { clearTimeout(lookHoldTimer); lookHoldTimer = null }
   if (connectShowTimer) { clearTimeout(connectShowTimer); connectShowTimer = null }
   if (connectHoldTimer) { clearTimeout(connectHoldTimer); connectHoldTimer = null }
+  // Stop the LOOK flash and clear any in-flight highlight (skip / unmount).
+  for (const t of lookFlashTimers) clearTimeout(t)
+  lookFlashTimers = []
+  store.setHighlight(null)
 }
 
 // Reads a CSS custom property as milliseconds. Falls back to 0 if the
@@ -249,17 +260,13 @@ onMounted(() => {
   // doesn't auto-advance — progress is user-driven via the crosses.
   const appearDelayMs = readMsVar('--rotate-appear-delay')
   crossesReadyTimer = setTimeout(() => {
-    // 1) "You picked this image." drifts in, holds, fades.
-    showPickedCaption.value = true
+    // 1) "Look where it lives in the maps above." drifts in, holds, fades — now
+    // the FIRST sentence shown (the "You picked this image." intro was removed).
+    showLookCaption.value = true
+    flashSelectedOnFeedback()   // flash the selected image on the maps, only now
     crossesReadyTimer = null
-    pickedHoldTimer = setTimeout(() => {
-      showPickedCaption.value = false   // PICKED fades out
-      // 1b) After PICKED fades: "Look where she lives in the maps below." drifts
-      // in, holds, fades — its own beat before the map/action-view narration.
-      lookShowTimer = setTimeout(() => {
-        showLookCaption.value = true
-        lookHoldTimer = setTimeout(() => {
-          showLookCaption.value = false   // LOOK fades out
+    lookHoldTimer = setTimeout(() => {
+      showLookCaption.value = false   // LOOK fades out
       // 2) Darken the interface AT THE MOMENT LOOK fades out (the automatic
       // "Look at the projection above" dim caption rides the darkening), then
       // "This map-view…" on the FEEDBACK centre, then brighten + "This action
@@ -298,9 +305,7 @@ onMounted(() => {
           }, MIRROR_HOLD_MS)
         }, MIRROR_LEAD_MS)
       }, ROTATE_FADE_OUT_MS)
-        }, LOOK_HOLD_MS)         // LOOK holds, then fades
-      }, ROTATE_FADE_OUT_MS)     // gap after PICKED fades before LOOK drifts in
-    }, PICKED_HOLD_MS)
+    }, LOOK_HOLD_MS)         // LOOK holds, then fades
   }, appearDelayMs)
 })
 
@@ -397,9 +402,6 @@ onBeforeUnmount(() => {
            3) START_ACTION  — HOLDS until the central image is clicked (advance).
          Sequencing is driven by the showZoomAction/showModesCaption/
          showStartAction flags in the allCanvasesZoomed watch. -->
-    <p class="modes-caption" :class="{ visible: showPickedCaption }">
-      <span class="caption-text">{{ PICKED_TEXT }}</span>
-    </p>
     <p class="modes-caption" :class="{ visible: showLookCaption }">
       <span class="caption-text">{{ LOOK_TEXT }}</span>
     </p>

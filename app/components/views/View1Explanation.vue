@@ -8,7 +8,7 @@ const store = useInteractionStore()
 
 const PANELS = [
   'Welcome to Proxima.',
-  'A dual-view experience designed to explore large image corpus.',
+  'A dual-view system designed to explore large image corpus.',
 ]
 const FADE_OUT_MS = ROTATE_FADE_OUT_MS
 

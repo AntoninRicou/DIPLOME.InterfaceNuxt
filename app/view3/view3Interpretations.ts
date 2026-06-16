@@ -49,22 +49,22 @@ export const view3Interpretations: Record<View3ComponentId, View3Interpretation>
   component_1: {
     title: 'Source tracing',
     body:
-      'Images connected through book and subject context around the selected image.',
+      'Connected through book and subject context.',
   },
   component_2: {
     title: 'Form mirroring',
     body:
-      'Images connected through visual similarity and composition around the selected image.',
+      'Connected through visual similarity and composition.',
   },
   component_3: {
     title: 'Semantic shifting',
     body:
-      'Images connected through interpreted meanings and language around the selected image.',
+      'Connected through interpreted meanings and language.',
   },
   component_4: {
     title: 'Time drifting',
     body:
-      'Images connected through time-based relationships around the selected image.',
+      'Connected through time-based relationships.',
 
   }
 }
