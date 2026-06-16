@@ -32,7 +32,7 @@ import { ROTATE_FADE_OUT_MS } from '~/utils/rotateText'
 const ENTRY_PANELS = [
   'Proxima brings together thousands of images.',
 
-  'These images were published in the past<br> through a Western vision.',
+  'These images were published in the past<br> through a Western dominant vision.',
 
   'Today, you can explore them<br>from multiple perspectives at once.',
 ]

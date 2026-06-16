@@ -371,7 +371,7 @@ let finaleTimers: ReturnType<typeof setTimeout>[] = []
 // shown once when the relational view is entered (i.e. right after the user
 // clicks the central image in VIEW_3). Fades in after a short settle beat,
 // holds, fades out.
-const RELATIONAL_INTRO_TEXT = '	You can now explore the corpus\naround the centered image.'
+const RELATIONAL_INTRO_TEXT = 'You can now explore the corpus<br>around the centered image.'
 const RELATIONAL_INTRO_DELAY_MS = 400 // settle beat before the rotate keywords drift in (−1s)
 const RELATIONAL_INTRO_HOLD_MS = 7500  // "You can now explore…" full-opacity hold before fading out (+2s)
 const RELATIONAL_INTRO2_HOLD_MS = 8000 // mode-words caption full-opacity hold before fading out (+2s)
@@ -800,7 +800,7 @@ function onStartOver() {
       :class="{ visible: relationalIntroVisible }"
       aria-live="polite"
     >
-      <span class="caption-text">{{ RELATIONAL_INTRO_TEXT }}</span>
+      <span class="caption-text" v-html="RELATIONAL_INTRO_TEXT"></span>
     </p>
 
     <!-- Second entry caption — names the four proximity modes, each mode word

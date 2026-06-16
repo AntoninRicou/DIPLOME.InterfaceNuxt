@@ -74,7 +74,7 @@ const ZOOM_ACTION = 'Activate the four quadrants across both screens.'
 // and BEFORE the start prompt. FEEDBACK (project) centre ONLY (mirrored via
 // set-center-caption), with the INTERFACE darkened while it plays — no
 // interface text for this one.
-const MIRROR_CAPTION = 'This map-view will retrace the journey\nthrough your image selections.'
+const MIRROR_CAPTION = 'This map-view retrace the journey\nthrough the image selections.'
 const MIRROR_DIM_LEVEL = 0.7 // interface darkening while the MIRROR caption plays on the feedback
 const START_ACTION = 'Click on your image to start.'
 const showZoomAction = ref(false)

@@ -869,7 +869,7 @@ button,
      `em` box widths scale with it so the two-line balance is preserved. */
   font-size: 1.3rem;
   font-weight: 500;
-  font-style: normal;
+  font-style: italic;
   letter-spacing: 0.015em;
   line-height: 1.2;
 }

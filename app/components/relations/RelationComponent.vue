@@ -361,21 +361,24 @@ function comboSignature(): string {
 function startComboCycle(id: string) {
   stopComboCycle()
   if (!CYCLES.has(props.componentId)) return
-  comboTimer = setInterval(() => {
-    // Only advance the currently-hovered cell, and stop if the hover ended.
+  // One cycle step: bump the nonce, re-reading the rendered combination each
+  // step, until it differs from what's on screen — so every fade shows a new
+  // combination. Capped (8) so a cell with only one possible combination still
+  // advances once instead of looping forever. Stops if the hover ended.
+  const advance = () => {
     if (hoveredCell.value?.id !== id) { stopComboCycle(); return }
-    // Bump the nonce, re-reading the rendered combination each step, until it
-    // differs from what's on screen — so every fade shows a new combination.
-    // `radialWords` recomputes synchronously on each `hoverNonce` mutation.
-    // Capped (8) so a cell with only one possible combination still advances
-    // once instead of looping forever.
     const before = comboSignature()
     for (let i = 0; i < 8; i++) {
       const prev = hoverNonce.value[id]
       hoverNonce.value = { ...hoverNonce.value, [id]: prev === undefined ? 1 : prev + 1 }
       if (comboSignature() !== before) break
     }
-  }, HOVER_CYCLE_MS)
+  }
+  // First swap 1s sooner than the steady cadence, then settle into HOVER_CYCLE_MS.
+  comboTimer = setTimeout(() => {
+    advance()
+    comboTimer = setInterval(advance, HOVER_CYCLE_MS)
+  }, HOVER_CYCLE_MS - 1000)
 }
 onUnmounted(stopComboCycle)
 
