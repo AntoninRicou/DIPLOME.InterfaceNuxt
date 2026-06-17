@@ -107,6 +107,10 @@ export const useInteractionStore = defineStore('interaction', () => {
   // view transitions (VIEW_2 → VIEW_4 → explore-others). Opening it also clears
   // any quadrant interpretation text on the projection so the About reads clean.
   const creditsOpen = ref(false)
+  // True while the cursor is over the persistent "i" (info/About) control in
+  // app.vue. VIEW_4 reads it to suppress the custom quadrant arrow cursor over
+  // the button (it sits inside a quadrant region, so it would otherwise show).
+  const aboutHovered = ref(false)
 
   const canvasBackground = ref<'black' | 'gradient'>('gradient')
 
@@ -969,6 +973,7 @@ export const useInteractionStore = defineStore('interaction', () => {
     suggestionHovered,
     toggleView3Interpretation,
     creditsOpen,
+    aboutHovered,
     toggleCredits,
     canvasBackground,
     setCanvasBackground,

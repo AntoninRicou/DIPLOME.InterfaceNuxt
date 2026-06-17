@@ -214,9 +214,16 @@ const arrowActive = computed(() =>
   store.view4HoveredQuadrant !== null &&
   !store.relationalSelectionLocked &&
   !store.overviewConfirmed &&
+  // Hide the arrow once the 10th image is clicked — through the finale and after.
+  // (overviewEligible flips true at the click; overviewFinaleActive covers the
+  // finale; overviewConfirmed covers the explore phase that follows.)
+  !store.overviewEligible &&
+  !store.overviewFinaleActive &&
   // Hide the custom quadrant arrow while the credits overlay is open — otherwise
   // it duplicates over the panel (the colour arrow + the panel's own cursor).
-  !store.creditsOpen,
+  !store.creditsOpen &&
+  // …and while hovering the "i" info button (it sits inside a quadrant region).
+  !store.aboutHovered,
 )
 // The glow stays the same dark-grey all along (in CSS). The cursor's FILL takes
 // the hovered quadrant's colour the MOMENT the cursor enters that quadrant — for

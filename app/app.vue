@@ -102,6 +102,8 @@ function restartExperience() {
         :aria-pressed="store.creditsOpen"
         aria-label="about this project"
         @click="store.toggleCredits()"
+        @mouseenter="store.aboutHovered = true"
+        @mouseleave="store.aboutHovered = false"
       >
         i
       </button>
