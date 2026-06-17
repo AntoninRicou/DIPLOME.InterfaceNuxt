@@ -34,7 +34,7 @@ const ENTRY_PANELS = [
 
   'These images were published in the past<br> through a single Western perspective.',
 
-  'Today, you can explore them<br>from multiple perspectives at once.',
+  'Today, you can explore them<br>through multiple criteria at once.',
 ]
 // Project-ONLY centred narration, played (2s after the user's first hover) via
 // set-center-caption with the same rotate params. Each sentence fades in,

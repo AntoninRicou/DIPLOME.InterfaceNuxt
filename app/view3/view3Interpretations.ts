@@ -64,7 +64,7 @@ export const view3Interpretations: Record<View3ComponentId, View3Interpretation>
   component_4: {
     title: 'Time drifting',
     body:
-      'Connected through\ntime-based relationships.',
+      'Connected through\ntemporal relations.',
 
   }
 }
