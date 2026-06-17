@@ -37,7 +37,7 @@ const CAPTION_DELAY_MS = 2000
 // Middle NARRATION shown after zooming (mirrored to project). Uses the shared
 // rotate-text params (--rotate-size + fade timing + blue-grey stroke), same as
 // the rotating intro narration — see `.modes-caption` styles.
-const MODES_CAPTION = 'This action-view will let you choose\nwhere to explore next.'
+const MODES_CAPTION = 'This action-view let you choose\nwhere to explore next.'
 // CALL-TO-ACTION sentences (interface-only) — now rendered as CENTRED rotate
 // text (the .modes-caption style), the 1st and 3rd of a 3-sentence sequence
 // with MODES_CAPTION in between. ZOOM_ACTION appears after the initial settle
@@ -64,7 +64,7 @@ function flashSelectedOnFeedback() {
 }
 // CONNECT — a short sentence shown AFTER the action-view (MODES) caption and
 // BEFORE ZOOM_ACTION, linking the two screens.
-const CONNECT_TEXT = 'Both views are directly connected.'
+const CONNECT_TEXT = 'Both views are directly interconnected.'
 const showConnectCaption = ref(false)
 const CONNECT_HOLD_MS = 5000
 let connectShowTimer: ReturnType<typeof setTimeout> | null = null
@@ -74,7 +74,7 @@ const ZOOM_ACTION = 'Activate the four quadrants across both screens.'
 // and BEFORE the start prompt. FEEDBACK (project) centre ONLY (mirrored via
 // set-center-caption), with the INTERFACE darkened while it plays — no
 // interface text for this one.
-const MIRROR_CAPTION = 'This map-view retrace the journey\nthrough the image selections.'
+const MIRROR_CAPTION = 'This map-view retraces the journey\nthrough the image selections.'
 const MIRROR_DIM_LEVEL = 0.7 // interface darkening while the MIRROR caption plays on the feedback
 const START_ACTION = 'Click on your image to start.'
 const showZoomAction = ref(false)

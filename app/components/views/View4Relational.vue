@@ -373,7 +373,7 @@ let finaleTimers: ReturnType<typeof setTimeout>[] = []
 // holds, fades out.
 const RELATIONAL_INTRO_TEXT = 'Explore the corpus<br>by clicking the next image.'
 const RELATIONAL_INTRO_DELAY_MS = 400 // settle beat before the rotate keywords drift in (−1s)
-const RELATIONAL_INTRO_HOLD_MS = 7500  // "You can now explore…" full-opacity hold before fading out (+2s)
+const RELATIONAL_INTRO_HOLD_MS = 5000  // "You can now explore…" full-opacity hold before fading out (+2s)
 const RELATIONAL_INTRO2_HOLD_MS = 8000 // mode-words caption full-opacity hold before fading out (+2s)
 const relationalIntroVisible = ref(false)
 
@@ -811,7 +811,7 @@ function onStartOver() {
       aria-live="polite"
     >
       <span class="caption-text"
-        >The centered image is connected to the ones around by<br /><!--
+        >Those images are connected by<br /><!--
         --><template v-for="(m, i) in RELATIONAL_MODES" :key="m.word">{{ i === 0 ? '' : i === RELATIONAL_MODES.length - 1 ? ' & ' : ', ' }}<span
           class="mode-word"
           :style="{ '--mode-glow': m.color }"
